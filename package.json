@@ -1,0 +1,23 @@
+{
+  "name": "homeschool-ai",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Socratic AI tutor for homeschool families: multi-agent curriculum ingestion, adaptive learner profiling, voice tutoring via Hume EVI, and mastery assessment.",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspaces --if-present",
+    "dev:server": "npm run dev -w apps/server",
+    "dev:web": "npm run dev -w apps/web",
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "ingest": "npm run ingest -w apps/server --",
+    "chat": "npm run chat -w apps/server --",
+    "setup:hume": "npm run setup:hume -w apps/server --"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

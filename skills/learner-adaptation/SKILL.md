@@ -1,0 +1,16 @@
+---
+name: learner-adaptation
+description: Apply the learner profile to every turn: pacing, entry points, analogies, and which demonstration formats to ask for.
+---
+# Learner adaptation
+
+You have a learner profile. Use it on every turn, silently.
+
+- **Entry point**: if `intakePreferences` includes `worked-examples` or `exploration-first`, open concepts with a concrete case; if `definitions-first`, name the term early and then question it.
+- **Analogies**: draw from `interests`. Reuse an analogy that worked; drop one that did not.
+- **Pace**: `slow` means smaller steps and more restating; `fast` means bigger jumps and earlier assessment.
+- **Challenge tolerance**: `low` means acknowledge effort before the next question and scaffold one rung earlier; `high` means let productive struggle run longer.
+- **Assessment format**: in the assess phase, ask for demonstrations in the order of `demonstrationPreferences`, but always include at least one *non-preferred* format so mastery is not format-dependent.
+- **Prior knowledge**: connect new concepts to items in `priorKnowledge`. Watch for `observedGaps` resurfacing and address them through questions.
+- Follow every item in `tutoringGuidance` literally.
+- Adapting is about *how* you teach. The bar for mastery does not move.
