@@ -8,12 +8,12 @@ Built as a small multi-agent system on the Claude API (Opus 5) with Hume EVI for
 
 ## What it does
 
-1. **Ingest** lesson plans, textbook chapters, and worksheets (PDF, DOCX, Markdown, text) into structured lessons and concepts, each traceable to the source passage.
+1. **Ingest** whatever you teach from: lesson plans and textbook chapters (PDF, DOCX, Markdown, text), **PowerPoint lectures** (slide text plus speaker notes), **YouTube and TED videos** (captions, or transcribed when there are none), **podcasts** (RSS feed or episode link), and web pages. Everything becomes lessons and concepts traceable to the source passage or timestamp.
 2. **Profile** a new student with a short intake conversation: how they take in ideas, how they best show understanding, pace, and challenge tolerance. Not to make it easier; to make it stick.
 3. **Tutor** with the Socratic method: elicit, probe, expose contradictions, ask for demonstrations, and only then move on. The tutor stays inside your material and says so when something isn't covered.
 4. **Assess** through the conversation itself. A separate agent reads the transcript, scores mastery per concept (0-4), lists misconceptions, audits the tutor's claims against the source, and writes summaries for parent and student.
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the agent design and [skills/](skills/) for the competencies each agent is built from.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the agent design, [docs/LATENCY.md](docs/LATENCY.md) for how the voice path stays conversational, [docs/RESEARCH.md](docs/RESEARCH.md) for the product and learning-science research, and [skills/](skills/) for the competencies each agent is built from.
 
 ## Quick start (text mode, Anthropic key only)
 
@@ -27,9 +27,15 @@ npm run dev:web                 # UI on :5173
 Or from the terminal:
 
 ```bash
-npm run ingest -- --title "Life Science 7" ./my-chapter.pdf
+npm run ingest -- --title "Life Science 7" ./my-chapter.pdf ./lecture.pptx
+npm run ingest -- --title "Cells" https://www.youtube.com/watch?v=... https://www.ted.com/talks/...
+npm run ingest -- --episodes 2 https://example.com/podcast/feed.xml
 npm run chat -- --learner "Maya" --grade 7      # runs intake, then the lesson, then prints the report
 ```
+
+Video and podcast ingestion needs two extra pieces: the `yt-dlp` binary (`pip install yt-dlp`) for
+video sites, and a speech-to-text provider for anything without captions (`DEEPGRAM_API_KEY`, or a
+local `whisper` CLI with `STT_PROVIDER=whisper-cli`). YouTube captions need only `yt-dlp`.
 
 ## Voice mode (Hume EVI)
 
@@ -53,7 +59,9 @@ brain behind it, so voice and text sessions share the same tutor, state, and rep
 | `CLAUDE_MODEL` | Model for offline agents (curriculum, profile, assessment). Default `claude-opus-5`. |
 | `CLAUDE_TUTOR_MODEL`, `CLAUDE_TUTOR_EFFORT` | Live tutor model and effort. Default `claude-opus-5` at `low` effort for voice latency. |
 | `CLAUDE_REFUSAL_FALLBACKS` | Server-side fallback to another Claude model if a safety classifier declines a turn. Default on. |
+| `CLAUDE_TUTOR_THINKING`, `CLAUDE_PREWARM_CACHE` | Latency knobs; see [docs/LATENCY.md](docs/LATENCY.md). |
 | `HUME_API_KEY`, `HUME_SECRET_KEY`, `HUME_CONFIG_ID`, `PUBLIC_URL`, `CLM_SECRET` | Voice layer. |
+| `YTDLP_BIN`, `STT_PROVIDER`, `DEEPGRAM_API_KEY`, `WHISPER_BIN` | Video and podcast ingestion. |
 
 ## Project layout
 
@@ -76,6 +84,9 @@ Tune agent behaviour by editing `skills/*/SKILL.md` and restarting the server. A
 dropping a folder in `skills/` and listing it in the agent's `skills` array in `apps/server/src/agents/`.
 
 ## Honest limits
+
+- **YouTube.** Fetching transcripts or audio from videos you do not own breaches YouTube's terms of service (a civil matter, and cloud IPs get blocked). Use the video path for your family's own or clearly licensed videos, run it from your own machine, or plug in a hosted transcript API. TED talks are CC BY-NC-ND: fine for personal educational use; a commercial product built on them needs a licence check. Podcast feeds and PowerPoint files carry no such issue.
+- **Voice latency.** Hume in custom-language-model mode is speech recognition, then Claude, then Hume's speech model voicing the text. It is not native speech-to-speech, and that is deliberate: it keeps the orchestrator, grounding, and assessor in charge. The cost is time-to-first-token, which is why the live tutor defaults to Sonnet 5 and every turn is measured. See [docs/LATENCY.md](docs/LATENCY.md).
 
 - No model "can't make mistakes". The system reduces the risk by grounding the tutor in your material, giving it a retrieval tool, and having a second agent audit its claims. Read the grounding audit in each report.
 - Retrieval is lexical (BM25). Fine for a course; upgrade to embeddings for a whole library.

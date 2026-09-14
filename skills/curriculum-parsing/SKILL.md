@@ -23,3 +23,15 @@ lessons, concepts, objectives, guiding questions and practice items.
   documented ones for the concept, clearly phrased as misconceptions.
 - **Level**: infer the grade band from vocabulary and stated audience; state it as given if the material says.
 - Preserve the material's own terminology and notation exactly.
+
+## Spoken and visual sources
+
+- **Transcripts** (videos, TED talks, podcasts): paragraphs begin with `[mm:ss]` timestamps. Speech is
+  redundant and loosely ordered; extract the *ideas*, not the sentences. Segment lessons where the
+  speaker changes topic. Quote the speaker's own phrasing in key facts so the tutor can say "the
+  speaker put it this way". Skip intros, sponsor reads, jokes, and housekeeping. Keep the timestamp
+  of the passage a concept comes from in your head; cite the chunk id as always.
+- **Slide decks**: each slide is a heading. Bullet fragments are not facts by themselves; read the
+  speaker notes (if any) and the surrounding slides to reconstruct the claim. A run of slides on one
+  idea is one concept. If a slide is only an image caption or title, fold it into its neighbours.
+- **Web pages**: ignore navigation, comments, and related-article lists.

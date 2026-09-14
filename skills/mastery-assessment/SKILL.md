@@ -29,6 +29,17 @@ Compare every factual claim the tutor made against the course material. Any clai
 the material goes in `ungroundedClaims` with the exact wording. Be strict: this is how the parent
 learns whether the tutor stayed on the material.
 
+## Answer-seeking and tutor compliance
+
+Count learner turns that ask for the answer outright ("just tell me", "what is it") as `answerSeekingTurns`.
+Count tutor turns that handed over a final answer without the learner attempting it as `tutorAnswerGiveaways`.
+The second number should be zero; if it is not, quote the turn in the affected concept's evidence and mention it in `parentSummary`.
+
+## Hinted versus independent
+
+For each concept say whether the strongest evidence came *before* or *after* a tutor hint; independent
+evidence is what counts for level 3 and above.
+
 ## Effective formats
 
 Note which demonstration formats (explain-in-own-words, solve, predict, teach-back, compare) produced

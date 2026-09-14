@@ -5,7 +5,7 @@
  * (role + skills) is rendered first and marked for prompt caching; per-session context comes after.
  */
 import Anthropic from "@anthropic-ai/sdk";
-import { anthropic, fallbackParams, type Effort } from "../llm/client.js";
+import { anthropic, fallbackParams, reasoningParams, type Effort, type TurnLatency } from "../llm/client.js";
 import { renderSkills } from "../skills/loader.js";
 
 export interface AgentSpec {
@@ -16,15 +16,25 @@ export interface AgentSpec {
   skills: string[];
   model: string;
   effort: Effort;
+  /** Only the live tutor sets this; offline agents keep adaptive thinking. */
+  thinking?: "adaptive" | "disabled";
 }
 
 export type SystemBlock = Anthropic.Beta.BetaTextBlockParam;
 
-/** Build the system prompt: [stable role+skills (cached)] + [dynamic context blocks]. */
-export function buildSystem(spec: AgentSpec, dynamic: string[]): SystemBlock[] {
+/**
+ * Build the system prompt: [stable role+skills (cached)] + [dynamic context blocks].
+ * `cacheThrough` marks the first N dynamic blocks as part of a second cache breakpoint: use it for
+ * per-session context that does not change between turns (course, lesson, learner profile).
+ */
+export function buildSystem(spec: AgentSpec, dynamic: string[], cacheThrough = 0): SystemBlock[] {
   const stable = `You are the ${spec.name}.\n\n${spec.role}\n\n${renderSkills(spec.skills)}`;
   const blocks: SystemBlock[] = [{ type: "text", text: stable, cache_control: { type: "ephemeral" } }];
-  for (const d of dynamic) if (d.trim()) blocks.push({ type: "text", text: d });
+  const kept = dynamic.filter((d) => d.trim());
+  kept.forEach((d, i) => {
+    const isCacheEdge = cacheThrough > 0 && i === Math.min(cacheThrough, kept.length) - 1;
+    blocks.push(isCacheEdge ? { type: "text", text: d, cache_control: { type: "ephemeral" } } : { type: "text", text: d });
+  });
   return blocks;
 }
 
@@ -43,6 +53,8 @@ export interface StreamTurnOptions {
   /** Cap on tool round-trips per user turn. */
   maxIterations?: number;
   signal?: AbortSignal;
+  /** Called once with latency data when the turn completes. */
+  onLatency?: (l: TurnLatency) => void;
 }
 
 export interface TurnResult {
@@ -51,6 +63,7 @@ export interface TurnResult {
   /** The messages appended during this turn (assistant + tool results), for callers that keep history. */
   appended: Anthropic.Beta.BetaMessageParam[];
   stopReason: string | null;
+  latency: TurnLatency;
 }
 
 /**
@@ -65,8 +78,11 @@ export async function* streamTurn(opts: StreamTurnOptions): AsyncGenerator<strin
   let fullText = "";
   let stopReason: string | null = null;
   const maxIterations = opts.maxIterations ?? 4;
+  const t0 = performance.now();
+  const latency: TurnLatency = { ttftMs: -1, totalMs: 0, iterations: 0, cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 0, outputTokens: 0 };
 
   for (let i = 0; i < maxIterations; i++) {
+    latency.iterations += 1;
     const stream = anthropic.beta.messages.stream(
       {
         model: opts.spec.model,
@@ -74,7 +90,7 @@ export async function* streamTurn(opts: StreamTurnOptions): AsyncGenerator<strin
         system: opts.system,
         messages,
         tools: tools.length ? tools.map((t) => t.definition) : undefined,
-        output_config: { effort: opts.spec.effort },
+        ...reasoningParams(opts.spec.model, opts.spec.effort, opts.spec.thinking),
         ...fallbackParams(),
       },
       { signal: opts.signal },
@@ -82,12 +98,17 @@ export async function* streamTurn(opts: StreamTurnOptions): AsyncGenerator<strin
 
     for await (const event of stream) {
       if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
+        if (latency.ttftMs < 0) latency.ttftMs = Math.round(performance.now() - t0);
         fullText += event.delta.text;
         yield event.delta.text;
       }
     }
     const message = await stream.finalMessage();
     stopReason = message.stop_reason;
+    latency.cacheReadTokens += message.usage.cache_read_input_tokens ?? 0;
+    latency.cacheWriteTokens += message.usage.cache_creation_input_tokens ?? 0;
+    latency.inputTokens += message.usage.input_tokens;
+    latency.outputTokens += message.usage.output_tokens;
 
     if (message.stop_reason === "refusal") {
       const fallbackText = "I'm not able to go into that here. Let's get back to the lesson.";
@@ -124,7 +145,30 @@ export async function* streamTurn(opts: StreamTurnOptions): AsyncGenerator<strin
     appended.push(resultTurn);
   }
 
-  return { text: fullText.trim(), appended, stopReason };
+  latency.totalMs = Math.round(performance.now() - t0);
+  if (latency.ttftMs < 0) latency.ttftMs = latency.totalMs;
+  opts.onLatency?.(latency);
+  return { text: fullText.trim(), appended, stopReason, latency };
+}
+
+/**
+ * Pre-warm the prompt cache for a system prompt (max_tokens: 0 runs prefill only, bills a cache write,
+ * returns no output). Fire-and-forget at session start so the first spoken turn is a cache hit.
+ * Must not be combined with streaming, structured outputs, or explicit `thinking.type: "enabled"`.
+ */
+export async function prewarm(spec: AgentSpec, system: SystemBlock[], tools: AgentTool<never>[] = []): Promise<void> {
+  try {
+    await anthropic.beta.messages.create({
+      model: spec.model,
+      max_tokens: 0,
+      system,
+      tools: tools.length ? tools.map((t) => t.definition) : undefined,
+      messages: [{ role: "user", content: "warmup" }],
+      ...(reasoningParams(spec.model, spec.effort, "adaptive") as object),
+    });
+  } catch (err) {
+    console.warn("[prewarm] skipped:", err instanceof Error ? err.message : err);
+  }
 }
 
 /** Convert a plain transcript into API messages (tool traffic is not persisted; only spoken text is). */

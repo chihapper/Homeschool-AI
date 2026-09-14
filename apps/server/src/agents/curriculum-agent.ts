@@ -10,6 +10,7 @@ import { config } from "../config.js";
 import { CurriculumExtractionSchema, type Course, type CurriculumExtraction, type SourceChunk } from "../domain/types.js";
 import { chunkDocument, slug } from "../ingest/chunk.js";
 import type { ExtractedDocument } from "../ingest/extract.js";
+import type { SourceDocument } from "../ingest/media/sources.js";
 import { buildSystem, type AgentSpec } from "./base.js";
 import { courses } from "../store/index.js";
 
@@ -31,7 +32,7 @@ export interface IngestOptions {
   onProgress?: (msg: string) => void;
 }
 
-export async function ingestCourse(docs: ExtractedDocument[], opts: IngestOptions = {}): Promise<Course> {
+export async function ingestCourse(docs: Array<ExtractedDocument | SourceDocument>, opts: IngestOptions = {}): Promise<Course> {
   const chunks: SourceChunk[] = docs.flatMap((d) => chunkDocument(d.text, d.fileName));
   if (!chunks.length) throw new Error("No text could be extracted from the uploaded material.");
 
@@ -39,7 +40,7 @@ export async function ingestCourse(docs: ExtractedDocument[], opts: IngestOption
   const extractions: CurriculumExtraction[] = [];
   for (const [i, batch] of batches.entries()) {
     opts.onProgress?.(`Extracting batch ${i + 1}/${batches.length} (${batch.length} chunks)`);
-    extractions.push(await extractBatch(batch, opts.titleHint, i, batches.length));
+    extractions.push(await extractBatch(batch, opts.titleHint, i, batches.length, docs));
   }
 
   const merged = mergeExtractions(extractions);
@@ -54,20 +55,25 @@ export async function ingestCourse(docs: ExtractedDocument[], opts: IngestOption
     concepts: merged.concepts,
     chunks,
     sourceFiles: docs.map((d) => d.fileName),
+    sources: docs.map((d) => ({ name: d.fileName, kind: "kind" in d ? d.kind : "file", url: "url" in d ? d.url : undefined })),
     createdAt: new Date().toISOString(),
   };
   validateReferences(course);
   return courses.put(course);
 }
 
-async function extractBatch(batch: SourceChunk[], titleHint: string | undefined, index: number, total: number): Promise<CurriculumExtraction> {
+async function extractBatch(batch: SourceChunk[], titleHint: string | undefined, index: number, total: number, docs: Array<ExtractedDocument | SourceDocument>): Promise<CurriculumExtraction> {
   const system = buildSystem(curriculumAgent, []);
+  const spoken = docs.filter((d) => "kind" in d && (d.kind === "video" || d.kind === "podcast" || d.kind === "audio")).map((d) => d.fileName);
+  const slides = docs.filter((d) => "kind" in d && d.kind === "slides").map((d) => d.fileName);
   const material = batch
     .map((c) => `<chunk id="${c.id}" heading="${c.headingPath.join(" > ")}">\n${c.text}\n</chunk>`)
     .join("\n\n");
   const instructions = [
     titleHint ? `The parent calls this course "${titleHint}".` : "",
     total > 1 ? `This is part ${index + 1} of ${total} of the material. Extract only what is in this part.` : "",
+    spoken.length ? `These sources are transcripts of spoken recordings (${spoken.join("; ")}): paragraphs start with [mm:ss] timestamps. Segment lessons by topic shift, not by timestamp; quote the speaker's own phrasing in key facts; ignore filler, sponsor reads, and intros.` : "",
+    slides.length ? `These sources are slide decks (${slides.join("; ")}): treat "Speaker notes" as the lecturer's explanation of the slide; a run of slides on one idea is one concept.` : "",
     "Extract the course structure from the material below. Reference chunks by their id in sourceChunkIds.",
   ]
     .filter(Boolean)

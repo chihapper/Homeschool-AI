@@ -9,7 +9,7 @@
 import { config } from "../config.js";
 import type { Concept, Course, Learner, Lesson, Observation, Session, SessionPhase } from "../domain/types.js";
 import { ChunkIndex } from "../ingest/retrieval.js";
-import { buildSystem, streamTurn, transcriptToMessages, type AgentTool, type AgentSpec, type TurnResult } from "./base.js";
+import { buildSystem, prewarm, streamTurn, transcriptToMessages, type AgentTool, type AgentSpec, type TurnResult } from "./base.js";
 
 export const tutorAgent: AgentSpec = {
   name: "Socratic Tutor",
@@ -20,6 +20,7 @@ export const tutorAgent: AgentSpec = {
   skills: ["socratic-method", "learner-adaptation", "grounding", "voice-conversation"],
   model: config.tutorModel,
   effort: config.tutorEffort,
+  thinking: config.tutorThinking,
 };
 
 export type AdvanceTarget = "inquire" | "assess" | "next-concept";
@@ -44,6 +45,9 @@ const PHASE_GUIDANCE: Record<SessionPhase, string> = {
   "wrap-up": "Phase: WRAP-UP. Summarise what the learner figured out today in two or three sentences, name one thing to think about before next time, and say goodbye.",
   complete: "The session is complete. Say a brief goodbye.",
 };
+
+/** Number of leading context blocks that are stable for the whole session (course+lesson, learner). Cached. */
+export const STABLE_CONTEXT_BLOCKS = 2;
 
 export function buildTutorContext(ctx: TutorContext): string[] {
   const { learner, course, lesson, concept, session } = ctx;
@@ -164,8 +168,14 @@ export function tutorTools(ctx: TutorContext): AgentTool<never>[] {
   return [lookup as AgentTool<never>, record as AgentTool<never>, advance as AgentTool<never>];
 }
 
+/** Warm the cache for the stable part of this session's tutor prompt (role + skills + course + learner). */
+export function prewarmTutor(ctx: TutorContext): Promise<void> {
+  const stable = buildTutorContext(ctx).slice(0, STABLE_CONTEXT_BLOCKS);
+  return prewarm(tutorAgent, buildSystem(tutorAgent, stable, STABLE_CONTEXT_BLOCKS), tutorTools(ctx));
+}
+
 export function tutorTurn(ctx: TutorContext, signal?: AbortSignal): AsyncGenerator<string, TurnResult, void> {
-  const system = buildSystem(tutorAgent, buildTutorContext(ctx));
+  const system = buildSystem(tutorAgent, buildTutorContext(ctx), STABLE_CONTEXT_BLOCKS);
   let messages = transcriptToMessages(ctx.session.transcript);
   if (!messages.length) messages = [{ role: "user", content: "(The student has just joined the lesson. Open with a warm one-line greeting and your first eliciting question.)" }];
   return streamTurn({ spec: tutorAgent, system, messages, tools: tutorTools(ctx), maxTokens: 700, signal });

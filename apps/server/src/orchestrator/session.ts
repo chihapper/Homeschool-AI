@@ -8,10 +8,12 @@
  * (e.g. no next-concept without recorded evidence) and owns all persistence.
  */
 import type { Course, Learner, Lesson, MasteryReport, Observation, Session, TranscriptTurn } from "../domain/types.js";
+import type { TurnLatency } from "../llm/client.js";
 import { ChunkIndex } from "../ingest/retrieval.js";
 import { courses, learners, reports, sessions } from "../store/index.js";
 import { finalizeProfile, profilerTurn } from "../agents/profiler-agent.js";
-import { tutorTurn, type AdvanceTarget } from "../agents/tutor-agent.js";
+import { prewarmTutor, tutorTurn, type AdvanceTarget, type TutorContext } from "../agents/tutor-agent.js";
+import { config } from "../config.js";
 import { assessSession } from "../agents/assessor-agent.js";
 
 const indexCache = new Map<string, ChunkIndex>();
@@ -52,10 +54,40 @@ export function createSession(args: CreateSessionArgs): Session {
     phase: needsIntake ? "intake" : "teach",
     transcript: [],
     observations: [],
-    pendingDirectives: [],
+    pendingDirectives: course && !needsIntake ? retrievalDirectives(learner, course) : [],
     startedAt: new Date().toISOString(),
   };
-  return sessions.put(session);
+  const saved = sessions.put(session);
+  if (config.prewarmCache && course && lesson && !needsIntake) {
+    const ctx = tutorContextFor(saved, learner, course, lesson);
+    if (ctx) void prewarmTutor(ctx);
+  }
+  return saved;
+}
+
+/**
+ * Spaced retrieval: if this learner has mastered concepts in earlier sessions, ask the tutor to open with
+ * one retrieval question on the least-recently-reported one before starting today's concept.
+ */
+export function retrievalDirectives(learner: Learner, course: Course): string[] {
+  const prior = reports
+    .list()
+    .filter((r) => r.learnerId === learner.id && r.courseId === course.id)
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const mastered = prior.flatMap((r) => r.concepts.filter((c) => c.level >= 2).map((c) => ({ conceptId: c.conceptId, at: r.createdAt })));
+  if (!mastered.length) return [];
+  const oldest = mastered[0];
+  const concept = course.concepts.find((c) => c.id === oldest.conceptId);
+  if (!concept) return [];
+  return [
+    `Spaced retrieval: before today's concept, ask ONE quick retrieval question about "${concept.name}" (learned on ${oldest.at.slice(0, 10)}). No hints. Record the result with record_observation for concept ${concept.id}, then move on to today's concept.`,
+  ];
+}
+
+function tutorContextFor(session: Session, learner: Learner, course: Course, lesson: Lesson): TutorContext | undefined {
+  const concept = course.concepts.find((c) => c.id === lesson.conceptIds[session.conceptIndex]);
+  if (!concept) return undefined;
+  return { session, learner, course, lesson, concept, index: indexFor(course), onObservation: () => "", onAdvance: () => "" };
 }
 
 export function getSession(id: string): Session {
@@ -128,7 +160,7 @@ export async function* respond(
   if (userText.trim()) session.transcript.push({ role: "user", content: userText.trim(), at: now, expressions });
 
   let intakeFinished: string | undefined;
-  let result: { text: string };
+  let result: { text: string; latency: TurnLatency };
 
   if (session.phase === "intake") {
     const gen = profilerTurn({ session, learner, course, onFinish: (reason) => (intakeFinished = reason) }, signal);
@@ -173,7 +205,7 @@ export async function* respond(
   }
 
   if (result.text) {
-    const turn: TranscriptTurn = { role: "assistant", content: result.text, at: new Date().toISOString() };
+    const turn: TranscriptTurn = { role: "assistant", content: result.text, at: new Date().toISOString(), latency: result.latency };
     session.transcript.push(turn);
   }
 
@@ -191,6 +223,21 @@ export async function* respond(
 
   sessions.put(session);
   return { text: result.text, session };
+}
+
+/** Latency summary across a session's assistant turns (for the API and the chat CLI). */
+export function latencySummary(session: Session): { turns: number; ttftP50Ms: number; ttftMaxMs: number; totalP50Ms: number; cacheHitRate: number } {
+  const ls = session.transcript.map((t) => t.latency).filter((l): l is NonNullable<typeof l> => Boolean(l));
+  const p50 = (xs: number[]): number => (xs.length ? [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)] : 0);
+  const cacheRead = ls.reduce((a, l) => a + l.cacheReadTokens, 0);
+  const allInput = ls.reduce((a, l) => a + l.cacheReadTokens + l.cacheWriteTokens + l.inputTokens, 0);
+  return {
+    turns: ls.length,
+    ttftP50Ms: p50(ls.map((l) => l.ttftMs)),
+    ttftMaxMs: Math.max(0, ...ls.map((l) => l.ttftMs)),
+    totalP50Ms: p50(ls.map((l) => l.totalMs)),
+    cacheHitRate: allInput ? Math.round((100 * cacheRead) / allInput) / 100 : 0,
+  };
 }
 
 /** End the session and, when a lesson was taught, produce the mastery report. */

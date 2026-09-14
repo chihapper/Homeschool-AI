@@ -4,14 +4,15 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { ingestCourse } from "../agents/curriculum-agent.js";
-import { extractTextFromBuffer } from "../ingest/extract.js";
-import { createSession, endSession, getSession, respond } from "../orchestrator/session.js";
+import { documentFromUpload, documentsFromUrl, type SourceDocument } from "../ingest/media/sources.js";
+import { createSession, endSession, getSession, latencySummary, respond } from "../orchestrator/session.js";
 import { courses, learners, reports } from "../store/index.js";
 import { config } from "../config.js";
 import { humeConfigured, mintAccessToken } from "../voice/hume.js";
 
 const LearnerBody = z.object({ name: z.string().min(1), age: z.number().int().optional(), gradeLevel: z.string().optional() });
 const SessionBody = z.object({ learnerId: z.string(), courseId: z.string().optional(), lessonId: z.string().optional(), skipIntake: z.boolean().optional() });
+const IngestBody = z.object({ urls: z.array(z.string().url()).min(1), title: z.string().optional(), episodes: z.number().int().min(1).max(20).optional(), lang: z.string().optional() });
 const MessageBody = z.object({ text: z.string().default(""), expressions: z.array(z.string()).optional() });
 
 /** Strip bulky chunk text from course listings. */
@@ -27,19 +28,33 @@ export function registerApiRoutes(app: FastifyInstance): void {
   app.get("/api/courses", async () => courses.list().map(courseSummary));
   app.get("/api/courses/:id", async (req: FastifyRequest<{ Params: { id: string } }>) => courseSummary(courses.require(req.params.id)));
 
+  /** Multipart: files (pdf, docx, pptx, md, txt, mp3, m4a, mp4, wav) plus optional `title` and `urls` (newline-separated). */
   app.post("/api/courses/upload", async (req, reply) => {
-    const docs: Array<{ fileName: string; text: string }> = [];
+    const docs: SourceDocument[] = [];
     let title: string | undefined;
+    const urls: string[] = [];
     for await (const part of req.parts()) {
       if (part.type === "file") {
         const buf = await part.toBuffer();
-        docs.push(await extractTextFromBuffer(buf, part.filename));
+        docs.push(await documentFromUpload(buf, part.filename, { onProgress: (m) => req.log.info(m) }));
       } else if (part.fieldname === "title" && typeof part.value === "string") {
         title = part.value;
+      } else if (part.fieldname === "urls" && typeof part.value === "string") {
+        urls.push(...part.value.split(/\s+/).filter(Boolean));
       }
     }
-    if (!docs.length) return reply.code(400).send({ error: "Upload at least one file (pdf, docx, md, txt)." });
+    for (const u of urls) docs.push(...(await documentsFromUrl(u, { onProgress: (m) => req.log.info(m) })));
+    if (!docs.length) return reply.code(400).send({ error: "Provide at least one file or URL." });
     const course = await ingestCourse(docs, { titleHint: title, onProgress: (m) => req.log.info(m) });
+    return courseSummary(course);
+  });
+
+  /** JSON alternative for URL-only ingestion: { urls: string[], title?: string, episodes?: number }. */
+  app.post("/api/courses/ingest", async (req) => {
+    const body = IngestBody.parse(req.body);
+    const docs: SourceDocument[] = [];
+    for (const u of body.urls) docs.push(...(await documentsFromUrl(u, { episodes: body.episodes, lang: body.lang, onProgress: (m) => req.log.info(m) })));
+    const course = await ingestCourse(docs, { titleHint: body.title, onProgress: (m) => req.log.info(m) });
     return courseSummary(course);
   });
 
@@ -54,6 +69,7 @@ export function registerApiRoutes(app: FastifyInstance): void {
   // ---- Sessions ------------------------------------------------------------
   app.post("/api/sessions", async (req) => createSession(SessionBody.parse(req.body)));
   app.get("/api/sessions/:id", async (req: FastifyRequest<{ Params: { id: string } }>) => getSession(req.params.id));
+  app.get("/api/sessions/:id/latency", async (req: FastifyRequest<{ Params: { id: string } }>) => latencySummary(getSession(req.params.id)));
 
   /** Text-mode turn. Streams the reply as SSE `data: {"delta": "..."}` events, then `data: {"done": true, ...}`. */
   app.post("/api/sessions/:id/message", async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {

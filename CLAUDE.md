@@ -9,7 +9,7 @@ agents and a Hume EVI custom-language-model endpoint; a Vite/React app is the pa
 - `apps/server/src/agents/` — one file per agent (`curriculum`, `profiler`, `tutor`, `assessor`) plus `base.ts` (prompt assembly + streaming tool loop).
 - `apps/server/src/orchestrator/session.ts` — deterministic state machine; the only place phase transitions and persistence happen.
 - `apps/server/src/voice/` — Hume bridge: `clm.ts` (SSE endpoint Hume calls), `hume.ts` (tokens, config creation).
-- `apps/server/src/ingest/` — file -> text -> heading-aware chunks -> BM25 index.
+- `apps/server/src/ingest/` — file -> text -> heading-aware chunks -> BM25 index. `ingest/media/` handles pptx, video (yt-dlp), podcasts (RSS), speech-to-text, and web pages; `media/sources.ts` is the single entry point.
 - `skills/*/SKILL.md` — agent competencies, loaded at runtime into system prompts. Tune behaviour here before touching code.
 - `apps/web/` — React UI (text mode works with only an Anthropic key; voice needs Hume).
 - `data/` — file-backed JSON store (gitignored). One JSON per course/learner/session/report.
@@ -22,7 +22,9 @@ agents and a Hume EVI custom-language-model endpoint; a Vite/React app is the pa
 - System prompts: stable role + skills first (cached), per-session context after. Keep the stable part byte-identical across turns.
 - Agents *request* transitions through tools; the orchestrator validates and applies them. Don't let an agent mutate session state directly.
 - Grounding is a product requirement: the tutor must not assert facts outside the course material. The assessor audits this. Keep it that way.
-- Tests are pure (no network). `npm test` must pass before pushing.
+- Latency is a product requirement for the live tutor: stream every delta, speak before tool calls, keep the cached prefix stable, gate effort/thinking params on the model (`reasoningParams`). Every assistant turn records `latency`; see `docs/LATENCY.md`.
+- External binaries (`yt-dlp`, `whisper`) and STT APIs are optional and must fail with a clear message, never crash ingestion of other sources.
+- Tests are pure (no network, no binaries). `npm test` must pass before pushing.
 
 ## Commands
 

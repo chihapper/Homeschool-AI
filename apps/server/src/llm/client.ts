@@ -15,6 +15,40 @@ export function fallbackParams(): { betas: string[]; fallbacks: "default" } | Re
   return config.refusalFallbacks ? { betas: [REFUSAL_FALLBACK_BETA], fallbacks: "default" } : {};
 }
 
+/**
+ * `output_config.effort` and adaptive thinking exist on Opus 4.6+ / Sonnet 4.6+ / Opus 5 / Sonnet 5 / Fable.
+ * Haiku 4.5 and older models reject them, so callers must gate on this.
+ */
+export function supportsEffort(model: string): boolean {
+  return /claude-(opus|sonnet|fable|mythos)-(4-[6-9]|5|4-[6-9]-|5-)/.test(model) || /claude-(opus|sonnet)-5\b/.test(model);
+}
+
+/** Request params for thinking + effort that are valid for the given model. */
+export function reasoningParams(model: string, effort: Effort, thinking: "adaptive" | "disabled" = "adaptive"): Record<string, unknown> {
+  if (!supportsEffort(model)) return {}; // Haiku 4.5: no thinking (fastest), no effort param.
+  const params: Record<string, unknown> = { output_config: { effort } };
+  if (thinking === "disabled" && (effort === "low" || effort === "medium" || effort === "high")) {
+    params.thinking = { type: "disabled" };
+  } else {
+    params.thinking = { type: "adaptive" };
+  }
+  return params;
+}
+
+/** Per-turn latency measurements, recorded on every assistant turn. */
+export interface TurnLatency {
+  /** ms from request start to first streamed text delta. */
+  ttftMs: number;
+  /** ms from request start to end of the turn (all tool iterations). */
+  totalMs: number;
+  /** Number of model round-trips (1 + tool iterations). */
+  iterations: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  inputTokens: number;
+  outputTokens: number;
+}
+
 /** Extract concatenated text from a response's content blocks. */
 export function textOf(content: Array<{ type: string; text?: string }>): string {
   return content

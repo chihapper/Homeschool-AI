@@ -31,8 +31,26 @@ export const config = {
   tutorEffort: (env("CLAUDE_TUTOR_EFFORT", "low") as "low" | "medium" | "high" | "xhigh" | "max"),
   /** Effort for offline agents (curriculum, profiler summary, assessor). */
   analysisEffort: (env("CLAUDE_ANALYSIS_EFFORT", "high") as "low" | "medium" | "high" | "xhigh" | "max"),
+  /**
+   * Thinking for the live tutor. "adaptive" (default) lets the model decide; at low effort it rarely thinks.
+   * "disabled" shaves first-token latency further but Opus 5 has known failure modes with it (see docs/LATENCY.md).
+   */
+  tutorThinking: (env("CLAUDE_TUTOR_THINKING", "adaptive") as "adaptive" | "disabled"),
   /** Route safety-classifier refusals to a fallback model automatically. */
   refusalFallbacks: env("CLAUDE_REFUSAL_FALLBACKS", "true") !== "false",
+  /** Pre-warm the tutor's prompt cache when a session is created, so the first spoken turn hits the cache. */
+  prewarmCache: env("CLAUDE_PREWARM_CACHE", "true") !== "false",
+
+  /** Speech-to-text for podcasts / videos without captions. */
+  stt: {
+    provider: env("STT_PROVIDER", "deepgram") as "deepgram" | "whisper-cli" | "none",
+    deepgramApiKey: env("DEEPGRAM_API_KEY"),
+    deepgramModel: env("DEEPGRAM_MODEL", "nova-3")!,
+    /** Path to a local `whisper` / `whisper-cli` binary if STT_PROVIDER=whisper-cli. */
+    whisperBin: env("WHISPER_BIN", "whisper")!,
+  },
+  /** yt-dlp binary used for YouTube / TED / other video and audio URLs. */
+  ytDlpBin: env("YTDLP_BIN", "yt-dlp")!,
 
   hume: {
     apiKey: env("HUME_API_KEY"),

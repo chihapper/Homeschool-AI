@@ -6,7 +6,7 @@
  */
 import readline from "node:readline/promises";
 import { stdin, stdout } from "node:process";
-import { createSession, endSession, respond } from "../orchestrator/session.js";
+import { createSession, endSession, latencySummary, respond } from "../orchestrator/session.js";
 import { learners, courses } from "../store/index.js";
 import { requireAnthropicKey } from "../config.js";
 
@@ -46,7 +46,8 @@ async function main(): Promise<void> {
       stdout.write(r.value);
       r = await gen.next();
     }
-    stdout.write(`\n   [phase=${r.value.session.phase} concept=${r.value.session.conceptIndex + 1} obs=${r.value.session.observations.length}]\n\n`);
+    const last = r.value.session.transcript.at(-1)?.latency;
+    stdout.write(`\n   [phase=${r.value.session.phase} concept=${r.value.session.conceptIndex + 1} obs=${r.value.session.observations.length}${last ? ` ttft=${last.ttftMs}ms total=${last.totalMs}ms cache=${last.cacheReadTokens}/${last.cacheReadTokens + last.cacheWriteTokens + last.inputTokens}` : ""}]\n\n`);
     if (r.value.session.phase === "complete") break;
     userText = (await rl.question("You: ")).trim();
     if (userText === "/end") break;
@@ -57,6 +58,7 @@ async function main(): Promise<void> {
     }
   }
   rl.close();
+  console.log("\nLatency:", JSON.stringify(latencySummary(session.id ? (await import("../store/index.js")).sessions.require(session.id) : session)));
   console.log("\nAssessing session...");
   const { report } = await endSession(session.id);
   if (report) {

@@ -20,6 +20,25 @@ Skills live in `skills/<name>/SKILL.md` and are concatenated into the agent's sy
 the "competencies" layer: you can reshape how the tutor questions, how strict the assessor is, or how
 the intake runs by editing markdown.
 
+## Ingestion sources
+
+`ingest/media/sources.ts` is the single entry point. Uploaded bytes and URLs both become
+`SourceDocument { fileName, text, kind, url? }` and flow into the same chunker and Curriculum Agent.
+
+| Source | Path | Notes |
+|---|---|---|
+| PDF, DOCX, MD, TXT | `ingest/extract.ts` | as before |
+| PowerPoint `.pptx` | `media/pptx.ts` | slide text + speaker notes; each slide becomes a heading so chunks keep slide boundaries |
+| YouTube, TED, Vimeo, ~1,000 sites | `media/ytdlp.ts` | metadata + captions via `yt-dlp`; if no captions, audio is downloaded and transcribed |
+| Podcast RSS / direct audio URL | `media/podcast.ts` | latest N episodes, enclosure download, transcription |
+| Uploaded audio/video files | `media/transcribe.ts` | Deepgram (default) or a local whisper CLI |
+| Web page | `media/sources.ts` | tag-stripped text with headings preserved |
+
+Transcripts are rendered as paragraphs prefixed with `[mm:ss]` so a concept's source chunk still says
+where in the recording it came from. The `curriculum-parsing` skill has specific rules for spoken and
+slide sources (segment by topic shift, ignore intros and sponsor reads, read speaker notes as the
+lecturer's explanation).
+
 ## Session flow
 
 ```
@@ -70,7 +89,10 @@ tutor as `[expressions: ...]` so it can adapt (the `voice-conversation` skill sa
 File-backed JSON in `data/` (`courses/`, `learners/`, `sessions/`, `reports/`). `JsonStore` is the only
 persistence abstraction; swap it for a database when needed.
 
-## Prompt caching
+## Prompt caching and latency
 
-`base.ts` renders `[role + skills]` as the first system block with `cache_control`, followed by session
-context. Skill order is part of the cached prefix; keep it stable.
+`base.ts` renders `[role + skills]` as the first cached system block, then the per-session stable
+context (course + lesson, learner profile) as a second cached block, then the per-turn blocks (current
+concept, observations, phase). Skill order is part of the cached prefix; keep it stable. Sessions
+pre-warm the cache on creation, and every assistant turn records time-to-first-token and cache usage.
+See [LATENCY.md](LATENCY.md).

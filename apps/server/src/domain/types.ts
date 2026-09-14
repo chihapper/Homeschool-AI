@@ -64,6 +64,10 @@ export const CourseSchema = z.object({
   concepts: z.array(ConceptSchema),
   chunks: z.array(SourceChunkSchema),
   sourceFiles: z.array(z.string()),
+  /** Where each source came from: an uploaded file, or a URL (video, podcast, TED talk). */
+  sources: z
+    .array(z.object({ name: z.string(), kind: z.enum(["file", "video", "podcast", "audio", "slides", "url"]), url: z.string().optional() }))
+    .optional(),
   createdAt: z.string(),
 });
 export type Course = z.infer<typeof CourseSchema>;
@@ -149,6 +153,18 @@ export const TranscriptTurnSchema = z.object({
   at: z.string(),
   /** Top prosody / expression labels from Hume, if the turn came through voice. */
   expressions: z.array(z.string()).optional(),
+  /** Latency measurements for assistant turns (see TurnLatency). */
+  latency: z
+    .object({
+      ttftMs: z.number(),
+      totalMs: z.number(),
+      iterations: z.number().int(),
+      cacheReadTokens: z.number(),
+      cacheWriteTokens: z.number(),
+      inputTokens: z.number(),
+      outputTokens: z.number(),
+    })
+    .optional(),
 });
 export type TranscriptTurn = z.infer<typeof TranscriptTurnSchema>;
 
@@ -209,6 +225,10 @@ export const MasteryReportSchema = z.object({
   recommendedNext: z.array(z.string()),
   /** Any statement the tutor made that the assessor could not ground in the source material. */
   ungroundedClaims: z.array(z.string()),
+  /** Learner turns that asked for the answer outright. A rising number across sessions is the crutch pattern. */
+  answerSeekingTurns: z.number().int(),
+  /** Tutor turns that handed over a final answer before the learner attempted it. Should be zero. */
+  tutorAnswerGiveaways: z.number().int(),
   createdAt: z.string(),
 });
 export type MasteryReport = z.infer<typeof MasteryReportSchema>;

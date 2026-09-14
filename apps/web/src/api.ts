@@ -2,7 +2,7 @@
 
 export interface Lesson { id: string; title: string; objectives: string[]; conceptIds: string[]; order: number }
 export interface Concept { id: string; name: string; summary: string; keyFacts: string[] }
-export interface Course { id: string; title: string; subject: string; level: string; description: string; lessons: Lesson[]; concepts: Concept[]; chunkCount: number }
+export interface Course { id: string; title: string; subject: string; level: string; description: string; lessons: Lesson[]; concepts: Concept[]; chunkCount: number; sources?: Array<{ name: string; kind: string; url?: string }> }
 export interface Learner { id: string; name: string; age?: number; gradeLevel?: string; profile?: { parentSummary: string; tutoringGuidance: string[] } }
 export type Phase = "intake" | "teach" | "inquire" | "assess" | "wrap-up" | "complete";
 export interface Session { id: string; learnerId: string; courseId?: string; lessonId?: string; conceptIndex: number; phase: Phase; transcript: Array<{ role: "user" | "assistant"; content: string; at: string }>; observations: Array<{ conceptId: string; kind: string; evidence: string; note: string }> }
@@ -16,12 +16,14 @@ async function j<T>(res: Response): Promise<T> {
 export const api = {
   health: () => fetch("/api/../health").then(j<{ ok: boolean; hume: boolean; tutorModel: string }>),
   courses: () => fetch("/api/courses").then(j<Course[]>),
-  uploadCourse: (files: File[], title: string) => {
+  uploadCourse: (files: File[], title: string, urls: string[] = []) => {
     const fd = new FormData();
     if (title) fd.append("title", title);
+    if (urls.length) fd.append("urls", urls.join("\n"));
     for (const f of files) fd.append("files", f, f.name);
     return fetch("/api/courses/upload", { method: "POST", body: fd }).then(j<Course>);
   },
+  latency: (sessionId: string) => fetch(`/api/sessions/${sessionId}/latency`).then(j<{ turns: number; ttftP50Ms: number; ttftMaxMs: number; totalP50Ms: number; cacheHitRate: number }>),
   learners: () => fetch("/api/learners").then(j<Learner[]>),
   createLearner: (body: { name: string; age?: number; gradeLevel?: string }) =>
     fetch("/api/learners", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).then(j<Learner>),

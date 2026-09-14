@@ -18,6 +18,7 @@ export const profilerAgent: AgentSpec = {
   skills: ["initial-assessment", "voice-conversation", "grounding"],
   model: config.tutorModel,
   effort: config.tutorEffort,
+  thinking: config.tutorThinking,
 };
 
 export interface ProfilerContext {
