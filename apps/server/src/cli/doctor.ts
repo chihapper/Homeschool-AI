@@ -97,7 +97,7 @@ async function main(): Promise<void> {
   console.log("  Stage 2 (media):       npm run ingest -- --title \"Deck\" ./lecture.pptx  |  npm run ingest -- https://www.ted.com/talks/...");
   console.log("  Stage 3 (voice):       ngrok http 3001 -> PUBLIC_URL -> npm run setup:hume -> HUME_CONFIG_ID -> web app, Voice mode");
   console.log("  See docs/TESTING.md for the full plan.\n");
-  process.exit(fails ? 1 : 0);
+  process.exit(0); // A report, not a gate: never surface as an npm lifecycle error.
 }
 
 main().catch((err) => {
