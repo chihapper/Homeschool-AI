@@ -34,7 +34,8 @@ async function main(): Promise<void> {
   add(major >= 20 ? "ok" : "fail", `Node ${process.versions.node}`, major >= 20 ? "" : "Node 20 or newer is required.");
   const deps = fs.existsSync(path.join(REPO_ROOT, "node_modules"));
   add(deps ? "ok" : "fail", "Dependencies installed", deps ? "" : "Run `npm install` at the repo root.");
-  add(fs.existsSync(path.join(REPO_ROOT, ".env")) ? "ok" : "warn", ".env file", "Copy .env.example to .env and fill in keys. (Values are also read from the shell environment.)");
+  const hasEnv = fs.existsSync(path.join(REPO_ROOT, ".env"));
+  add(hasEnv ? "ok" : "warn", ".env file", hasEnv ? "" : "Copy .env.example to .env and fill in keys. (Values are also read from the shell environment.)");
   add(fs.existsSync(config.skillsDir) ? "ok" : "fail", `Skills dir ${path.relative(REPO_ROOT, config.skillsDir)}`, "");
   try {
     fs.mkdirSync(config.dataDir, { recursive: true });

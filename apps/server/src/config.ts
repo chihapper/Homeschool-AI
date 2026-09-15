@@ -35,8 +35,10 @@ function env(name: string, fallback?: string): string | undefined {
 export const config = {
   port: Number(env("PORT", "3001")),
   host: env("HOST", "0.0.0.0")!,
-  dataDir: path.resolve(env("DATA_DIR", path.join(REPO_ROOT, "data"))!),
-  skillsDir: path.resolve(env("SKILLS_DIR", path.join(REPO_ROOT, "skills"))!),
+  // Relative DATA_DIR / SKILLS_DIR are resolved against the repo root, not the cwd: npm runs workspace
+  // scripts from apps/server, which would otherwise scatter data under apps/server/data.
+  dataDir: path.resolve(REPO_ROOT, env("DATA_DIR", "data")!),
+  skillsDir: path.resolve(REPO_ROOT, env("SKILLS_DIR", "skills")!),
 
   /** Model used by every agent unless overridden per agent. */
   model: env("CLAUDE_MODEL", "claude-opus-5")!,
@@ -80,6 +82,14 @@ export const config = {
   /** Origins allowed to call the HTTP API (the Vite dev server by default). */
   corsOrigins: (env("CORS_ORIGINS", "http://localhost:5173")!).split(",").map((s) => s.trim()),
 } as const;
+
+/**
+ * Resolve a path typed on the command line. npm sets INIT_CWD to the directory the user ran `npm run`
+ * from; workspace scripts themselves execute inside apps/server.
+ */
+export function resolveUserPath(p: string): string {
+  return path.resolve(process.env.INIT_CWD ?? process.cwd(), p);
+}
 
 export function requireAnthropicKey(): void {
   if (!process.env.ANTHROPIC_API_KEY && !process.env.ANTHROPIC_AUTH_TOKEN) {

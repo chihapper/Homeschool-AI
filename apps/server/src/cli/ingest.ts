@@ -9,7 +9,7 @@ import { ingestCourse } from "../agents/curriculum-agent.js";
 import fs from "node:fs";
 import path from "node:path";
 import { documentFromUpload, documentsFromUrl, type SourceDocument } from "../ingest/media/sources.js";
-import { requireAnthropicKey } from "../config.js";
+import { requireAnthropicKey, resolveUserPath } from "../config.js";
 
 async function main(): Promise<void> {
   requireAnthropicKey();
@@ -31,7 +31,9 @@ async function main(): Promise<void> {
     if (/^https?:\/\//.test(input)) {
       docs.push(...(await documentsFromUrl(input, { episodes, onProgress: (m) => console.log(`  ${m}`) })));
     } else {
-      docs.push(await documentFromUpload(fs.readFileSync(input), path.basename(input), { onProgress: (m) => console.log(`  ${m}`) }));
+      const file = resolveUserPath(input);
+      if (!fs.existsSync(file)) throw new Error(`File not found: ${file}`);
+      docs.push(await documentFromUpload(fs.readFileSync(file), path.basename(file), { onProgress: (m) => console.log(`  ${m}`) }));
     }
     const d = docs.at(-1)!;
     console.log(`Extracted ${d.text.length.toLocaleString()} chars from ${d.fileName} (${d.kind})`);
