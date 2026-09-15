@@ -15,7 +15,8 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "ingest": "npm run ingest -w apps/server --",
     "chat": "npm run chat -w apps/server --",
-    "setup:hume": "npm run setup:hume -w apps/server --"
+    "setup:hume": "npm run setup:hume -w apps/server --",
+    "doctor": "npm run doctor -w apps/server --"
   },
   "engines": {
     "node": ">=20"

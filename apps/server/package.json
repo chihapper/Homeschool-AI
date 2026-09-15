@@ -12,7 +12,8 @@
     "test": "vitest run",
     "ingest": "tsx src/cli/ingest.ts",
     "chat": "tsx src/cli/chat.ts",
-    "setup:hume": "tsx src/cli/setup-hume.ts"
+    "setup:hume": "tsx src/cli/setup-hume.ts",
+    "doctor": "tsx src/cli/doctor.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.125.0",

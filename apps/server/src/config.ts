@@ -4,6 +4,7 @@
  * Only ANTHROPIC_API_KEY is required to run the text-mode tutor, ingestion, and assessment.
  * Hume keys are needed only for the voice layer.
  */
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -11,6 +12,20 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 
 /** Repository root (apps/server/src -> ../../..). */
 export const REPO_ROOT = path.resolve(here, "..", "..", "..");
+
+// Load .env from the repo root (Node 20.12+ / 22 built-in). Shell environment wins over the file.
+for (const candidate of [path.join(process.cwd(), ".env"), path.join(REPO_ROOT, ".env")]) {
+  try {
+    if (fs.existsSync(candidate)) {
+      const before = { ...process.env };
+      process.loadEnvFile(candidate);
+      for (const k of Object.keys(process.env)) if (before[k] !== undefined) process.env[k] = before[k];
+      break;
+    }
+  } catch {
+    /* older Node without loadEnvFile: rely on the shell environment */
+  }
+}
 
 function env(name: string, fallback?: string): string | undefined {
   const v = process.env[name];
