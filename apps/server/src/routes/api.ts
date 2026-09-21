@@ -76,7 +76,7 @@ export function registerApiRoutes(app: FastifyInstance): void {
     const body = MessageBody.parse(req.body ?? {});
     reply.raw.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive", "Access-Control-Allow-Origin": originFor(req) });
     const abort = new AbortController();
-    req.raw.on("close", () => abort.abort());
+    reply.raw.on("close", () => abort.abort()); // response close = client went away (req "close" fires as soon as the body is read on Node 16+)
     try {
       const gen = respond(req.params.id, body.text, body.expressions, abort.signal);
       let r = await gen.next();

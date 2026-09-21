@@ -85,7 +85,7 @@ async function extractBatch(batch: SourceChunk[], titleHint: string | undefined,
     system: system.map((b) => ({ type: "text" as const, text: b.text, cache_control: b.cache_control })),
     output_config: { effort: curriculumAgent.effort, format: zodOutputFormat(CurriculumExtractionSchema) },
     messages: [{ role: "user", content: `${instructions}\n\n<material>\n${material}\n</material>` }],
-  });
+  }, { timeout: 30 * 60 * 1000 }); // explicit timeout: without one the SDK refuses a 32k-token non-streaming request (>10 min at its throughput estimate)
   assertNotRefused(response);
   if (!response.parsed_output) throw new Error("Curriculum extraction returned no parsable output.");
   return response.parsed_output;

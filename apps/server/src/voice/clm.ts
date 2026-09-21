@@ -103,7 +103,7 @@ export function registerClmRoutes(app: FastifyInstance): void {
 
     const { text, expressions } = lastUserTurn(req.body?.messages ?? []);
     const abort = new AbortController();
-    req.raw.on("close", () => abort.abort());
+    reply.raw.on("close", () => abort.abort()); // response close = Hume dropped the request (req "close" fires as soon as the body is read on Node 16+)
     try {
       const gen = respond(sessionId, text, expressions, abort.signal);
       let r = await gen.next();
