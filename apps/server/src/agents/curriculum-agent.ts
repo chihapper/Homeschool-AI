@@ -127,12 +127,20 @@ async function extractBatch(
   return parsed;
 }
 
+/**
+ * Split chunks into the fewest parts of at most `maxChars`, balanced rather than greedily filled: a 142k
+ * unit becomes two parts of ~71k, not 100k + 42k, so neither part sits right under the output ceiling.
+ * Chunks keep their order; a single chunk larger than `maxChars` becomes a part of its own.
+ */
 export function batchChunks(chunks: SourceChunk[], maxChars: number): SourceChunk[][] {
+  const total = chunks.reduce((a, c) => a + c.text.length, 0);
+  const parts = Math.max(1, Math.ceil(total / maxChars));
+  const target = Math.ceil(total / parts);
   const out: SourceChunk[][] = [];
   let cur: SourceChunk[] = [];
   let len = 0;
   for (const c of chunks) {
-    if (len + c.text.length > maxChars && cur.length) {
+    if (cur.length && len + c.text.length > target && out.length < parts - 1) {
       out.push(cur);
       cur = [];
       len = 0;
