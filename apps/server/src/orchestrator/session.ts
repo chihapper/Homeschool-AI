@@ -7,7 +7,7 @@
  * The LLM agents *request* transitions via the `advance` tool; the orchestrator validates them
  * (e.g. no next-concept without recorded evidence) and owns all persistence.
  */
-import type { Course, Learner, Lesson, MasteryReport, Observation, Session, TranscriptTurn } from "../domain/types.js";
+import { ObservationSchema, type Course, type Learner, type Lesson, type MasteryReport, type Observation, type Session, type TranscriptTurn } from "../domain/types.js";
 import type { TurnLatency } from "../llm/client.js";
 import type { TurnResult } from "../agents/base.js";
 import { ChunkIndex } from "../ingest/retrieval.js";
@@ -251,7 +251,12 @@ export async function* respond(
       lesson,
       concept,
       index: indexFor(course),
-      onObservation: (o: Observation) => {
+      onObservation: (raw: Observation) => {
+        // A tool call can arrive with an empty or partial payload (seen 2026-09-23: `{}`). Pushing it would
+        // make the session unsaveable, so refuse it here and let the model retry.
+        const checked = ObservationSchema.safeParse(raw);
+        if (!checked.success) return `Refused: incomplete observation (${checked.error.issues.map((i) => i.path.join(".")).join(", ") || "empty"}). Give conceptId, kind, evidence and note.`;
+        const o = checked.data;
         // The reflect pass sees the whole exchange each turn, so it sometimes re-files evidence it already
         // recorded. Duplicates would also inflate the two-observation gate on advancing, so drop them here.
         const already = session.observations.some((x) => x.conceptId === o.conceptId && x.evidence.trim() === o.evidence.trim());

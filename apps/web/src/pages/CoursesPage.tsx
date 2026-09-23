@@ -116,7 +116,8 @@ function CourseCard({ course: c, onDelete, onChange }: { course: Course; onDelet
   const toggleConcept = (id: string) =>
     saveFocus({ ...focus, skippedConceptIds: conceptSkipped(id) ? focus.skippedConceptIds.filter((x) => x !== id) : [...focus.skippedConceptIds, id] });
   const keptLessons = c.lessons.filter((l) => !lessonSkipped(l.id) && l.conceptIds.some((id) => !conceptSkipped(id)));
-  const keptConcepts = c.lessons.filter((l) => !lessonSkipped(l.id)).flatMap((l) => l.conceptIds.filter((id) => !conceptSkipped(id)));
+  // Distinct: a concept taught in two lessons is one concept.
+  const keptConcepts = new Set(c.lessons.filter((l) => !lessonSkipped(l.id)).flatMap((l) => l.conceptIds.filter((id) => !conceptSkipped(id))));
 
   return (
     <div className="card">
@@ -127,7 +128,7 @@ function CourseCard({ course: c, onDelete, onChange }: { course: Course; onDelet
       <p className="muted">{c.description}</p>
       <p className="muted small">{c.lessons.length} lessons · {c.concepts.length} concepts · {c.chunkCount} source passages · {c.sources?.map((s) => `${s.name} (${s.kind})`).join(", ")} · id <code>{c.id}</code></p>
       <p className="muted small">
-        <strong>Focus:</strong> the tutor teaches {keptLessons.length} of {c.lessons.length} lessons and {keptConcepts.length} of {c.concepts.length} concepts. Untick what you are not teaching; a change applies to sessions started afterwards.
+        <strong>Focus:</strong> the tutor teaches {keptLessons.length} of {c.lessons.length} lessons and {keptConcepts.size} of {c.concepts.length} concepts. Untick what you are not teaching; a change applies to sessions started afterwards.
         {saving && " Saving..."}
       </p>
       {keptLessons.length === 0 && <p className="warn small">Every lesson is skipped. Keep at least one concept somewhere, or no session can start on this course.</p>}
