@@ -67,8 +67,9 @@ function SessionInner({ courses, learners, health, session, onSession, onReport,
   const [learnerId, setLearnerId] = useState("");
   const [courseId, setCourseId] = useState("");
   const [lessonId, setLessonId] = useState("");
+  // Text is the default. It needs only an Anthropic key, so it always works; voice is a deliberate
+  // choice from the dropdown, because a spent Hume balance only shows up as a failed reply mid-session.
   const [mode, setMode] = useState<Mode>("text");
-  const [modeChosen, setModeChosen] = useState(false);
   const [skipIntake, setSkipIntake] = useState(false);
   const [open, setOpen] = useState<SessionSummary[]>([]);
   const [resumeId, setResumeId] = useState("");
@@ -128,9 +129,6 @@ function SessionInner({ courses, learners, health, session, onSession, onReport,
     if (!learnerId && learners[0]) setLearnerId(learners[0].id);
     if (!courseId && courses[0]) setCourseId(courses[0].id);
   }, [learners, courses, learnerId, courseId]);
-  useEffect(() => {
-    if (!modeChosen && health) setMode(voiceReady ? "voice" : "text");
-  }, [health, voiceReady, modeChosen]);
   useEffect(() => {
     autoListenRef.current = autoListen;
   }, [autoListen]);
@@ -403,7 +401,7 @@ function SessionInner({ courses, learners, health, session, onSession, onReport,
             <label>Lesson<select value={lessonId} onChange={(e) => setLessonId(e.target.value)}><option value="">First lesson</option>{course?.lessons.map((l) => <option key={l.id} value={l.id}>{l.title}</option>)}</select></label>
             <label>
               Mode
-              <select value={mode} onChange={(e) => { setMode(e.target.value as Mode); setModeChosen(true); }}>
+              <select value={mode} onChange={(e) => setMode(e.target.value as Mode)}>
                 <option value="voice">{voiceReady ? "Voice: talk to the tutor" : "Voice (not configured)"}</option>
                 <option value="text">Text</option>
                 <option value="evi">Voice via Hume EVI (needs a public URL)</option>
