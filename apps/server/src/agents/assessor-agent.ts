@@ -51,7 +51,7 @@ export async function assessSession(args: { session: Session; learner: Learner; 
   // the request timeout of a non-streaming call.
   const { message, parsed: out } = await streamParsed<MasteryExtraction>({
     model: assessorAgent.model,
-    max_tokens: 16_000,
+    max_tokens: 32_000, // streamed, so a long session's report has room (the model allows far more)
     system: system.map((b) => ({ type: "text" as const, text: b.text, cache_control: b.cache_control })),
     output_config: { effort: assessorAgent.effort, format: zodOutputFormat(MasteryExtractionSchema) },
     messages: [

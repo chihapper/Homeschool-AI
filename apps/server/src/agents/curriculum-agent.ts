@@ -29,14 +29,18 @@ export const curriculumAgent: AgentSpec = {
 };
 
 /**
- * Budget per extraction call, in characters of source text. The binding limit is the 32k-token output
- * ceiling, not the input: at this level of detail the model writes roughly 0.6-0.8 characters of course
- * JSON per character of source, and 32k tokens is about 85k characters of JSON. Measured 2026-09-23 on the
- * 49-page Ancient Rome guide (142k chars in one call): cut off at 85,558 characters. So a call takes at
- * most ~100k characters, a unit of that size or less is one call, and a bigger unit is split; parts run in
- * parallel and `mergeExtractions` concatenates their lessons and dedupes concepts by id.
+ * Budget per extraction call, in characters of source text. The binding limit is the output, not the
+ * input: at this level of detail the model writes roughly 0.6-1.4 characters of course JSON per character
+ * of source (measured 2026-09-23 on the 49-page Ancient Rome guide: 142k chars in one call was cut off at
+ * 85,558 characters, the 32k-token ceiling of the time). With `MAX_OUTPUT_TOKENS` below (about 170k
+ * characters of JSON) a 100k-character part has ample room. A unit that size or less is one call; a bigger
+ * one is split into balanced parts that run in parallel, and `mergeExtractions` concatenates their lessons
+ * and dedupes concepts by id.
  */
 export const BATCH_CHARS = 100_000;
+
+/** Opus 5 and Sonnet 5 allow up to 128k output tokens on a streamed request; 64k covers a full part with margin. */
+const MAX_OUTPUT_TOKENS = 64_000;
 
 export interface IngestOptions {
   titleHint?: string;
@@ -106,7 +110,7 @@ async function extractBatch(
   const { message, parsed } = await streamParsed<CurriculumExtraction>(
     {
       model: curriculumAgent.model,
-      max_tokens: 32_000,
+      max_tokens: MAX_OUTPUT_TOKENS,
       system: system.map((b) => ({ type: "text" as const, text: b.text, cache_control: b.cache_control })),
       output_config: { effort: curriculumAgent.effort, format: zodOutputFormat(CurriculumExtractionSchema) },
       messages: [{ role: "user", content: `${instructions}\n\n<material>\n${material}\n</material>` }],
