@@ -15,6 +15,26 @@ Built as a small multi-agent system on the Claude API (Opus 5) with Hume EVI for
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the agent design, [docs/LATENCY.md](docs/LATENCY.md) for how the voice path stays conversational, [docs/RESEARCH.md](docs/RESEARCH.md) for the product and learning-science research, and [skills/](skills/) for the competencies each agent is built from.
 
+## What this is (and is not)
+
+This is a study partner for one unit of the material you already teach from, plus a running picture of
+where your child stands on it. You bring a chapter, a week's readings, or a topical booklet; the tutor
+questions your child on it and never asserts anything the material does not say; the report shows you
+what they can explain, apply, and still get wrong, and whether the tutor stayed inside your material.
+
+It is not a curriculum. It does not choose what to teach, plan your week, replace the reading or the
+workbook, grade tests, or keep records. Homeschool families skip and substitute parts of any curriculum,
+so what gets taught stays your call: untick lessons or concepts on the Courses tab (**Focus**) and the
+tutor leaves them alone. Tick **Already read this** when starting a session and the tutor opens the way a
+Charlotte Mason narration does, asking your child to tell the reading back before any questions. The
+**Progress** panel on the Reports tab turns the session reports into one view per child and course.
+
+It works best on prose: history and science readings, literature, a parent's guide such as the Fords'
+*Ancient Civilizations* units, a chapter from an AmblesideOnline book, single-topic products such as
+Memoria Press's *Famous Men of Rome* or Beautiful Feet's *Ancient History*. Workbook pages (matching,
+cut-and-paste, map labelling, math worksheets) mostly do not come through as text yet; reading those as
+activities is the first item on the [roadmap](docs/ROADMAP.md).
+
 ## Quick start (text mode, Anthropic key only)
 
 ```bash

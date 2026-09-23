@@ -71,6 +71,8 @@ function SessionInner({ courses, learners, health, session, onSession, onReport,
   // choice from the dropdown, because a spent Hume balance only shows up as a failed reply mid-session.
   const [mode, setMode] = useState<Mode>("text");
   const [skipIntake, setSkipIntake] = useState(false);
+  // The student read the material beforehand: the tutor opens by asking them to tell it back, then questions from that.
+  const [narrationFirst, setNarrationFirst] = useState(false);
   const [open, setOpen] = useState<SessionSummary[]>([]);
   const [resumeId, setResumeId] = useState("");
   const [busy, setBusy] = useState(false);
@@ -157,9 +159,14 @@ function SessionInner({ courses, learners, health, session, onSession, onReport,
 
   const course = courses.find((c) => c.id === (session?.courseId ?? courseId));
   const learner = learners.find((l) => l.id === (session?.learnerId ?? learnerId));
-  const lesson = course?.lessons.find((l) => l.id === (session?.lessonId ?? lessonId)) ?? course?.lessons[0];
+  // Lessons the parent still teaches (mirrors domain/focus.ts on the server, which is the real guard).
+  const focus = course?.focus;
+  const startable = course?.lessons.filter((l) => !focus?.skippedLessonIds.includes(l.id) && l.conceptIds.some((id) => !focus?.skippedConceptIds.includes(id))) ?? [];
+  const lesson = course?.lessons.find((l) => l.id === (session?.lessonId ?? lessonId)) ?? startable[0] ?? course?.lessons[0];
   const conceptName = (id: string) => course?.concepts.find((c) => c.id === id)?.name ?? id;
-  const currentConceptId = lesson?.conceptIds[session?.conceptIndex ?? 0];
+  // A running session walks its own frozen list, which may be shorter than the lesson's.
+  const walk = session?.conceptIds ?? lesson?.conceptIds ?? [];
+  const currentConceptId = walk[session?.conceptIndex ?? 0];
 
   const refreshSession = useCallback(
     async (id: string) => {
@@ -284,7 +291,7 @@ function SessionInner({ courses, learners, health, session, onSession, onReport,
     clearHumeError();
     setBusy(true);
     try {
-      const s = await api.createSession({ learnerId, courseId: courseId || undefined, lessonId: lessonId || undefined, skipIntake });
+      const s = await api.createSession({ learnerId, courseId: courseId || undefined, lessonId: lessonId || undefined, skipIntake, narrationFirst });
       onSession(s);
       if (mode === "voice") {
         await connectVoice(s.id);
@@ -398,7 +405,7 @@ function SessionInner({ courses, learners, health, session, onSession, onReport,
           <div className="row">
             <label>Student<select value={learnerId} onChange={(e) => setLearnerId(e.target.value)}>{learners.map((l) => <option key={l.id} value={l.id}>{l.name}{l.profile ? "" : " (intake first)"}</option>)}</select></label>
             <label>Course<select value={courseId} onChange={(e) => { setCourseId(e.target.value); setLessonId(""); }}>{courses.map((c) => <option key={c.id} value={c.id}>{c.title}</option>)}</select></label>
-            <label>Lesson<select value={lessonId} onChange={(e) => setLessonId(e.target.value)}><option value="">First lesson</option>{course?.lessons.map((l) => <option key={l.id} value={l.id}>{l.title}</option>)}</select></label>
+            <label>Lesson<select value={lessonId} onChange={(e) => setLessonId(e.target.value)}><option value="">First kept lesson</option>{startable.map((l) => <option key={l.id} value={l.id}>{l.title}</option>)}</select></label>
             <label>
               Mode
               <select value={mode} onChange={(e) => setMode(e.target.value as Mode)}>
@@ -410,8 +417,10 @@ function SessionInner({ courses, learners, health, session, onSession, onReport,
             {learner && !learner.profile && (
               <label className="check"><span><input type="checkbox" checked={skipIntake} onChange={(e) => setSkipIntake(e.target.checked)} /> Skip intake</span><span className="hint">Go straight to the lesson with no profile.</span></label>
             )}
+            <label className="check"><span><input type="checkbox" checked={narrationFirst} onChange={(e) => setNarrationFirst(e.target.checked)} /> Already read this</span><span className="hint">Opens by asking the student to tell it back before any questions.</span></label>
             <button className="primary" disabled={!learnerId || !courseId || busy || (mode === "voice" && !voiceReady)} onClick={start}>{busy ? "Starting..." : "Begin"}</button>
           </div>
+          {course && startable.length === 0 && <p className="warn small">Every lesson in this course is skipped in its Focus (Courses tab). Keep at least one concept to start a session.</p>}
           {mode === "voice" && !voiceReady && <p className="warn small">Browser voice needs ASSEMBLYAI_API_KEY (speech-to-text) and HUME_API_KEY (text-to-speech). See Settings › Readiness.</p>}
           {mode === "voice" && voiceReady && <p className="muted small">The tutor speaks first. Click Talk (or just wait for it to listen), speak, and pause when you are done. Speech-to-text: AssemblyAI · voice: {health?.voice.ttsVoice} (Hume Octave {health?.voice.ttsVersion}).</p>}
           {learner && !learner.profile && !skipIntake && <p className="muted">{learner.name} has no profile yet, so the session opens with a short intake conversation before the lesson. Reset a profile from the Students tab to run intake again.</p>}
@@ -453,7 +462,7 @@ function SessionInner({ courses, learners, health, session, onSession, onReport,
           <div className="row">
             <span className="pill">{session.phase}</span>
             {lesson && currentConceptId && session.phase !== "intake" && (
-              <span className="muted">Concept {session.conceptIndex + 1} of {lesson.conceptIds.length}: <strong>{conceptName(currentConceptId)}</strong></span>
+              <span className="muted">Concept {session.conceptIndex + 1} of {walk.length}{walk.length < lesson.conceptIds.length ? ` kept (of ${lesson.conceptIds.length})` : ""}: <strong>{conceptName(currentConceptId)}</strong></span>
             )}
             {mode === "evi" && <span className="pill">{evi.status.value}{evi.isPlaying ? " · speaking" : ""}</span>}
             {mode === "voice" && <span className={`pill vs-${vstate}`}>{vstate}</span>}

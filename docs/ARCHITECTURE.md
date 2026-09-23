@@ -6,6 +6,22 @@ Students learn by being questioned, not by being told. The tutor here is "Socrat
 eliciting, probing, and asking for demonstrations, working strictly from material the parent chose.
 Everything is built to make that reliable rather than merely plausible.
 
+## Scope
+
+One unit of the family's own material at a time, a Socratic session on it, a report to the parent. Not a
+curriculum, a scheduler, or a grader. Two decisions are the parent's and never an agent's:
+
+- **Focus** (`Course.focus`, `PUT /api/courses/:id/focus`): which lessons and concepts are taught.
+  `createSession` resolves it once into `Session.conceptIds`; everything in a running session walks that
+  frozen list through `domain/focus.ts`, so a later edit changes neither the walk nor the cached prompt.
+- **Narration first** (`createSession({ narrationFirst })`): the student has already read the material,
+  so the opening turn asks them to tell it back before any questioning (the `socratic-method` skill says
+  how, and the assessor is told the first exchange is independent evidence).
+
+`GET /api/progress/:learnerId/:courseId` (`domain/progress.ts`) is the parent's cross-session view: the
+latest level per concept, the level before it, what the child still gets wrong, and the running grounding
+and giveaway counts. What is deliberately not built is in [ROADMAP.md](ROADMAP.md).
+
 ## Agents and their skills
 
 | Agent | When it runs | Skills | Output |
