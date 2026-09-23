@@ -79,10 +79,12 @@ not in the repo; ingest it from wherever it is:
 npm run ingest -- --title "Ancient Rome" "C:\Users\<you>\Downloads\8 Ancient Rome.pdf"
 ```
 
-1. **One extraction call.** The console shows `Extracting batch 1/1`. Open `data/courses/<id>.json`: a
-   chunk under FOOD or CLOTHING reads as spaced prose (the scan's text layer fuses words; `ingest/pdf-text.ts`
-   joins them by geometry); expect roughly one lesson per section, Activities as practice items, and key
-   facts that appear verbatim in the chunks.
+1. **Two parts, in parallel.** The console shows `Extracting batch 1/2` and `2/2` at once (the unit is
+   142k characters; a part is at most 100k because the model's 32k-token output ceiling binds first), then
+   progress lines every 20k characters of output. Expect eight to ten minutes at high effort. Open
+   `data/courses/<id>.json`: a chunk under FOOD or CLOTHING reads as spaced prose (the scan's text layer
+   fuses words; `ingest/pdf-text.ts` joins them by geometry); expect roughly one lesson per section,
+   Activities as practice items, and key facts that appear verbatim in the chunks.
 2. **Focus.** Courses tab: untick two sections (say Religion and Leisure). The card's count line drops,
    and the Session tab's lesson list no longer offers them.
 3. **Narration first.** Session tab: a 7th-grade student, the Government lesson, tick "Already read

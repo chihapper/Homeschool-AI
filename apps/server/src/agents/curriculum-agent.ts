@@ -29,13 +29,14 @@ export const curriculumAgent: AgentSpec = {
 };
 
 /**
- * Rough budget per extraction call, in characters of source text. One unit (a chapter, a week's readings,
- * a topical booklet; the 49-page Ancient Rome guide is 145k) should be a single call, because
- * `mergeExtractions` cannot reconcile a topic split across two calls. Input is not the limit (200k chars is
- * about 50k tokens); the 32k-token output ceiling is, so a null or truncated `parsed_output` on a dense
- * unit means this is too high.
+ * Budget per extraction call, in characters of source text. The binding limit is the 32k-token output
+ * ceiling, not the input: at this level of detail the model writes roughly 0.6-0.8 characters of course
+ * JSON per character of source, and 32k tokens is about 85k characters of JSON. Measured 2026-09-23 on the
+ * 49-page Ancient Rome guide (142k chars in one call): cut off at 85,558 characters. So a call takes at
+ * most ~100k characters, a unit of that size or less is one call, and a bigger unit is split; parts run in
+ * parallel and `mergeExtractions` concatenates their lessons and dedupes concepts by id.
  */
-export const BATCH_CHARS = 200_000;
+export const BATCH_CHARS = 100_000;
 
 export interface IngestOptions {
   titleHint?: string;
@@ -47,11 +48,14 @@ export async function ingestCourse(docs: Array<ExtractedDocument | SourceDocumen
   if (!chunks.length) throw new Error("No text could be extracted from the uploaded material.");
 
   const batches = batchChunks(chunks, BATCH_CHARS);
-  const extractions: CurriculumExtraction[] = [];
-  for (const [i, batch] of batches.entries()) {
-    opts.onProgress?.(`Extracting batch ${i + 1}/${batches.length} (${batch.length} chunks)`);
-    extractions.push(await extractBatch(batch, opts.titleHint, i, batches.length, docs, opts.onProgress));
-  }
+  // Parts are independent ("extract only what is in this part"), so they run at the same time: a unit that
+  // splits in two takes as long as one part, not two.
+  const extractions: CurriculumExtraction[] = await Promise.all(
+    batches.map((batch, i) => {
+      opts.onProgress?.(`Extracting batch ${i + 1}/${batches.length} (${batch.length} chunks)`);
+      return extractBatch(batch, opts.titleHint, i, batches.length, docs, opts.onProgress);
+    }),
+  );
 
   const merged = mergeExtractions(extractions);
   const id = `${slug(opts.titleHint ?? merged.title)}-${Date.now().toString(36)}`;

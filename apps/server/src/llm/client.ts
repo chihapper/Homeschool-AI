@@ -89,7 +89,22 @@ export async function streamParsed<T>(
       opts.onProgress?.(chars);
     });
   }
-  const message = await stream.finalMessage();
+  // The SDK parses the JSON inside finalMessage(); when the output was cut off at max_tokens that parse
+  // throws an "unterminated string" error before the caller can read stop_reason, so the reason is caught
+  // here from the stream itself and named.
+  let stopReason: string | null = null;
+  stream.on("streamEvent", (event) => {
+    if (event.type === "message_delta" && event.delta.stop_reason) stopReason = event.delta.stop_reason;
+  });
+  let message: Anthropic.Message;
+  try {
+    message = await stream.finalMessage();
+  } catch (err) {
+    if (stopReason === "max_tokens") {
+      throw new Error(`The model hit its output limit (max_tokens ${params.max_tokens}) before finishing, so the structured output is cut off. Ask for less at a time.`);
+    }
+    throw err;
+  }
   const parsed = (message as { parsed_output?: unknown }).parsed_output ?? null;
   return { message, parsed: parsed as T | null };
 }
