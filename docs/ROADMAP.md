@@ -35,29 +35,42 @@ graded work lives.
 pages, plus column-aware text for the mostly-textual ones.
 **Trigger:** any family whose unit is mostly workbook pages.
 
-## 2. Voice narration
+## 2. Two things the first Ancient Rome session showed (2026-09-23)
+
+- **The grounding audit only sees the lesson's own passages.** The assessor gets the walked concepts'
+  source chunks; the tutor's `lookup_source` searches the whole course. So when the tutor endorsed
+  "Latin comes from Latium", which is in lesson 1's material but not in the Government lesson's, the
+  audit flagged it as ungrounded. Fix: log the passages the tutor retrieved during the session and hand
+  them to the assessor alongside the lesson's, or retrieve for each audited claim.
+- **A narration produces evidence for several concepts at once**, but the phase machine walks one
+  concept at a time: the reflect pass filed the student's consul evidence under concept 2 while the
+  session was still on concept 1, and the tutor had to come back for concept 1's two observations before
+  it could advance. Worth letting the reflect pass credit any walked concept the narration covered, so
+  the walk can skip what the narration already proved.
+
+## 3. Voice narration
 
 When "Already read this" is on, the first student turn needs a longer end-of-turn silence so a narration
 is not cut off at a pause (`sttMaxSilenceMs` in `voice/live.ts`). Untestable until the Hume balance is
 topped up.
 
-## 3. Per-learner focus
+## 4. Per-learner focus
 
 Siblings sharing one unit at different levels. `Course.focus` is per family today; a per-learner override
 merged at `createSession` is additive and needs no migration.
 
-## 4. A Charlotte Mason week as a second demo
+## 5. A Charlotte Mason week as a second demo
 
 One chapter of an AmblesideOnline Year 7 book (Churchill's *Birth of Britain* ch. 1 plus Asser's *Life
 of King Alfred*, both free), to prove narration-first on the reading it was designed for. Needs "one
 chapter of a Gutenberg book" ingest: the URL path today takes a whole page.
 
-## 5. "Suggest next week's focus"
+## 6. "Suggest next week's focus"
 
 From the Progress panel, without becoming a scheduler: the report's `recommendedNext` already exists;
 this would rank kept concepts by latest level and staleness.
 
-## 6. Pedagogy evals
+## 7. Pedagogy evals
 
 The Stage 4 simulated-student harness in [TESTING.md](TESTING.md), and the Sonnet/Opus/Haiku comparison,
 both better run against the Ancient Rome course than the photosynthesis sample.
