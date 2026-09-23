@@ -34,6 +34,23 @@ describe("applyAdvance", () => {
     expect(s.conceptIndex).toBe(1);
   });
 
+  it("walks only the session's frozen concept list, so a concept the parent skipped is never reached", () => {
+    // The lesson has a and b; b was skipped in the course's focus before this session started.
+    const s = session({ phase: "assess", conceptIds: ["a"], observations: [
+      { at: "", conceptId: "a", kind: "understanding", evidence: "", note: "" },
+      { at: "", conceptId: "a", kind: "partial", evidence: "", note: "" },
+    ] });
+    expect(applyAdvance(s, course, lesson, "next-concept", "r")).toMatch(/last concept.*wrap-up/);
+    expect(s.phase).toBe("wrap-up");
+    expect(s.conceptIndex).toBe(0);
+    // The frozen order wins over the lesson's, and the count the tutor hears is the walk's.
+    const t = session({ phase: "assess", conceptIds: ["b", "a"], observations: [
+      { at: "", conceptId: "b", kind: "understanding", evidence: "", note: "" },
+      { at: "", conceptId: "b", kind: "understanding", evidence: "", note: "" },
+    ] });
+    expect(applyAdvance(t, course, lesson, "next-concept", "r")).toBe("OK: moved to concept 2 of 2: A.");
+  });
+
   it("wraps up after the last concept", () => {
     const s = session({ phase: "assess", conceptIndex: 1, observations: [
       { at: "", conceptId: "b", kind: "understanding", evidence: "", note: "" },

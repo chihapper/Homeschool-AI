@@ -38,7 +38,9 @@ The second number should be zero; if it is not, quote the turn in the affected c
 ## Hinted versus independent
 
 For each concept say whether the strongest evidence came *before* or *after* a tutor hint; independent
-evidence is what counts for level 3 and above.
+evidence is what counts for level 3 and above. When a session opened with the learner narrating the
+material before the tutor had asked anything, that first exchange is independent by construction: weigh
+it like any unhinted answer.
 
 ## Effective formats
 

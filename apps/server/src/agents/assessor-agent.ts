@@ -7,6 +7,7 @@ import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { anthropic, assertNotRefused } from "../llm/client.js";
 import { config } from "../config.js";
 import { MasteryExtractionSchema, type Course, type Learner, type Lesson, type MasteryReport, type Session } from "../domain/types.js";
+import { walkedConceptIds } from "../domain/focus.js";
 import { buildSystem, type AgentSpec } from "./base.js";
 
 export const assessorAgent: AgentSpec = {
@@ -25,7 +26,9 @@ export const assessorAgent: AgentSpec = {
 
 export async function assessSession(args: { session: Session; learner: Learner; course: Course; lesson: Lesson }): Promise<MasteryReport> {
   const { session, learner, course, lesson } = args;
-  const concepts = course.concepts.filter((c) => lesson.conceptIds.includes(c.id));
+  // Only what the session walked: a concept the parent skipped gets no "not reached" row in the report.
+  const walked = new Set(walkedConceptIds(session, course, lesson));
+  const concepts = course.concepts.filter((c) => walked.has(c.id));
   const material = concepts
     .map((c) => {
       const passages = c.sourceChunkIds
@@ -54,6 +57,9 @@ export async function assessSession(args: { session: Session; learner: Learner; 
         role: "user",
         content:
           `Assess this session on lesson "${lesson.title}". Produce one entry in concepts for EVERY concept listed in the material, even if level is 0.\n\n` +
+          (session.narrationFirst
+            ? `This session opened with ${learner.name} telling back the material unprompted, before the tutor had asked anything. That first exchange is independent evidence: weigh it like any unhinted answer.\n\n`
+            : "") +
           `<material>\n${material}\n</material>\n\n<tutor_observations>\n${observations}\n</tutor_observations>\n\n<transcript>\n${transcript}\n</transcript>`,
       },
     ],

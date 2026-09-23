@@ -32,6 +32,7 @@ import type { Concept, Course, Learner, Lesson, Observation, Session, SessionPha
 import { ChunkIndex } from "../ingest/retrieval.js";
 import { buildSystem, prewarm, streamTurn, transcriptToMessages, type AgentTool, type AgentSpec, type TurnResult } from "./base.js";
 import { openThread, THREAD_PATIENCE, THREAD_PREFIX } from "../orchestrator/notes.js";
+import { walkedConceptIds } from "../domain/focus.js";
 
 export const tutorAgent: AgentSpec = {
   name: "Socratic Tutor",
@@ -100,8 +101,11 @@ export function buildTutorContext(ctx: TutorContext, mode: "speak" | "reflect" =
   const profile = learner.profile;
   const blocks: string[] = [];
 
-  // Course-level block is stable for the whole session (good cache hit rate).
-  const lessonConcepts = course.concepts.filter((c) => lesson.conceptIds.includes(c.id));
+  // Course-level block is stable for the whole session (good cache hit rate). It lists the session's frozen
+  // walk, so a concept the parent skipped is simply absent, and a focus edit mid-session changes nothing here.
+  const lessonConcepts = walkedConceptIds(session, course, lesson)
+    .map((id) => course.concepts.find((c) => c.id === id))
+    .filter((c): c is Concept => Boolean(c));
   blocks.push(
     `<course title="${course.title}" subject="${course.subject}" level="${course.level}">\n${course.description}\n</course>\n\n` +
       `<lesson title="${lesson.title}">\nObjectives:\n${lesson.objectives.map((o) => `- ${o}`).join("\n")}\n\n` +

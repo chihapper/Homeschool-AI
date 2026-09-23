@@ -28,8 +28,14 @@ export const curriculumAgent: AgentSpec = {
   },
 };
 
-/** Rough budget per extraction call, in characters of source text. */
-const BATCH_CHARS = 120_000;
+/**
+ * Rough budget per extraction call, in characters of source text. One unit (a chapter, a week's readings,
+ * a topical booklet; the 49-page Ancient Rome guide is 145k) should be a single call, because
+ * `mergeExtractions` cannot reconcile a topic split across two calls. Input is not the limit (200k chars is
+ * about 50k tokens); the 32k-token output ceiling is, so a null or truncated `parsed_output` on a dense
+ * unit means this is too high.
+ */
+export const BATCH_CHARS = 200_000;
 
 export interface IngestOptions {
   titleHint?: string;
