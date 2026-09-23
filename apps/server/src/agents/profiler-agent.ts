@@ -5,7 +5,7 @@
  * calls `finish_intake`; the orchestrator then asks for the structured profile.
  */
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
-import { anthropic, assertNotRefused } from "../llm/client.js";
+import { assertNotRefused, streamParsed } from "../llm/client.js";
 import { config } from "../config.js";
 import { LearnerProfileSchema, type Course, type Learner, type LearnerProfile, type Session } from "../domain/types.js";
 import { buildSystem, streamTurn, transcriptToMessages, type AgentTool, type AgentSpec, type TurnResult } from "./base.js";
@@ -85,7 +85,8 @@ export function profilerTurn(ctx: ProfilerContext, signal?: AbortSignal): AsyncG
 export async function finalizeProfile(ctx: Omit<ProfilerContext, "onFinish">): Promise<LearnerProfile> {
   const system = buildSystem({ ...profilerAgent, model: config.model, effort: config.analysisEffort }, [contextBlock({ ...ctx, onFinish: () => {} })]);
   const transcript = ctx.session.transcript.map((t) => `${t.role === "user" ? ctx.learner.name : "Tutor"}: ${t.content}`).join("\n");
-  const response = await anthropic.messages.parse({
+  // Streamed, like the other offline extractions: never lose a long high-effort generation to the request timeout.
+  const { message, parsed } = await streamParsed<LearnerProfile>({
     model: config.model,
     max_tokens: 8_000,
     system: system.map((b) => ({ type: "text" as const, text: b.text, cache_control: b.cache_control })),
@@ -97,7 +98,8 @@ export async function finalizeProfile(ctx: Omit<ProfilerContext, "onFinish">): P
       },
     ],
   });
-  assertNotRefused(response);
-  if (!response.parsed_output) throw new Error("Profile extraction returned no parsable output.");
-  return response.parsed_output;
+  assertNotRefused(message);
+  if (message.stop_reason === "max_tokens") throw new Error("Profile extraction was cut off at the output limit.");
+  if (!parsed) throw new Error("Profile extraction returned no parsable output.");
+  return parsed;
 }

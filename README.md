@@ -31,9 +31,11 @@ Charlotte Mason narration does, asking your child to tell the reading back befor
 
 It works best on prose: history and science readings, literature, a parent's guide such as the Fords'
 *Ancient Civilizations* units, a chapter from an AmblesideOnline book, single-topic products such as
-Memoria Press's *Famous Men of Rome* or Beautiful Feet's *Ancient History*. Workbook pages (matching,
-cut-and-paste, map labelling, math worksheets) mostly do not come through as text yet; reading those as
-activities is the first item on the [roadmap](docs/ROADMAP.md).
+Memoria Press's *Famous Men of Rome* or Beautiful Feet's *Ancient History*, and the reading articles
+inside a workbook (The Good and the Beautiful's grade 7-8 "lesson extensions" are exactly that). The
+activity pages of a workbook (maps to label, ciphers, timelines, cut-and-paste, math worksheets) mostly
+do not come through as text yet; reading those as activities is the first item on the
+[roadmap](docs/ROADMAP.md).
 
 ## Quick start (text mode, Anthropic key only)
 

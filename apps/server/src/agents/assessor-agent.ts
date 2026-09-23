@@ -4,9 +4,9 @@
  * Runs offline at the end of a session. Also performs a grounding audit of the tutor's claims.
  */
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
-import { anthropic, assertNotRefused } from "../llm/client.js";
+import { assertNotRefused, streamParsed } from "../llm/client.js";
 import { config } from "../config.js";
-import { MasteryExtractionSchema, type Course, type Learner, type Lesson, type MasteryReport, type Session } from "../domain/types.js";
+import { MasteryExtractionSchema, type Course, type Learner, type Lesson, type MasteryExtraction, type MasteryReport, type Session } from "../domain/types.js";
 import { walkedConceptIds } from "../domain/focus.js";
 import { buildSystem, type AgentSpec } from "./base.js";
 
@@ -47,7 +47,9 @@ export async function assessSession(args: { session: Session; learner: Learner; 
     `<learner name="${learner.name}">${learner.profile ? `Demonstration preferences: ${learner.profile.demonstrationPreferences.join(", ")}` : "No profile."}</learner>`,
   ]);
 
-  const response = await anthropic.messages.parse({
+  // Streamed for the same reason as the curriculum extraction: a long session at high effort can run past
+  // the request timeout of a non-streaming call.
+  const { message, parsed: out } = await streamParsed<MasteryExtraction>({
     model: assessorAgent.model,
     max_tokens: 16_000,
     system: system.map((b) => ({ type: "text" as const, text: b.text, cache_control: b.cache_control })),
@@ -64,8 +66,8 @@ export async function assessSession(args: { session: Session; learner: Learner; 
       },
     ],
   });
-  assertNotRefused(response);
-  const out = response.parsed_output;
+  assertNotRefused(message);
+  if (message.stop_reason === "max_tokens") throw new Error("Assessment was cut off at the output limit; the report is incomplete and was not saved.");
   if (!out) throw new Error("Assessment returned no parsable output.");
 
   // Clamp and complete: every lesson concept gets an entry.

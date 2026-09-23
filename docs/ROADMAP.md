@@ -20,8 +20,19 @@ Two decisions come with it: how to rasterize PDF pages (this machine has no `pdf
 renderer, or asking for image export as the scan path does today), and how the tutor uses an activity in
 dialogue (ask the student to explain their answer, not to redo the worksheet).
 
-**First step:** classify every page of The Good and the Beautiful History Year 1 sample (Student
-Explorer, grades 7-8) as prose, activity, or image, to size the problem on real material.
+**Sized on real material (2026-09-23):** The Good and the Beautiful's History Year 1 Student Explorer
+sample for grades 7-8, 41 pages. 17 pages are prose "lesson extension" articles of about 690 words each
+(Imhotep, the Sistine Chapel, Marconi), which the tool can teach from today. 20 pages are activities,
+and their loss comes in three tiers: vector-drawn tasks (a picture cipher, Morse code, a sixty-name
+family tree, art references) leave no text at all; maps and diagrams keep their labels but lose the
+spatial task; two-column pages come out with the columns interleaved line by line. All five map
+activities also send the student to the separate course book for the instructions, so reading the page
+perfectly would still not ground the tutor in what the child was asked to do. The sample has no answer
+key. By text volume the file looks 63% prose; by page count it is half activities, which is where the
+graded work lives.
+
+**Next step:** a reading mode that returns typed activity items from page images, tested on those 20
+pages, plus column-aware text for the mostly-textual ones.
 **Trigger:** any family whose unit is mostly workbook pages.
 
 ## 2. Voice narration

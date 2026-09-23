@@ -5,7 +5,7 @@
  * and processes large sources in batches of chunks that are merged deterministically.
  */
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
-import { anthropic, assertNotRefused } from "../llm/client.js";
+import { assertNotRefused, streamParsed } from "../llm/client.js";
 import { config } from "../config.js";
 import { CurriculumExtractionSchema, type Course, type CurriculumExtraction, type SourceChunk } from "../domain/types.js";
 import { chunkDocument, slug } from "../ingest/chunk.js";
@@ -50,7 +50,7 @@ export async function ingestCourse(docs: Array<ExtractedDocument | SourceDocumen
   const extractions: CurriculumExtraction[] = [];
   for (const [i, batch] of batches.entries()) {
     opts.onProgress?.(`Extracting batch ${i + 1}/${batches.length} (${batch.length} chunks)`);
-    extractions.push(await extractBatch(batch, opts.titleHint, i, batches.length, docs));
+    extractions.push(await extractBatch(batch, opts.titleHint, i, batches.length, docs, opts.onProgress));
   }
 
   const merged = mergeExtractions(extractions);
@@ -72,7 +72,14 @@ export async function ingestCourse(docs: Array<ExtractedDocument | SourceDocumen
   return courses.put(course);
 }
 
-async function extractBatch(batch: SourceChunk[], titleHint: string | undefined, index: number, total: number, docs: Array<ExtractedDocument | SourceDocument>): Promise<CurriculumExtraction> {
+async function extractBatch(
+  batch: SourceChunk[],
+  titleHint: string | undefined,
+  index: number,
+  total: number,
+  docs: Array<ExtractedDocument | SourceDocument>,
+  onProgress?: (msg: string) => void,
+): Promise<CurriculumExtraction> {
   const system = buildSystem(curriculumAgent, []);
   const spoken = docs.filter((d) => "kind" in d && (d.kind === "video" || d.kind === "podcast" || d.kind === "audio")).map((d) => d.fileName);
   const slides = docs.filter((d) => "kind" in d && d.kind === "slides").map((d) => d.fileName);
@@ -89,16 +96,31 @@ async function extractBatch(batch: SourceChunk[], titleHint: string | undefined,
     .filter(Boolean)
     .join("\n");
 
-  const response = await anthropic.messages.parse({
-    model: curriculumAgent.model,
-    max_tokens: 32_000,
-    system: system.map((b) => ({ type: "text" as const, text: b.text, cache_control: b.cache_control })),
-    output_config: { effort: curriculumAgent.effort, format: zodOutputFormat(CurriculumExtractionSchema) },
-    messages: [{ role: "user", content: `${instructions}\n\n<material>\n${material}\n</material>` }],
-  }, { timeout: 30 * 60 * 1000 }); // explicit timeout: without one the SDK refuses a 32k-token non-streaming request (>10 min at its throughput estimate)
-  assertNotRefused(response);
-  if (!response.parsed_output) throw new Error("Curriculum extraction returned no parsable output.");
-  return response.parsed_output;
+  // Streamed: a unit-sized batch at high effort generates for ten minutes or more, longer than any
+  // non-streaming request survives (see streamParsed).
+  let reported = 0;
+  const { message, parsed } = await streamParsed<CurriculumExtraction>(
+    {
+      model: curriculumAgent.model,
+      max_tokens: 32_000,
+      system: system.map((b) => ({ type: "text" as const, text: b.text, cache_control: b.cache_control })),
+      output_config: { effort: curriculumAgent.effort, format: zodOutputFormat(CurriculumExtractionSchema) },
+      messages: [{ role: "user", content: `${instructions}\n\n<material>\n${material}\n</material>` }],
+    },
+    {
+      onProgress: (chars) => {
+        if (chars - reported < 20_000) return;
+        reported = chars;
+        onProgress?.(`Still extracting part ${index + 1}/${total}: ${Math.round(chars / 1000)}k characters of course structure so far`);
+      },
+    },
+  );
+  assertNotRefused(message);
+  if (message.stop_reason === "max_tokens") {
+    throw new Error(`Curriculum extraction hit the output limit on part ${index + 1}/${total} (${batch.length} chunks). Lower BATCH_CHARS in curriculum-agent.ts so each part is smaller.`);
+  }
+  if (!parsed) throw new Error("Curriculum extraction returned no parsable output.");
+  return parsed;
 }
 
 export function batchChunks(chunks: SourceChunk[], maxChars: number): SourceChunk[][] {
