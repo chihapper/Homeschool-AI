@@ -1,15 +1,37 @@
 /**
- * Tutor Agent: the live Socratic teacher. Runs behind both the text chat API and the Hume voice bridge.
+ * Tutor Agent: the live Socratic teacher. Runs behind the browser voice path, the text chat API and the
+ * Hume voice bridge.
+ *
+ * A turn is TWO calls, because they have different deadlines:
+ *
+ *  1. `tutorTurn` — SPEAK. The learner is waiting, so this call has no bookkeeping tools and no private
+ *     reasoning: it hears the learner and asks the next question. Only `lookup_source` is available,
+ *     because reading a passage before answering is part of answering.
+ *  2. `reflectTurn` — REFLECT. Runs after the words are out, while the learner is listening. It records
+ *     observations and requests the phase change, with the session's normal effort and thinking. Nobody
+ *     is waiting on it, so it may take as long as it needs; the orchestrator applies its decisions before
+ *     the next turn.
+ *
+ * This is what a human tutor does: answer in the gap of the conversation, file the note afterwards.
+ * Measured on 2026-09-22, the single-call design spent 5-15 s thinking before speaking on the turns where
+ * it was deciding whether to advance, which is exactly the wrong place to spend it.
  *
  * Tools:
- *  - lookup_source        retrieve verbatim passages from the course material (grounding)
- *  - record_observation   log evidence of understanding / misconception for the Assessor
- *  - advance              request a phase change or move to the next concept (validated by the orchestrator)
+ *  - lookup_source        retrieve verbatim passages from the course material (grounding) — SPEAK call
+ *  - record_observation   log evidence of understanding / misconception for the Assessor — REFLECT call
+ *  - advance              request a phase change or move to the next concept (validated by the orchestrator) — REFLECT call
+ *  - open_thread          name what this dialogue is still working on, for the next turn — REFLECT call
+ *
+ * `open_thread` is what makes the turns one dialogue rather than a series of separate questions. The
+ * speaking call cannot deliberate, so the reflect pass names the unfinished business in one sentence and
+ * the next speaking turn sees it beside the phase: the phase is what kind of work is being done, the
+ * thread is what the work is on.
  */
 import { config } from "../config.js";
 import type { Concept, Course, Learner, Lesson, Observation, Session, SessionPhase } from "../domain/types.js";
 import { ChunkIndex } from "../ingest/retrieval.js";
 import { buildSystem, prewarm, streamTurn, transcriptToMessages, type AgentTool, type AgentSpec, type TurnResult } from "./base.js";
+import { openThread, THREAD_PATIENCE, THREAD_PREFIX } from "../orchestrator/notes.js";
 
 export const tutorAgent: AgentSpec = {
   name: "Socratic Tutor",
@@ -18,9 +40,31 @@ export const tutorAgent: AgentSpec = {
     "You teach by questioning, you stay inside the material, and you never do the student's thinking for them. " +
     "Your aim is durable understanding the student can demonstrate, not coverage.",
   skills: ["socratic-method", "learner-adaptation", "grounding", "voice-conversation"],
-  model: config.tutorModel,
-  effort: config.tutorEffort,
-  thinking: config.tutorThinking,
+  // Getters: a change in the Settings tab applies on the next turn without a restart.
+  get model() {
+    return config.tutorModel;
+  },
+  get effort() {
+    return config.tutorEffort;
+  },
+  get thinking() {
+    return config.tutorThinking;
+  },
+};
+
+/**
+ * The same tutor, reflecting after the fact. Same prompt and skills (so the cached prefix is shared), but
+ * it may think: the learner is listening to the reply while this runs.
+ */
+export const reflectAgent: AgentSpec = {
+  ...tutorAgent,
+  get model() {
+    return config.tutorModel;
+  },
+  get effort() {
+    return config.reflectEffort;
+  },
+  thinking: "adaptive",
 };
 
 export type AdvanceTarget = "inquire" | "assess" | "next-concept";
@@ -35,12 +79,14 @@ export interface TutorContext {
   /** Orchestrator hooks; return a message the model will see as the tool result. */
   onObservation: (o: Observation) => string;
   onAdvance: (to: AdvanceTarget, rationale: string) => string;
+  /** Name what the dialogue is still working on, for the next spoken turn (reflect pass only). */
+  onThread?: (thread: string) => string;
 }
 
 const PHASE_GUIDANCE: Record<SessionPhase, string> = {
   intake: "",
   teach: "Phase: TEACH. Elicit what the learner already thinks, then build the concept through questions grounded in the material. Call advance to 'inquire' once the learner has stated the core idea in their own words.",
-  inquire: "Phase: INQUIRE. Invite the learner's own questions about the concept. Answer accurately from the material, then turn each answer into a question back. Call advance to 'assess' once their questions are answered or after a few exchanges.",
+  inquire: "Phase: INQUIRE. Invite the learner's own questions about the concept. Answer accurately from the material, then turn each answer into a question back — including back to anything the dialogue left unfinished. Call advance to 'assess' once their questions are answered or after a few exchanges.",
   assess: "Phase: ASSESS. No more scaffolding. Ask for demonstrations (own words, apply to a new case, predict, teach back). Record at least two observations. Then call advance to 'next-concept'.",
   "wrap-up": "Phase: WRAP-UP. Summarise what the learner figured out today in two or three sentences, name one thing to think about before next time, and say goodbye.",
   complete: "The session is complete. Say a brief goodbye.",
@@ -49,7 +95,7 @@ const PHASE_GUIDANCE: Record<SessionPhase, string> = {
 /** Number of leading context blocks that are stable for the whole session (course+lesson, learner). Cached. */
 export const STABLE_CONTEXT_BLOCKS = 2;
 
-export function buildTutorContext(ctx: TutorContext): string[] {
+export function buildTutorContext(ctx: TutorContext, mode: "speak" | "reflect" = "speak"): string[] {
   const { learner, course, lesson, concept, session } = ctx;
   const profile = learner.profile;
   const blocks: string[] = [];
@@ -98,13 +144,42 @@ export function buildTutorContext(ctx: TutorContext): string[] {
     blocks.push(`<observations_so_far>\n${recent.map((o) => `- [${o.kind}] ${o.evidence} (${o.note})`).join("\n")}\n</observations_so_far>`);
   }
 
-  blocks.push(PHASE_GUIDANCE[session.phase]);
-  if (session.pendingDirectives.length) blocks.push(`<orchestrator>\n${session.pendingDirectives.join("\n")}\n</orchestrator>`);
-  blocks.push("Speak to the learner first. Call tools after your spoken words, in the same turn. Never mention tools, phases, or the profile out loud.");
+  // The phase is what kind of work this turn does; the thread is what the work is on. One dialogue, so
+  // they are given together rather than as competing instructions.
+  const thread = openThread(session);
+  blocks.push(
+    PHASE_GUIDANCE[session.phase] +
+      (thread
+        ? `\n\nThis dialogue is still working on something: ${thread.text}\n` +
+          "That is where you and the learner actually are, so this turn works on it — inside whatever the phase above asks of you. " +
+          "If they take you somewhere else, go with them for a sentence, because a real question of theirs deserves a real answer, then bring it back in the same turn. " +
+          "A question they answered around is not an interruption to the lesson; it is the lesson, and holding them to it gently is the whole method.\n" +
+          (thread.turns < THREAD_PATIENCE
+            ? `This is turn ${thread.turns} on it, so a fresh angle is better than repeating yourself word for word.`
+            : `This is turn ${thread.turns} on it: you have come at it from several angles and the learner has not accounted for it yet. ` +
+              "Stop varying the approach. Say plainly that you want to come back to this, ask the question in its simplest form, and wait — silence here is doing work, so do not fill it with a hint.")
+        : ""),
+  );
+  const machineDirectives = session.pendingDirectives.filter((d) => !d.startsWith(THREAD_PREFIX));
+  if (machineDirectives.length) blocks.push(`<orchestrator>\n${machineDirectives.join("\n")}\n</orchestrator>`);
+  blocks.push(
+    mode === "speak"
+      ? "You are speaking to the learner now and they are waiting, so answer straight away: two to four sentences ending in your single question. " +
+        "Do not stop to weigh whether they are ready to move on and do not take notes; that happens after you speak, in a separate pass you do not run here. " +
+        "If you need a passage from the material to answer honestly, call lookup_source first, then speak. Never mention tools, phases, or the profile out loud."
+      : "The learner has just heard your reply (the last assistant message) and is listening; nothing you write here reaches them, so write nothing. " +
+        "Take your notes now: call record_observation for every piece of evidence in the exchange you have not already recorded, quoting the learner, " +
+        "and call advance when the phase is genuinely finished. " +
+        "This is also the only place you get to think before teaching: the next spoken turn happens fast and cannot weigh anything. " +
+        "So decide what this dialogue is still working on and call open_thread with it in one sentence — a question they answered around, a claim that contradicts something they said earlier, " +
+        "an answer that was right but sounded like a guess. If the thread is finished, do not call it, and the next turn moves on. " +
+        "Make every call in one batch. If there is nothing to record, no reason to advance and nothing unfinished, do nothing at all.",
+  );
   return blocks;
 }
 
-export function tutorTools(ctx: TutorContext): AgentTool<never>[] {
+/** Tools for one call: the SPEAK call may only read; the REFLECT call does the bookkeeping. */
+export function tutorTools(ctx: TutorContext, mode: "speak" | "reflect" = "speak"): AgentTool<never>[] {
   const lookup: AgentTool<{ query: string }> = {
     definition: {
       name: "lookup_source",
@@ -144,13 +219,15 @@ export function tutorTools(ctx: TutorContext): AgentTool<never>[] {
       strict: true,
     },
     run: (o) => ctx.onObservation({ ...o, at: new Date().toISOString() }),
+    endsSpeech: "after-question",
   };
 
   const advance: AgentTool<{ to: AdvanceTarget; rationale: string }> = {
     definition: {
       name: "advance",
       description:
-        "Move the session forward: 'inquire' after the learner has stated the concept in their own words; 'assess' when their questions are answered; 'next-concept' after you have recorded assessment observations. The orchestrator may refuse and tell you what is missing.",
+        "Move the session forward: 'inquire' after the learner has stated the concept in their own words; 'assess' when their questions are answered; 'next-concept' after you have recorded assessment observations. " +
+        "Call it in the same batch as your record_observation calls, after you have spoken; the new phase applies from your next turn. The orchestrator may refuse and tell you what is missing.",
       input_schema: {
         type: "object",
         properties: {
@@ -162,21 +239,71 @@ export function tutorTools(ctx: TutorContext): AgentTool<never>[] {
       },
       strict: true,
     },
-    run: ({ to, rationale }) => ctx.onAdvance(to, rationale),
+    run: ({ to, rationale }) => {
+      const result = ctx.onAdvance(to, rationale);
+      // A refusal is reported as a tool error, which earns the model one silent pass to fix its bookkeeping.
+      if (result.startsWith("Refused")) throw new Error(result);
+      return result;
+    },
+    endsSpeech: "after-question",
   };
 
-  return [lookup as AgentTool<never>, record as AgentTool<never>, advance as AgentTool<never>];
+  const thread: AgentTool<{ thread: string }> = {
+    definition: {
+      name: "open_thread",
+      description:
+        "Name in ONE SHORT SENTENCE (about fifteen words; longer is cut off) what this dialogue is still working on, so your next turn continues it instead of starting fresh. " +
+        "Use it when the exchange left something unfinished: a question the learner answered around, a claim of theirs that contradicts something they said earlier, " +
+        'an answer that was right but sounded like a guess. For example: "He answered around what the fertilizer actually does for the corn." ' +
+        "Calling it again replaces it; when the thread is genuinely finished, do not call it at all. Do not use it to restate the phase or the lesson plan.",
+      input_schema: {
+        type: "object",
+        properties: { thread: { type: "string", description: "One sentence naming the unfinished business of the dialogue." } },
+        required: ["thread"],
+        additionalProperties: false,
+      },
+      strict: true,
+    },
+    run: ({ thread: text }) => ctx.onThread?.(text) ?? "No thread channel on this turn.",
+  };
+
+  return mode === "speak" ? [lookup as AgentTool<never>] : [record as AgentTool<never>, advance as AgentTool<never>, thread as AgentTool<never>];
 }
 
 /** Warm the cache for the stable part of this session's tutor prompt (role + skills + course + learner). */
 export function prewarmTutor(ctx: TutorContext): Promise<void> {
-  const stable = buildTutorContext(ctx).slice(0, STABLE_CONTEXT_BLOCKS);
-  return prewarm(tutorAgent, buildSystem(tutorAgent, stable, STABLE_CONTEXT_BLOCKS), tutorTools(ctx));
+  const stable = buildTutorContext(ctx, "speak").slice(0, STABLE_CONTEXT_BLOCKS);
+  return prewarm(tutorAgent, buildSystem(tutorAgent, stable, STABLE_CONTEXT_BLOCKS), tutorTools(ctx, "speak"));
 }
 
+/** The SPEAK call: what the learner hears, as fast as the model can say it. */
 export function tutorTurn(ctx: TutorContext, signal?: AbortSignal): AsyncGenerator<string, TurnResult, void> {
-  const system = buildSystem(tutorAgent, buildTutorContext(ctx), STABLE_CONTEXT_BLOCKS);
+  const system = buildSystem(tutorAgent, buildTutorContext(ctx, "speak"), STABLE_CONTEXT_BLOCKS);
   let messages = transcriptToMessages(ctx.session.transcript);
   if (!messages.length) messages = [{ role: "user", content: "(The student has just joined the lesson. Open with a warm one-line greeting and your first eliciting question.)" }];
-  return streamTurn({ spec: tutorAgent, system, messages, tools: tutorTools(ctx), maxTokens: 700, signal });
+  // Thinking off regardless of the session setting: this call is the one the learner waits on.
+  return streamTurn({ spec: { ...tutorAgent, thinking: "disabled" }, system, messages, tools: tutorTools(ctx, "speak"), maxTokens: 700, signal });
+}
+
+/**
+ * The REFLECT call: records observations and requests the phase change, after the reply was spoken.
+ * `spokenText` is the reply the learner just heard (not yet in the transcript when this runs).
+ * Returns when the bookkeeping is done; anything it writes as text is ignored.
+ */
+export async function reflectTurn(ctx: TutorContext, spokenText: string, signal?: AbortSignal): Promise<TurnResult> {
+  const system = buildSystem(reflectAgent, buildTutorContext(ctx, "reflect"), STABLE_CONTEXT_BLOCKS);
+  const messages = transcriptToMessages([...ctx.session.transcript, ...(spokenText ? [{ role: "assistant" as const, content: spokenText }] : [])]);
+  if (!messages.length) return { text: "", appended: [], stopReason: null, latency: { ttftMs: 0, totalMs: 0, iterations: 0, cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 0, outputTokens: 0, suppressedChars: 0 } };
+  // The API requires the conversation to end with a user message, and this one ends with the tutor's own
+  // reply, so close it with the instruction for this pass.
+  messages.push({
+    role: "user",
+    content:
+      "(Reflect on the exchange above. Record any evidence with record_observation, quoting the learner, and call advance if the phase is finished. " +
+      "Make the calls in one batch and write no words: the learner cannot hear this pass.)",
+  });
+  const gen = streamTurn({ spec: reflectAgent, system, messages, tools: tutorTools(ctx, "reflect"), maxTokens: 700, signal });
+  let r = await gen.next();
+  while (!r.done) r = await gen.next(); // its words are for nobody
+  return r.value;
 }

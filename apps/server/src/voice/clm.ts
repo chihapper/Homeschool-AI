@@ -111,6 +111,8 @@ export function registerClmRoutes(app: FastifyInstance): void {
         write(sseChunk(id, sessionId, r.value, null));
         r = await gen.next();
       }
+      // Hume is already speaking; the tutor's notes and phase change settle in the background and are
+      // awaited at the start of the next turn (see settleReflection in the orchestrator).
     } catch (err) {
       req.log.error({ err }, "CLM turn failed");
       if (!abort.signal.aborted) write(sseChunk(id, sessionId, "Sorry, I lost my train of thought. Could you say that again?", null));

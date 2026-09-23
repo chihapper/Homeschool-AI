@@ -10,3 +10,6 @@ data/*
 .DS_Store
 coverage/
 apps/server/data/
+
+# debugging captures, not source
+*.wav

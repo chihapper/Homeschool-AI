@@ -1,21 +1,55 @@
 /** Thin client for the server API. Types mirror apps/server/src/domain/types.ts. */
 
-export interface Lesson { id: string; title: string; objectives: string[]; conceptIds: string[]; order: number }
-export interface Concept { id: string; name: string; summary: string; keyFacts: string[] }
-export interface Course { id: string; title: string; subject: string; level: string; description: string; lessons: Lesson[]; concepts: Concept[]; chunkCount: number; sources?: Array<{ name: string; kind: string; url?: string }> }
-export interface Learner { id: string; name: string; age?: number; gradeLevel?: string; profile?: { parentSummary: string; tutoringGuidance: string[] } }
+export interface Lesson { id: string; title: string; objectives: string[]; conceptIds: string[]; guidingQuestions: string[]; practiceItems: string[]; order: number }
+export interface Concept { id: string; name: string; summary: string; keyFacts: string[]; commonMisconceptions: string[]; sourceChunkIds: string[]; prerequisites: string[] }
+export interface Chunk { id: string; source: string; headingPath: string[]; text: string; order: number }
+export interface Course { id: string; title: string; subject: string; level: string; description: string; lessons: Lesson[]; concepts: Concept[]; chunkCount: number; sources?: Array<{ name: string; kind: string; url?: string }>; createdAt: string }
+export interface Profile {
+  intakePreferences: string[]; demonstrationPreferences: string[]; challengeTolerance: string; pace: string; verbalLevel: string;
+  interests: string[]; priorKnowledge: string[]; observedGaps: string[]; parentSummary: string; tutoringGuidance: string[];
+}
+export interface Learner { id: string; name: string; age?: number; gradeLevel?: string; profile?: Profile; createdAt: string }
 export type Phase = "intake" | "teach" | "inquire" | "assess" | "wrap-up" | "complete";
-export interface Session { id: string; learnerId: string; courseId?: string; lessonId?: string; conceptIndex: number; phase: Phase; transcript: Array<{ role: "user" | "assistant"; content: string; at: string }>; observations: Array<{ conceptId: string; kind: string; evidence: string; note: string }> }
-export interface Report { sessionId: string; concepts: Array<{ conceptId: string; level: number; evidence: string[]; misconceptions: string[]; nextStep: string }>; parentSummary: string; studentSummary: string; recommendedNext: string[]; ungroundedClaims: string[]; effectiveFormats: string[] }
+export interface Latency { ttftMs: number; totalMs: number; iterations: number; cacheReadTokens: number; cacheWriteTokens: number; inputTokens: number; outputTokens: number; suppressedChars?: number; thinkingChars?: number; toolsBeforeSpeech?: boolean; reflectMs?: number; reflectThinkingChars?: number; firstAudioMs?: number; transcriptMs?: number; interrupted?: boolean }
+export interface Turn { role: "user" | "assistant"; content: string; at: string; expressions?: string[]; latency?: Latency }
+export interface Observation { at: string; conceptId: string; kind: "understanding" | "partial" | "misconception" | "gap" | "engagement"; evidence: string; note: string }
+export interface Session { id: string; learnerId: string; courseId?: string; lessonId?: string; conceptIndex: number; phase: Phase; transcript: Turn[]; observations: Observation[]; pendingDirectives: string[]; startedAt: string; endedAt?: string }
+export interface SessionSummary { id: string; learnerId: string; courseId?: string; lessonId?: string; phase: Phase; conceptIndex: number; turns: number; observations: number; startedAt: string; endedAt?: string; hasReport: boolean }
+export interface LatencySummary { turns: number; ttftP50Ms: number; ttftMaxMs: number; totalP50Ms: number; cacheHitRate: number; firstAudioP50Ms?: number }
+export interface Report {
+  sessionId: string; learnerId: string; courseId?: string; lessonId?: string; createdAt: string;
+  concepts: Array<{ conceptId: string; level: number; evidence: string[]; misconceptions: string[]; nextStep: string }>;
+  parentSummary: string; studentSummary: string; recommendedNext: string[]; ungroundedClaims: string[]; effectiveFormats: string[];
+  answerSeekingTurns: number; tutorAnswerGiveaways: number;
+}
+export interface RuntimeSettings {
+  model: string; tutorModel: string; tutorEffort: string; analysisEffort: string; reflectEffort: string; tutorThinking: "adaptive" | "disabled"; prewarmCache: boolean; refusalFallbacks: boolean;
+  ttsVoice: string; ttsVersion: "1" | "2"; ttsInstant: boolean; ttsBatchSentences: boolean; sttMinSilenceMs: number; sttMaxSilenceMs: number;
+}
+export interface SettingsView { effective: RuntimeSettings; defaults: RuntimeSettings; overrides: Partial<RuntimeSettings>; options: { models: string[]; efforts: string[]; thinking: string[] } }
+export interface Readiness { rows: Array<{ status: "ok" | "warn" | "fail"; item: string; note: string; stage: 0 | 1 | 2 | 3 }>; blocking: number; optional: number; checkedAt: string }
+export interface Health { ok: boolean; model: string; tutorModel: string; tutorEffort: string; tutorThinking: string; hume: boolean; voice: { stt: "assemblyai" | "none"; tts: "hume" | "none"; ttsVoice: string; ttsVersion: string } }
 
 async function j<T>(res: Response): Promise<T> {
   if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error ?? `${res.status} ${res.statusText}`);
   return res.json() as Promise<T>;
 }
+const json = (method: string, body?: unknown): RequestInit => ({ method, headers: { "content-type": "application/json" }, body: JSON.stringify(body ?? {}) });
 
 export const api = {
-  health: () => fetch("/api/../health").then(j<{ ok: boolean; hume: boolean; tutorModel: string }>),
+  health: () => fetch("/api/health").then(j<Health>),
+
+  settings: () => fetch("/api/settings").then(j<SettingsView>),
+  saveSettings: (patch: Partial<RuntimeSettings>) => fetch("/api/settings", json("PUT", patch)).then(j<SettingsView>),
+  resetSettings: () => fetch("/api/settings", { method: "DELETE" }).then(j<SettingsView>),
+  doctor: (ping: boolean) => fetch(`/api/doctor?ping=${ping}`).then(j<Readiness>),
+  voices: () => fetch("/api/voice/voices").then(j<Array<{ id: string; name: string }>>),
+
   courses: () => fetch("/api/courses").then(j<Course[]>),
+  chunks: (courseId: string) => fetch(`/api/courses/${courseId}/chunks`).then(j<Chunk[]>),
+  deleteCourse: (id: string) => fetch(`/api/courses/${id}`, { method: "DELETE" }).then(j<{ ok: true }>),
+  samples: () => fetch("/api/samples").then(j<Array<{ name: string; size: number }>>),
+  ingestSamples: (samples: string[], title?: string) => fetch("/api/courses/ingest", json("POST", { samples, title: title || undefined })).then(j<Course>),
   uploadCourse: (files: File[], title: string, urls: string[] = []) => {
     const fd = new FormData();
     if (title) fd.append("title", title);
@@ -23,24 +57,37 @@ export const api = {
     for (const f of files) fd.append("files", f, f.name);
     return fetch("/api/courses/upload", { method: "POST", body: fd }).then(j<Course>);
   },
-  latency: (sessionId: string) => fetch(`/api/sessions/${sessionId}/latency`).then(j<{ turns: number; ttftP50Ms: number; ttftMaxMs: number; totalP50Ms: number; cacheHitRate: number }>),
+
   learners: () => fetch("/api/learners").then(j<Learner[]>),
-  createLearner: (body: { name: string; age?: number; gradeLevel?: string }) =>
-    fetch("/api/learners", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).then(j<Learner>),
-  createSession: (body: { learnerId: string; courseId?: string; lessonId?: string; skipIntake?: boolean }) =>
-    fetch("/api/sessions", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).then(j<Session>),
+  createLearner: (body: { name: string; age?: number; gradeLevel?: string }) => fetch("/api/learners", json("POST", body)).then(j<Learner>),
+  resetProfile: (id: string) => fetch(`/api/learners/${id}/profile`, { method: "DELETE" }).then(j<Learner>),
+  deleteLearner: (id: string) => fetch(`/api/learners/${id}`, { method: "DELETE" }).then(j<{ ok: true }>),
+
+  sessions: () => fetch("/api/sessions").then(j<SessionSummary[]>),
+  createSession: (body: { learnerId: string; courseId?: string; lessonId?: string; skipIntake?: boolean }) => fetch("/api/sessions", json("POST", body)).then(j<Session>),
   session: (id: string) => fetch(`/api/sessions/${id}`).then(j<Session>),
+  deleteSession: (id: string) => fetch(`/api/sessions/${id}`, { method: "DELETE" }).then(j<{ ok: true }>),
+  latency: (sessionId: string) => fetch(`/api/sessions/${sessionId}/latency`).then(j<LatencySummary>),
   endSession: (id: string) => fetch(`/api/sessions/${id}/end`, { method: "POST" }).then(j<{ session: Session; report?: Report }>),
+  /** Attach browser-measured voice timings to the latest tutor turn (used by the Hume EVI path). */
+  turnLatency: (id: string, body: { firstAudioMs?: number; transcriptMs?: number }) => fetch(`/api/sessions/${id}/turn-latency`, json("POST", body)).then(j<{ ok: true }>),
+
+  reports: () => fetch("/api/reports").then(j<Report[]>),
+  report: (sessionId: string) => fetch(`/api/reports/${sessionId}`).then(j<Report>),
+
   humeToken: () => fetch("/api/hume/token").then(j<{ accessToken: string; configId: string | null; clmSecret: string | null }>),
 
-  /** Text-mode turn: streams deltas via SSE. */
-  async *message(sessionId: string, text: string): AsyncGenerator<string, { phase: Phase; conceptIndex: number }, void> {
-    const res = await fetch(`/api/sessions/${sessionId}/message`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text }) });
+  /**
+   * Text-mode turn: streams deltas via SSE. The reply ends at `done`; the tutor's notes and any phase
+   * change arrive a few seconds later as `reflected`, which calls `onReflected` if given.
+   */
+  async *message(sessionId: string, text: string, onReflected?: () => void): AsyncGenerator<string, { phase: Phase; conceptIndex: number; latency: Latency | null }, void> {
+    const res = await fetch(`/api/sessions/${sessionId}/message`, json("POST", { text }));
     if (!res.ok || !res.body) throw new Error(`${res.status} ${res.statusText}`);
     const reader = res.body.getReader();
     const dec = new TextDecoder();
     let buf = "";
-    let done = { phase: "teach" as Phase, conceptIndex: 0 };
+    let done = { phase: "teach" as Phase, conceptIndex: 0, latency: null as Latency | null };
     for (;;) {
       const { value, done: end } = await reader.read();
       if (end) break;
@@ -50,12 +97,33 @@ export const api = {
         const line = buf.slice(0, i).trim();
         buf = buf.slice(i + 2);
         if (!line.startsWith("data: ")) continue;
-        const ev = JSON.parse(line.slice(6)) as { delta?: string; done?: boolean; phase?: Phase; conceptIndex?: number; error?: string };
+        const ev = JSON.parse(line.slice(6)) as { delta?: string; done?: boolean; reflected?: boolean; phase?: Phase; conceptIndex?: number; latency?: Latency | null; error?: string };
         if (ev.error) throw new Error(ev.error);
         if (ev.delta) yield ev.delta;
-        if (ev.done) done = { phase: ev.phase ?? "teach", conceptIndex: ev.conceptIndex ?? 0 };
+        if (ev.done) done = { phase: ev.phase ?? "teach", conceptIndex: ev.conceptIndex ?? 0, latency: ev.latency ?? null };
+        if (ev.reflected) onReflected?.();
       }
     }
     return done;
   },
 };
+
+/** Same p50 / hit-rate math as the server's latencySummary, so the panel updates without an extra request. */
+export function summarizeLatency(transcript: Turn[]): LatencySummary {
+  const ls = transcript.map((t) => t.latency).filter((l): l is Latency => Boolean(l) && !l?.interrupted);
+  const p50 = (xs: number[]): number => (xs.length ? [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)] : 0);
+  const read = ls.reduce((a, l) => a + l.cacheReadTokens, 0);
+  const all = ls.reduce((a, l) => a + l.cacheReadTokens + l.cacheWriteTokens + l.inputTokens, 0);
+  const audio = ls.map((l) => l.firstAudioMs).filter((x): x is number => typeof x === "number");
+  return {
+    turns: ls.length,
+    ttftP50Ms: p50(ls.map((l) => l.ttftMs)),
+    ttftMaxMs: Math.max(0, ...ls.map((l) => l.ttftMs)),
+    totalP50Ms: p50(ls.map((l) => l.totalMs)),
+    cacheHitRate: all ? Math.round((100 * read) / all) / 100 : 0,
+    ...(audio.length ? { firstAudioP50Ms: p50(audio) } : {}),
+  };
+}
+
+export const fmtMs = (ms: number): string => (ms >= 1000 ? `${(ms / 1000).toFixed(1)} s` : `${ms} ms`);
+export const fmtDate = (iso: string): string => new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });

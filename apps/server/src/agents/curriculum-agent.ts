@@ -20,8 +20,12 @@ export const curriculumAgent: AgentSpec = {
     "You convert a homeschool parent's raw teaching material into a structured course that a Socratic tutor can teach from. " +
     "You are meticulous and faithful to the source. You never add content the material does not contain.",
   skills: ["curriculum-parsing", "grounding"],
-  model: config.model,
-  effort: config.analysisEffort,
+  get model() {
+    return config.model;
+  },
+  get effort() {
+    return config.analysisEffort;
+  },
 };
 
 /** Rough budget per extraction call, in characters of source text. */

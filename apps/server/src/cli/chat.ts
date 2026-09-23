@@ -46,6 +46,7 @@ async function main(): Promise<void> {
       stdout.write(r.value);
       r = await gen.next();
     }
+    await r.value.reflection?.catch(() => {}); // the tutor's notes, taken after the words are out
     const last = r.value.session.transcript.at(-1)?.latency;
     stdout.write(`\n   [phase=${r.value.session.phase} concept=${r.value.session.conceptIndex + 1} obs=${r.value.session.observations.length}${last ? ` ttft=${last.ttftMs}ms total=${last.totalMs}ms cache=${last.cacheReadTokens}/${last.cacheReadTokens + last.cacheWriteTokens + last.inputTokens}` : ""}]\n\n`);
     if (r.value.session.phase === "complete") break;

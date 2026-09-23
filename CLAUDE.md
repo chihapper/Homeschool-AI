@@ -8,7 +8,7 @@ agents and a Hume EVI custom-language-model endpoint; a Vite/React app is the pa
 - `apps/server/src/domain/types.ts` — every persisted object and structured LLM output, as Zod schemas. Change schemas here first.
 - `apps/server/src/agents/` — one file per agent (`curriculum`, `profiler`, `tutor`, `assessor`) plus `base.ts` (prompt assembly + streaming tool loop).
 - `apps/server/src/orchestrator/session.ts` — deterministic state machine; the only place phase transitions and persistence happen.
-- `apps/server/src/voice/` — Hume bridge: `clm.ts` (SSE endpoint Hume calls), `hume.ts` (tokens, config creation).
+- `apps/server/src/voice/` — voice. Browser path: `live.ts` (WebSocket per session: mic audio in, spoken reply out, barge-in), `stt-assemblyai.ts` (streaming speech-to-text with end-of-turn detection), `tts-hume.ts` (Octave, per sentence), `sentence-chunker.ts`, `pcm.ts`. Hume EVI path: `clm.ts` (SSE endpoint Hume calls), `hume.ts` (tokens, config creation). Provider specifics stay in the adapters; the turn loop lives in `live.ts`.
 - `apps/server/src/ingest/` — file -> text -> heading-aware chunks -> BM25 index. `ingest/media/` handles pptx, video (yt-dlp), podcasts (RSS), speech-to-text, and web pages; `media/sources.ts` is the single entry point.
 - `skills/*/SKILL.md` — agent competencies, loaded at runtime into system prompts. Tune behaviour here before touching code.
 - `apps/web/` — React UI (text mode works with only an Anthropic key; voice needs Hume).
@@ -21,8 +21,9 @@ agents and a Hume EVI custom-language-model endpoint; a Vite/React app is the pa
 - Streaming agents use `client.beta.messages.stream` (needed for server-side refusal fallbacks). Always check `stop_reason` before trusting content.
 - System prompts: stable role + skills first (cached), per-session context after. Keep the stable part byte-identical across turns.
 - Agents *request* transitions through tools; the orchestrator validates and applies them. Don't let an agent mutate session state directly.
+- A tutor turn is **two calls**: `tutorTurn` speaks (no bookkeeping tools, thinking off, the learner is waiting) and `reflectTurn` records observations, requests the phase change, and may leave ONE note for the next turn (`note_for_next_turn` -> `orchestrator/notes.ts`), all while the learner listens. Never move bookkeeping back into the speaking call; never let the speaking call think. `respond()` returns the reflect pass as `reflection` and awaits any pending one before the next turn (`settleReflection`). The thread is not a competing instruction: it rides with the phase guidance in one block (phase = what kind of work this turn does, thread = what the work is on) and carries how many turns it has been open, so the tutor varies its angle at first and then asks plainly. Keep it that way; an earlier version made the note *outrank* the phase, which worked but read as an org chart rather than a dialogue.
 - Grounding is a product requirement: the tutor must not assert facts outside the course material. The assessor audits this. Keep it that way.
-- Latency is a product requirement for the live tutor: stream every delta, speak before tool calls, keep the cached prefix stable, gate effort/thinking params on the model (`reasoningParams`). Every assistant turn records `latency`; see `docs/LATENCY.md`.
+- Latency is a product requirement for the live tutor: stream every delta, keep bookkeeping and thinking out of the speaking call, keep the cached prefix stable, gate effort/thinking params on the model (`reasoningParams`). Every assistant turn records `latency`; see `docs/LATENCY.md`.
 - External binaries (`yt-dlp`, `whisper`) and STT APIs are optional and must fail with a clear message, never crash ingestion of other sources.
 - Tests are pure (no network, no binaries). `npm test` must pass before pushing.
 

@@ -16,9 +16,16 @@ export const profilerAgent: AgentSpec = {
     "You run a short, friendly intake conversation with a homeschool student to learn how they learn and how they best show what they know. " +
     "You are warm, curious, and observant. You are also the same voice that will tutor them later, so be consistent.",
   skills: ["initial-assessment", "voice-conversation", "grounding"],
-  model: config.tutorModel,
-  effort: config.tutorEffort,
-  thinking: config.tutorThinking,
+  // Getters: a change in the Settings tab applies on the next turn without a restart.
+  get model() {
+    return config.tutorModel;
+  },
+  get effort() {
+    return config.tutorEffort;
+  },
+  get thinking() {
+    return config.tutorThinking;
+  },
 };
 
 export interface ProfilerContext {
@@ -40,7 +47,9 @@ function contextBlock(ctx: ProfilerContext): string {
   }
   parts.push(
     "When you have enough evidence for every field of the learner profile (usually after 8-12 exchanges), " +
-      "say a warm goodbye for now and call finish_intake in the same turn. Speak first, then call the tool.",
+      "say a warm goodbye for now and call finish_intake in the same turn. Speak first, then call the tool. " +
+      "The closing turn asks no question: it thanks them and names one specific thing they did well. Nothing you write after finish_intake reaches the learner. " +
+      "On every other turn, end with your single question and call no tool.",
   );
   return parts.join("\n\n");
 }
@@ -51,7 +60,7 @@ export function profilerTurn(ctx: ProfilerContext, signal?: AbortSignal): AsyncG
       name: "finish_intake",
       description:
         "Call this once, after your closing words, when you have gathered enough evidence to fill every field of the learner profile. " +
-        "Do not call it before at least six exchanges unless the learner asks to stop.",
+        "Do not call it before at least eight exchanges unless the learner asks to stop.",
       input_schema: {
         type: "object",
         properties: { reason: { type: "string", description: "One sentence on why the intake is complete." } },
@@ -64,6 +73,7 @@ export function profilerTurn(ctx: ProfilerContext, signal?: AbortSignal): AsyncG
       ctx.onFinish(reason);
       return "Intake marked complete.";
     },
+    endsSpeech: "always",
   };
   const system = buildSystem(profilerAgent, [contextBlock(ctx)]);
   let messages = transcriptToMessages(ctx.session.transcript);

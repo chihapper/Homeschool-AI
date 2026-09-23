@@ -163,6 +163,22 @@ export const TranscriptTurnSchema = z.object({
       cacheWriteTokens: z.number(),
       inputTokens: z.number(),
       outputTokens: z.number(),
+      /** Text the model produced after its bookkeeping tools ran; dropped, never shown to the learner. */
+      suppressedChars: z.number().optional(),
+      /** Characters of private reasoning before the first spoken word. */
+      thinkingChars: z.number().optional(),
+      /** The model did its bookkeeping before speaking (an extra round trip before the first word). */
+      toolsBeforeSpeech: z.boolean().optional(),
+      /** Milliseconds the reflect pass took, after the reply was spoken. */
+      reflectMs: z.number().optional(),
+      /** Characters of private reasoning in the reflect pass. */
+      reflectThinkingChars: z.number().optional(),
+      /** Voice turns: ms from the student's end of speech to the first audio byte sent back. */
+      firstAudioMs: z.number().optional(),
+      /** Voice turns: ms from end of speech to the final transcript. */
+      transcriptMs: z.number().optional(),
+      /** The learner barged in and the reply was cut short. */
+      interrupted: z.boolean().optional(),
     })
     .optional(),
 });

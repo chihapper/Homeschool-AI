@@ -1,12 +1,17 @@
 /**
- * Runtime configuration, read once from the environment.
+ * Runtime configuration.
  *
- * Only ANTHROPIC_API_KEY is required to run the text-mode tutor, ingestion, and assessment.
- * Hume keys are needed only for the voice layer.
+ * Two layers:
+ *  1. Environment (.env or the shell), read once at startup. Only ANTHROPIC_API_KEY is required to run
+ *     the text-mode tutor, ingestion, and assessment. Hume keys are needed only for the voice layer.
+ *  2. Runtime overrides for the model settings (which model, effort, thinking, caching), changed from the
+ *     web app's Settings tab and persisted to <DATA_DIR>/settings.json so they survive a restart.
+ *     `config.tutorModel` etc. are getters, so every read sees the current value.
  */
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { z } from "zod";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -32,31 +37,192 @@ function env(name: string, fallback?: string): string | undefined {
   return v === undefined || v === "" ? fallback : v;
 }
 
+// Relative DATA_DIR / SKILLS_DIR are resolved against the repo root, not the cwd: npm runs workspace
+// scripts from apps/server, which would otherwise scatter data under apps/server/data.
+const dataDir = path.resolve(REPO_ROOT, env("DATA_DIR", "data")!);
+
+// ---------------------------------------------------------------------------
+// Model settings: env defaults + runtime overrides
+// ---------------------------------------------------------------------------
+
+export const EffortSchema = z.enum(["low", "medium", "high", "xhigh", "max"]);
+export type Effort = z.infer<typeof EffortSchema>;
+
+export const RuntimeSettingsSchema = z.object({
+  /** Model used by the offline agents (curriculum, profile extraction, assessor). */
+  model: z.string().min(1),
+  /** The live tutor and intake conversation are latency-sensitive; they can use a different model. */
+  tutorModel: z.string().min(1),
+  /** Effort for the live tutor. Lower effort = faster first token. */
+  tutorEffort: EffortSchema,
+  /** Effort for the offline agents. */
+  analysisEffort: EffortSchema,
+  /** Effort for the tutor's reflect pass (notes and phase changes), which runs while the learner listens. */
+  reflectEffort: EffortSchema,
+  /** Thinking for the live tutor: adaptive (model decides; rarely thinks at low effort) or disabled. */
+  tutorThinking: z.enum(["adaptive", "disabled"]),
+  /** Pre-warm the tutor's prompt cache when a session is created. */
+  prewarmCache: z.boolean(),
+  /** Route safety-classifier refusals to a fallback model automatically. */
+  refusalFallbacks: z.boolean(),
+  /** Hume voice for the tutor: a Voice Library name ("Ava Song"), or "CUSTOM_VOICE:<id>" for a saved voice. */
+  ttsVoice: z.string().min(1),
+  /** Octave model version. "2" is faster; "1" honours per-utterance acting descriptions. */
+  ttsVersion: z.enum(["1", "2"]),
+  /** Octave instant mode: lower first-audio latency at some cost in expressiveness. */
+  ttsInstant: z.boolean(),
+  /** Send the sentences already waiting as one request so the voice keeps its cadence across them. Off = one request per sentence. */
+  ttsBatchSentences: z.boolean(),
+  /** Silence, in ms, before the transcriber decides the student has finished a thought (short pauses). */
+  sttMinSilenceMs: z.number().int().min(100).max(5000),
+  /** Silence, in ms, after which a turn ends regardless of how confident the transcriber is. */
+  sttMaxSilenceMs: z.number().int().min(200).max(10000),
+});
+export type RuntimeSettings = z.infer<typeof RuntimeSettingsSchema>;
+
+/** Values from the environment (or the code defaults). Never change while the process runs. */
+export const envDefaults: RuntimeSettings = {
+  model: env("CLAUDE_MODEL", "claude-opus-5")!,
+  tutorModel: env("CLAUDE_TUTOR_MODEL", env("CLAUDE_MODEL", "claude-opus-5"))!,
+  tutorEffort: EffortSchema.catch("low").parse(env("CLAUDE_TUTOR_EFFORT", "low")),
+  analysisEffort: EffortSchema.catch("high").parse(env("CLAUDE_ANALYSIS_EFFORT", "high")),
+  reflectEffort: EffortSchema.catch("medium").parse(env("CLAUDE_REFLECT_EFFORT", "medium")),
+  tutorThinking: env("CLAUDE_TUTOR_THINKING", "adaptive") === "disabled" ? "disabled" : "adaptive",
+  prewarmCache: env("CLAUDE_PREWARM_CACHE", "true") !== "false",
+  refusalFallbacks: env("CLAUDE_REFUSAL_FALLBACKS", "true") !== "false",
+  ttsVoice: env("HUME_TTS_VOICE", "Ava Song")!,
+  ttsVersion: env("HUME_TTS_VERSION", "2") === "1" ? "1" : "2",
+  ttsInstant: env("HUME_TTS_INSTANT", "true") !== "false",
+  ttsBatchSentences: env("HUME_TTS_BATCH", "true") !== "false",
+  sttMinSilenceMs: Number(env("ASSEMBLYAI_MIN_TURN_SILENCE", "400")),
+  sttMaxSilenceMs: Number(env("ASSEMBLYAI_MAX_TURN_SILENCE", "1500")),
+};
+
+/** Models offered in the Settings tab. Any model id can still be typed in. */
+export const MODEL_OPTIONS = ["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5"] as const;
+
+let settingsFile = path.join(dataDir, "settings.json");
+let overrides: Partial<RuntimeSettings> = loadOverrides(settingsFile);
+
+function loadOverrides(file: string): Partial<RuntimeSettings> {
+  try {
+    if (!fs.existsSync(file)) return {};
+    return RuntimeSettingsSchema.partial().parse(JSON.parse(fs.readFileSync(file, "utf8")));
+  } catch (err) {
+    console.warn(`[config] ignoring unreadable ${file}:`, err instanceof Error ? err.message : err);
+    return {};
+  }
+}
+
+function effective(): RuntimeSettings {
+  return { ...envDefaults, ...overrides };
+}
+
+export function getSettings(): { effective: RuntimeSettings; defaults: RuntimeSettings; overrides: Partial<RuntimeSettings> } {
+  return { effective: effective(), defaults: envDefaults, overrides: { ...overrides } };
+}
+
+/** Validate and apply a partial change; persisted so it survives a restart. Returns the effective settings. */
+export function updateSettings(patch: unknown): RuntimeSettings {
+  const parsed = RuntimeSettingsSchema.partial().parse(patch);
+  overrides = { ...overrides, ...parsed };
+  // Drop overrides that merely restate the default, so the file only holds real changes.
+  for (const k of Object.keys(overrides) as Array<keyof RuntimeSettings>) if (overrides[k] === envDefaults[k]) delete overrides[k];
+  persist();
+  return effective();
+}
+
+/** Forget every override; back to the environment values. */
+export function resetSettings(): RuntimeSettings {
+  overrides = {};
+  persist();
+  return effective();
+}
+
+function persist(): void {
+  try {
+    fs.mkdirSync(path.dirname(settingsFile), { recursive: true });
+    if (Object.keys(overrides).length) fs.writeFileSync(settingsFile, JSON.stringify(overrides, null, 2));
+    else if (fs.existsSync(settingsFile)) fs.unlinkSync(settingsFile);
+  } catch (err) {
+    console.warn("[config] could not persist settings:", err instanceof Error ? err.message : err);
+  }
+}
+
+/** Tests only: point the overrides file somewhere disposable and start clean. */
+export function useSettingsFile(file: string): void {
+  settingsFile = file;
+  overrides = loadOverrides(file);
+}
+
+// ---------------------------------------------------------------------------
+
 export const config = {
   port: Number(env("PORT", "3001")),
   host: env("HOST", "0.0.0.0")!,
-  // Relative DATA_DIR / SKILLS_DIR are resolved against the repo root, not the cwd: npm runs workspace
-  // scripts from apps/server, which would otherwise scatter data under apps/server/data.
-  dataDir: path.resolve(REPO_ROOT, env("DATA_DIR", "data")!),
+  dataDir,
   skillsDir: path.resolve(REPO_ROOT, env("SKILLS_DIR", "skills")!),
 
-  /** Model used by every agent unless overridden per agent. */
-  model: env("CLAUDE_MODEL", "claude-opus-5")!,
-  /** The live voice tutor is latency-sensitive; allow a separate model. */
-  tutorModel: env("CLAUDE_TUTOR_MODEL", env("CLAUDE_MODEL", "claude-opus-5"))!,
-  /** Effort for the live tutor. Lower effort = faster first token. */
-  tutorEffort: (env("CLAUDE_TUTOR_EFFORT", "low") as "low" | "medium" | "high" | "xhigh" | "max"),
-  /** Effort for offline agents (curriculum, profiler summary, assessor). */
-  analysisEffort: (env("CLAUDE_ANALYSIS_EFFORT", "high") as "low" | "medium" | "high" | "xhigh" | "max"),
+  // Live model settings (see RuntimeSettingsSchema). Getters, so runtime overrides apply immediately.
+  get model(): string {
+    return effective().model;
+  },
+  get tutorModel(): string {
+    return effective().tutorModel;
+  },
+  get tutorEffort(): Effort {
+    return effective().tutorEffort;
+  },
+  get analysisEffort(): Effort {
+    return effective().analysisEffort;
+  },
+  get reflectEffort(): Effort {
+    return effective().reflectEffort;
+  },
+  get tutorThinking(): "adaptive" | "disabled" {
+    return effective().tutorThinking;
+  },
+  get refusalFallbacks(): boolean {
+    return effective().refusalFallbacks;
+  },
+  get prewarmCache(): boolean {
+    return effective().prewarmCache;
+  },
+  get ttsVoice(): string {
+    return effective().ttsVoice;
+  },
+  get ttsVersion(): "1" | "2" {
+    return effective().ttsVersion;
+  },
+  get ttsInstant(): boolean {
+    return effective().ttsInstant;
+  },
+  get ttsBatchSentences(): boolean {
+    return effective().ttsBatchSentences;
+  },
+  get sttMinSilenceMs(): number {
+    return effective().sttMinSilenceMs;
+  },
+  get sttMaxSilenceMs(): number {
+    return effective().sttMaxSilenceMs;
+  },
+
   /**
-   * Thinking for the live tutor. "adaptive" (default) lets the model decide; at low effort it rarely thinks.
-   * "disabled" shaves first-token latency further but Opus 5 has known failure modes with it (see docs/LATENCY.md).
+   * Browser voice: the student talks into the web app; the server streams the audio to a transcriber and
+   * speaks the tutor's reply back. No tunnel needed (unlike Hume EVI, which must call us from outside).
    */
-  tutorThinking: (env("CLAUDE_TUTOR_THINKING", "adaptive") as "adaptive" | "disabled"),
-  /** Route safety-classifier refusals to a fallback model automatically. */
-  refusalFallbacks: env("CLAUDE_REFUSAL_FALLBACKS", "true") !== "false",
-  /** Pre-warm the tutor's prompt cache when a session is created, so the first spoken turn hits the cache. */
-  prewarmCache: env("CLAUDE_PREWARM_CACHE", "true") !== "false",
+  voice: {
+    /** Speech-to-text for the live student: assemblyai (streaming, end-of-turn detection) or none. */
+    sttProvider: env("VOICE_STT", "assemblyai") as "assemblyai" | "none",
+    assemblyAiKey: env("ASSEMBLYAI_API_KEY"),
+    assemblyAiModel: env("ASSEMBLYAI_SPEECH_MODEL", "universal-3-5-pro")!,
+    /** Text-to-speech for the tutor: hume (Octave) or none (text only). */
+    ttsProvider: env("VOICE_TTS", "hume") as "hume" | "none",
+    /** Sample rates: what the browser sends, what Hume returns, what we send back to the browser. */
+    micSampleRate: 16_000,
+    humeSampleRate: Number(env("HUME_TTS_SAMPLE_RATE", "48000")),
+    playbackSampleRate: 24_000,
+  },
 
   /** Speech-to-text for podcasts / videos without captions. */
   stt: {

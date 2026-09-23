@@ -6,7 +6,8 @@ import { config } from "../config.js";
 
 export const anthropic = new Anthropic();
 
-export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
+export type { Effort } from "../config.js";
+import type { Effort } from "../config.js";
 
 /** Beta flag + value for server-side refusal fallbacks (see Anthropic docs, "server-side fallback"). */
 export const REFUSAL_FALLBACK_BETA = "server-side-fallback-2026-07-01";
@@ -47,6 +48,22 @@ export interface TurnLatency {
   cacheWriteTokens: number;
   inputTokens: number;
   outputTokens: number;
+  /** Characters the model wrote after a state-changing tool call, which were dropped rather than spoken. */
+  suppressedChars: number;
+  /** Characters of private reasoning (adaptive thinking) the model produced before speaking. The usual cause of a slow first word. */
+  thinkingChars?: number;
+  /** The model called tools before saying anything, costing an extra round trip before the first word. */
+  toolsBeforeSpeech?: boolean;
+  /** Tutor turns: ms the reflect pass took (notes and phase change), which ran while the learner listened. */
+  reflectMs?: number;
+  /** Characters of private reasoning in the reflect pass. Costs nobody any waiting. */
+  reflectThinkingChars?: number;
+  /** Voice turns only: ms from the student's end of speech to the first audio byte sent back. */
+  firstAudioMs?: number;
+  /** Voice turns only: ms from end of speech to the final transcript (0 for streaming transcription). */
+  transcriptMs?: number;
+  /** The learner barged in; the reply was cut short and what was spoken is what the transcript holds. */
+  interrupted?: boolean;
 }
 
 /** Extract concatenated text from a response's content blocks. */

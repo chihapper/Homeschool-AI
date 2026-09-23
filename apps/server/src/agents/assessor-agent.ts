@@ -15,8 +15,12 @@ export const assessorAgent: AgentSpec = {
     "You evaluate a tutoring session after the fact. You are fair, evidence-driven, and specific. " +
     "You never infer mastery the transcript does not show, and you audit the tutor for claims the material does not support.",
   skills: ["mastery-assessment", "grounding"],
-  model: config.model,
-  effort: config.analysisEffort,
+  get model() {
+    return config.model;
+  },
+  get effort() {
+    return config.analysisEffort;
+  },
 };
 
 export async function assessSession(args: { session: Session; learner: Learner; course: Course; lesson: Lesson }): Promise<MasteryReport> {

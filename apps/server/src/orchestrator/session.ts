@@ -9,10 +9,12 @@
  */
 import type { Course, Learner, Lesson, MasteryReport, Observation, Session, TranscriptTurn } from "../domain/types.js";
 import type { TurnLatency } from "../llm/client.js";
+import type { TurnResult } from "../agents/base.js";
 import { ChunkIndex } from "../ingest/retrieval.js";
 import { courses, learners, reports, sessions } from "../store/index.js";
+import { openThread, setOpenThread } from "./notes.js";
 import { finalizeProfile, profilerTurn } from "../agents/profiler-agent.js";
-import { prewarmTutor, tutorTurn, type AdvanceTarget, type TutorContext } from "../agents/tutor-agent.js";
+import { prewarmTutor, reflectTurn, tutorTurn, type AdvanceTarget, type TutorContext } from "../agents/tutor-agent.js";
 import { config } from "../config.js";
 import { assessSession } from "../agents/assessor-agent.js";
 
@@ -109,12 +111,12 @@ export function applyAdvance(session: Session, course: Course, lesson: Lesson, t
     case "inquire":
       if (session.phase !== "teach") return `Refused: cannot move to inquire from ${session.phase}.`;
       session.phase = "inquire";
-      session.pendingDirectives.push("Now in INQUIRE: invite the learner's questions about this concept.");
+      session.pendingDirectives.push("Now in INQUIRE: the learner's questions about this concept come first. If you already invited them, just answer what they ask.");
       return `OK: phase is now inquire (${rationale}).`;
     case "assess":
       if (session.phase !== "inquire" && session.phase !== "teach") return `Refused: cannot move to assess from ${session.phase}.`;
       session.phase = "assess";
-      session.pendingDirectives.push("Now in ASSESS: ask for demonstrations and record at least two observations before advancing.");
+      session.pendingDirectives.push("Now in ASSESS: ask for demonstrations, one per turn, and record at least two observations before advancing. No hints in this phase.");
       return `OK: phase is now assess (${rationale}).`;
     case "next-concept": {
       if (session.phase !== "assess") return "Refused: assess the current concept first (advance to 'assess').";
@@ -137,6 +139,20 @@ export function applyAdvance(session: Session, course: Course, lesson: Lesson, t
 export interface RespondResult {
   text: string;
   session: Session;
+  /**
+   * The tutor's reflect pass: records observations and requests the phase change, started after the reply
+   * was spoken and running while the learner listens. Await it before the next turn so the tutor's notes
+   * and the phase are current; the session on disk is updated when it settles.
+   */
+  reflection?: Promise<Session>;
+}
+
+/** In-flight reflect passes, so a caller that did not keep the promise can still wait before the next turn. */
+const reflections = new Map<string, Promise<Session>>();
+
+/** Wait for any reflect pass still running for this session (no-op if there is none). */
+export async function settleReflection(sessionId: string): Promise<void> {
+  await reflections.get(sessionId)?.catch(() => {});
 }
 
 /**
@@ -149,6 +165,8 @@ export async function* respond(
   expressions?: string[],
   signal?: AbortSignal,
 ): AsyncGenerator<string, RespondResult, void> {
+  // The previous turn's notes and phase change must land before this turn is composed.
+  await settleReflection(sessionId);
   const session = sessions.require(sessionId);
   if (session.phase === "complete") {
     const bye = "This session is finished. Start a new one when you're ready.";
@@ -161,51 +179,88 @@ export async function* respond(
 
   let intakeFinished: string | undefined;
   let result: { text: string; latency: TurnLatency };
+  /** Set for tutor turns: runs the bookkeeping once the reply has been spoken. */
+  let startReflection: ((spoken: string) => Promise<Session>) | undefined;
+
+  /**
+   * Stream an agent turn through to the caller. On a barge-in (the caller aborted the signal) keep what
+   * the learner already heard as the turn's text instead of losing the exchange.
+   */
+  async function* drain(gen: AsyncGenerator<string, TurnResult, void>): AsyncGenerator<string, { text: string; latency: TurnLatency }, void> {
+    let spoken = "";
+    try {
+      let r = await gen.next();
+      while (!r.done) {
+        spoken += r.value;
+        yield r.value;
+        r = await gen.next();
+      }
+      return r.value;
+    } catch (err) {
+      if (!signal?.aborted) throw err;
+      return {
+        text: spoken.trim(),
+        latency: { ttftMs: 0, totalMs: 0, iterations: 1, cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 0, outputTokens: 0, suppressedChars: 0, interrupted: true },
+      };
+    }
+  }
 
   if (session.phase === "intake") {
-    const gen = profilerTurn({ session, learner, course, onFinish: (reason) => (intakeFinished = reason) }, signal);
-    let r = await gen.next();
-    while (!r.done) {
-      yield r.value;
-      r = await gen.next();
-    }
-    result = r.value;
+    result = yield* drain(profilerTurn({ session, learner, course, onFinish: (reason) => (intakeFinished = reason) }, signal));
   } else {
     if (!course || !lesson) throw new Error("Session has no course/lesson.");
     const concept = course.concepts.find((c) => c.id === lesson.conceptIds[session.conceptIndex]);
     if (!concept) throw new Error("Current concept not found.");
     const directives = session.pendingDirectives;
+    // The thread is not a one-shot directive: it lives until the dialogue resolves it. Remember how many
+    // turns it has been open so the reflect pass can keep counting, and drop it if that pass does not
+    // renew it (which is how a resolved thread disappears).
+    const priorThreadTurns = openThread(session)?.turns ?? 0;
     session.pendingDirectives = [];
-    const gen = tutorTurn(
-      {
-        session: { ...session, pendingDirectives: directives },
-        learner,
-        course,
-        lesson,
-        concept,
-        index: indexFor(course),
-        onObservation: (o: Observation) => {
-          session.observations.push(o);
-          return `Recorded (${session.observations.filter((x) => x.conceptId === o.conceptId).length} observations for ${o.conceptId}).`;
-        },
-        onAdvance: (to, rationale) => applyAdvance(session, course, lesson, to, rationale),
+    const ctx: TutorContext = {
+      session: { ...session, pendingDirectives: directives },
+      learner,
+      course,
+      lesson,
+      concept,
+      index: indexFor(course),
+      onObservation: (o: Observation) => {
+        // The reflect pass sees the whole exchange each turn, so it sometimes re-files evidence it already
+        // recorded. Duplicates would also inflate the two-observation gate on advancing, so drop them here.
+        const already = session.observations.some((x) => x.conceptId === o.conceptId && x.evidence.trim() === o.evidence.trim());
+        if (already) return `Already recorded that evidence for ${o.conceptId}; nothing added.`;
+        session.observations.push(o);
+        return `Recorded (${session.observations.filter((x) => x.conceptId === o.conceptId).length} observations for ${o.conceptId}).`;
       },
-      signal,
-    );
-    let r = await gen.next();
-    while (!r.done) {
-      yield r.value;
-      r = await gen.next();
-    }
-    result = r.value;
-    if (session.phase === "wrap-up" && result.text) {
-      // The wrap-up words were just spoken; next turn closes the session.
-      session.pendingDirectives.push("The learner may say goodbye. Respond in one sentence.");
-    }
+      onAdvance: (to, rationale) => applyAdvance(session, course, lesson, to, rationale),
+      onThread: (thread) => setOpenThread(session, thread, priorThreadTurns),
+    };
+    result = yield* drain(tutorTurn(ctx, signal));
+
+    // The reflect pass reads the exchange INCLUDING the reply just spoken, and writes into this same
+    // session object, which is persisted again when it settles.
+    startReflection = async (spoken: string): Promise<Session> => {
+      try {
+        const r = await reflectTurn({ ...ctx, session }, spoken);
+        if (session.phase === "wrap-up" && spoken) {
+          session.pendingDirectives.push("The learner may say goodbye. Respond in one sentence.");
+        }
+        const last = [...session.transcript].reverse().find((t) => t.role === "assistant");
+        if (last?.latency) {
+          last.latency.reflectMs = r.latency.totalMs;
+          last.latency.reflectThinkingChars = r.latency.thinkingChars;
+        }
+      } catch (err) {
+        console.warn("[reflect] pass failed:", err instanceof Error ? err.message : err);
+      }
+      return sessions.put(session);
+    };
   }
 
   if (result.text) {
-    const turn: TranscriptTurn = { role: "assistant", content: result.text, at: new Date().toISOString(), latency: result.latency };
+    // A cut-off reply keeps an ellipsis so the model (and the assessor) can see it was interrupted.
+    const content = result.latency.interrupted ? `${result.text} …` : result.text;
+    const turn: TranscriptTurn = { role: "assistant", content, at: new Date().toISOString(), latency: result.latency };
     session.transcript.push(turn);
   }
 
@@ -215,6 +270,11 @@ export async function* respond(
     if (course && lesson) {
       session.phase = "teach";
       session.pendingDirectives.push(`Intake is complete. Begin the lesson "${lesson.title}" with the first concept.`);
+      // The tutor prompt (with the new profile) is about to be used for the first time: warm its cache now.
+      if (config.prewarmCache) {
+        const ctx = tutorContextFor(session, { ...learner, profile }, course, lesson);
+        if (ctx) void prewarmTutor(ctx);
+      }
     } else {
       session.phase = "complete";
       session.endedAt = new Date().toISOString();
@@ -222,22 +282,43 @@ export async function* respond(
   }
 
   sessions.put(session);
-  return { text: result.text, session };
+
+  // Start the bookkeeping now that the words are out. An interrupted reply is not reflected on: the
+  // exchange the learner heard is incomplete, and the next turn will cover it.
+  let reflection: Promise<Session> | undefined;
+  if (startReflection && result.text && !result.latency.interrupted) {
+    reflection = startReflection(result.text).finally(() => {
+      if (reflections.get(sessionId) === reflection) reflections.delete(sessionId);
+    });
+    reflections.set(sessionId, reflection);
+  }
+  return { text: result.text, session, reflection };
 }
 
-/** Latency summary across a session's assistant turns (for the API and the chat CLI). */
-export function latencySummary(session: Session): { turns: number; ttftP50Ms: number; ttftMaxMs: number; totalP50Ms: number; cacheHitRate: number } {
-  const ls = session.transcript.map((t) => t.latency).filter((l): l is NonNullable<typeof l> => Boolean(l));
+/** Latency summary across a session's assistant turns (for the API and the chat CLI). Interrupted turns are skipped. */
+export function latencySummary(session: Session): { turns: number; ttftP50Ms: number; ttftMaxMs: number; totalP50Ms: number; cacheHitRate: number; firstAudioP50Ms?: number } {
+  const ls = session.transcript.map((t) => t.latency).filter((l): l is NonNullable<typeof l> => Boolean(l) && !l?.interrupted);
   const p50 = (xs: number[]): number => (xs.length ? [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)] : 0);
   const cacheRead = ls.reduce((a, l) => a + l.cacheReadTokens, 0);
   const allInput = ls.reduce((a, l) => a + l.cacheReadTokens + l.cacheWriteTokens + l.inputTokens, 0);
+  const audio = ls.map((l) => l.firstAudioMs).filter((x): x is number => typeof x === "number");
   return {
     turns: ls.length,
     ttftP50Ms: p50(ls.map((l) => l.ttftMs)),
     ttftMaxMs: Math.max(0, ...ls.map((l) => l.ttftMs)),
     totalP50Ms: p50(ls.map((l) => l.totalMs)),
     cacheHitRate: allInput ? Math.round((100 * cacheRead) / allInput) / 100 : 0,
+    ...(audio.length ? { firstAudioP50Ms: p50(audio) } : {}),
   };
+}
+
+/** Attach voice timings (end of speech to first audio, etc.) to the most recent assistant turn. */
+export function annotateLastTurn(sessionId: string, patch: Partial<TurnLatency>): void {
+  const session = sessions.require(sessionId);
+  const last = [...session.transcript].reverse().find((t) => t.role === "assistant" && t.latency);
+  if (!last?.latency) return;
+  Object.assign(last.latency, patch);
+  sessions.put(session);
 }
 
 /** End the session and, when a lesson was taught, produce the mastery report. */

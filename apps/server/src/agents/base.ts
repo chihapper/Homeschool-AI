@@ -3,6 +3,15 @@
  *
  * Every agent is `AgentSpec` (identity + skills + model settings). The stable part of the prompt
  * (role + skills) is rendered first and marked for prompt caching; per-session context comes after.
+ *
+ * Speech policy (see `streamTurn`): the learner hears one reply per turn, ending in one question.
+ * State-changing tools carry `endsSpeech`:
+ *   - "after-question" (record_observation, advance): once the reply so far contains a question, the
+ *     learner has heard everything; later text is dropped and counted, and the loop stops unless a tool
+ *     reported an error (one silent pass to fix the bookkeeping). If no question has been asked yet, the
+ *     model may speak once more after the tools return, e.g. to open the next concept after advance.
+ *   - "always" (finish_intake): once anything has been said, the turn is over.
+ * Read-only tools (lookup_source) never end speech, so the model can look a passage up before it speaks.
  */
 import Anthropic from "@anthropic-ai/sdk";
 import { anthropic, fallbackParams, reasoningParams, type Effort, type TurnLatency } from "../llm/client.js";
@@ -42,7 +51,22 @@ export function buildSystem(spec: AgentSpec, dynamic: string[], cacheThrough = 0
 export interface AgentTool<I = unknown> {
   definition: Anthropic.Beta.BetaTool;
   run: (input: I) => Promise<string> | string;
+  /**
+   * For tools that change session state. "after-question": once the reply contains a question, later
+   * text is dropped (record_observation, advance). "always": once anything was said, the turn is over
+   * (finish_intake). Leave unset for read-only tools such as lookup_source.
+   */
+  endsSpeech?: "always" | "after-question";
 }
+
+/** The subset of the SDK's streaming call the loop uses. Injectable so the loop can be unit-tested. */
+export type StreamEvent = { type: "content_block_delta"; delta: { type: "text_delta"; text: string } } | { type: string };
+export interface MessageStream extends AsyncIterable<StreamEvent> {
+  finalMessage(): Promise<Pick<Anthropic.Beta.BetaMessage, "content" | "stop_reason" | "usage">>;
+}
+export type Streamer = (params: Anthropic.Beta.MessageCreateParamsStreaming | Anthropic.Beta.MessageCreateParamsNonStreaming, options: { signal?: AbortSignal }) => MessageStream;
+
+const defaultStreamer: Streamer = (params, options) => anthropic.beta.messages.stream(params as Anthropic.Beta.MessageCreateParamsNonStreaming, options) as unknown as MessageStream;
 
 export interface StreamTurnOptions {
   spec: AgentSpec;
@@ -50,15 +74,17 @@ export interface StreamTurnOptions {
   messages: Anthropic.Beta.BetaMessageParam[];
   tools?: AgentTool<never>[];
   maxTokens?: number;
-  /** Cap on tool round-trips per user turn. */
+  /** Cap on model round-trips per user turn. */
   maxIterations?: number;
   signal?: AbortSignal;
   /** Called once with latency data when the turn completes. */
   onLatency?: (l: TurnLatency) => void;
+  /** Tests only: replace the SDK call. */
+  streamer?: Streamer;
 }
 
 export interface TurnResult {
-  /** All assistant text produced this turn (may span several tool iterations). */
+  /** The text the learner heard this turn (may span a lookup round-trip). */
   text: string;
   /** The messages appended during this turn (assistant + tool results), for callers that keep history. */
   appended: Anthropic.Beta.BetaMessageParam[];
@@ -68,22 +94,25 @@ export interface TurnResult {
 
 /**
  * Run one agent turn, yielding text deltas as they stream, executing tools between iterations.
- * The generator's return value carries the full text and appended messages.
+ * The generator's return value carries the spoken text and appended messages.
  */
 export async function* streamTurn(opts: StreamTurnOptions): AsyncGenerator<string, TurnResult, void> {
   const tools = opts.tools ?? [];
   const byName = new Map(tools.map((t) => [t.definition.name, t] as const));
+  const streamer = opts.streamer ?? defaultStreamer;
   const messages = [...opts.messages];
   const appended: Anthropic.Beta.BetaMessageParam[] = [];
   let fullText = "";
   let stopReason: string | null = null;
+  /** Set once a state-changing tool has run after the reply was complete: later text is dropped. */
+  let silenced = false;
   const maxIterations = opts.maxIterations ?? 4;
   const t0 = performance.now();
-  const latency: TurnLatency = { ttftMs: -1, totalMs: 0, iterations: 0, cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 0, outputTokens: 0 };
+  const latency: TurnLatency = { ttftMs: -1, totalMs: 0, iterations: 0, cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 0, outputTokens: 0, suppressedChars: 0, thinkingChars: 0, toolsBeforeSpeech: false };
 
   for (let i = 0; i < maxIterations; i++) {
     latency.iterations += 1;
-    const stream = anthropic.beta.messages.stream(
+    const stream = streamer(
       {
         model: opts.spec.model,
         max_tokens: opts.maxTokens ?? 2048,
@@ -96,24 +125,40 @@ export async function* streamTurn(opts: StreamTurnOptions): AsyncGenerator<strin
       { signal: opts.signal },
     );
 
+    let spokeThisIteration = false;
     for await (const event of stream) {
-      if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
-        if (latency.ttftMs < 0) latency.ttftMs = Math.round(performance.now() - t0);
-        fullText += event.delta.text;
-        yield event.delta.text;
+      if (event.type !== "content_block_delta" || !("delta" in event) || event.delta.type !== "text_delta") continue;
+      const delta = event.delta.text;
+      if (silenced) {
+        latency.suppressedChars += delta.length;
+        continue;
       }
+      if (latency.ttftMs < 0) latency.ttftMs = Math.round(performance.now() - t0);
+      if (!spokeThisIteration && fullText && !/\s$/.test(fullText) && !/^\s/.test(delta)) {
+        // Speech resumed after a lookup round-trip: keep the segments from running together.
+        fullText += " ";
+        yield " ";
+      }
+      spokeThisIteration = true;
+      fullText += delta;
+      yield delta;
     }
     const message = await stream.finalMessage();
     stopReason = message.stop_reason;
+    // Diagnostics for a slow first word: private reasoning, and bookkeeping done before any speech.
+    for (const b of message.content) if (b.type === "thinking" && typeof (b as { thinking?: string }).thinking === "string") latency.thinkingChars = (latency.thinkingChars ?? 0) + (b as { thinking: string }).thinking.length;
+    if (!fullText && message.content.some((b) => b.type === "tool_use")) latency.toolsBeforeSpeech = true;
     latency.cacheReadTokens += message.usage.cache_read_input_tokens ?? 0;
     latency.cacheWriteTokens += message.usage.cache_creation_input_tokens ?? 0;
     latency.inputTokens += message.usage.input_tokens;
     latency.outputTokens += message.usage.output_tokens;
 
     if (message.stop_reason === "refusal") {
-      const fallbackText = "I'm not able to go into that here. Let's get back to the lesson.";
-      fullText += (fullText ? " " : "") + fallbackText;
-      yield fallbackText;
+      if (!silenced) {
+        const fallbackText = "I'm not able to go into that here. Let's get back to the lesson.";
+        fullText += (fullText ? " " : "") + fallbackText;
+        yield fallbackText;
+      }
       break;
     }
 
@@ -127,6 +172,7 @@ export async function* streamTurn(opts: StreamTurnOptions): AsyncGenerator<strin
     if (!toolUses.length) break;
 
     const results: Anthropic.Beta.BetaToolResultBlockParam[] = [];
+    let anyError = false;
     for (const use of toolUses) {
       const tool = byName.get(use.name);
       let content: string;
@@ -138,11 +184,18 @@ export async function* streamTurn(opts: StreamTurnOptions): AsyncGenerator<strin
         content = err instanceof Error ? err.message : String(err);
         isError = true;
       }
+      anyError ||= isError;
+      // Bookkeeping after a complete reply ends the turn's speech. Bookkeeping before the question has been asked does not: the model still owes the learner that question.
+      if (tool?.endsSpeech === "always" && fullText) silenced = true;
+      if (tool?.endsSpeech === "after-question" && /\?/.test(fullText)) silenced = true;
       results.push({ type: "tool_result", tool_use_id: use.id, content, is_error: isError || undefined });
     }
     const resultTurn: Anthropic.Beta.BetaMessageParam = { role: "user", content: results };
     messages.push(resultTurn);
     appended.push(resultTurn);
+
+    // Bookkeeping done and nothing went wrong: the turn is over. An error earns one silent pass to fix it.
+    if (silenced && !anyError) break;
   }
 
   latency.totalMs = Math.round(performance.now() - t0);
