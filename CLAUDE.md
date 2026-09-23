@@ -9,7 +9,7 @@ agents and a Hume EVI custom-language-model endpoint; a Vite/React app is the pa
 - `apps/server/src/agents/` — one file per agent (`curriculum`, `profiler`, `tutor`, `assessor`) plus `base.ts` (prompt assembly + streaming tool loop).
 - `apps/server/src/orchestrator/session.ts` — deterministic state machine; the only place phase transitions and persistence happen.
 - `apps/server/src/voice/` — voice. Browser path: `live.ts` (WebSocket per session: mic audio in, spoken reply out, barge-in), `stt-assemblyai.ts` (streaming speech-to-text with end-of-turn detection), `tts-hume.ts` (Octave, per sentence), `sentence-chunker.ts`, `pcm.ts`. Hume EVI path: `clm.ts` (SSE endpoint Hume calls), `hume.ts` (tokens, config creation). Provider specifics stay in the adapters; the turn loop lives in `live.ts`.
-- `apps/server/src/ingest/` — file -> text -> heading-aware chunks -> BM25 index. `ingest/media/` handles pptx, video (yt-dlp), podcasts (RSS), speech-to-text, and web pages; `media/sources.ts` is the single entry point.
+- `apps/server/src/ingest/` — file -> text -> heading-aware chunks -> BM25 index. `extract.ts` dispatches on file type (pdf, docx, epub, odt, rtf, html, text, zip) and refuses anything else by name with the conversion to run; `documents.ts` holds the markup readers and the shared text helpers; `ocr.ts` reads page scans through the model. `ingest/media/` handles pptx, video (yt-dlp), podcasts (RSS), speech-to-text, and web pages; `media/sources.ts` is the single entry point.
 - `skills/*/SKILL.md` — agent competencies, loaded at runtime into system prompts. Tune behaviour here before touching code.
 - `apps/web/` — React UI (text mode works with only an Anthropic key; voice needs Hume).
 - `data/` — file-backed JSON store (gitignored). One JSON per course/learner/session/report.
@@ -25,6 +25,7 @@ agents and a Hume EVI custom-language-model endpoint; a Vite/React app is the pa
 - Grounding is a product requirement: the tutor must not assert facts outside the course material. The assessor audits this. Keep it that way.
 - Latency is a product requirement for the live tutor: stream every delta, keep bookkeeping and thinking out of the speaking call, keep the cached prefix stable, gate effort/thinking params on the model (`reasoningParams`). Every assistant turn records `latency`; see `docs/LATENCY.md`.
 - External binaries (`yt-dlp`, `whisper`) and STT APIs are optional and must fail with a clear message, never crash ingestion of other sources.
+- An unreadable upload must never become text. `extract.ts` refuses a binary rather than reading it as UTF-8, because mojibake looks enough like prose that the curriculum agent will build a course from it. Every refusal names the conversion that produces a readable file.
 - Tests are pure (no network, no binaries). `npm test` must pass before pushing.
 
 ## Commands

@@ -71,6 +71,18 @@ Do this three times with different personas (novice who needs teaching first, co
 
 ## Stage 2: media ingestion
 
+**File formats.** Read directly: `.pdf`, `.docx`, `.epub`, `.odt`, `.rtf`, `.html`, `.md`, `.txt` and
+anything else text-like. Read by the model: `.png`, `.jpg`, `.gif`, `.webp` — scans and photographs of
+pages, transcribed verbatim with `[illegible]` where the scan is unreadable, so check a scanned course
+in "Source passages" before teaching from it. Unpacked: `.zip`, whose readable members are read in name
+order, each under a heading of its own filename. Slides and audio/video are handled separately, below.
+
+Anything else is refused by name with the conversion to run (`.doc` -> save as `.docx`, `.pages` ->
+export to PDF, `.mobi` -> convert to EPUB, `.tif` -> save as `.png`). A PDF with no text layer is a
+scan: it is refused with a pointer to exporting its pages as images. An unrecognised binary is refused
+rather than read as text.
+
+
 ```bash
 pip install yt-dlp                         # or brew install yt-dlp
 npm run ingest -- --title "Deck" ./some-lecture.pptx

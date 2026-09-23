@@ -8,7 +8,12 @@ import { extractPptx, slidesToText } from "./pptx.js";
 import { downloadToTemp, fetchFeed, isAudioUrl } from "./podcast.js";
 import { isAudioOrVideo, transcribeFile } from "./transcribe.js";
 import { downloadAudio, fetchCaptions, mediaInfo, ytDlpAvailable } from "./ytdlp.js";
-import { extractTextFromBuffer, normalize } from "../extract.js";
+import { extractTextFromBuffer } from "../extract.js";
+import { htmlToText, titleFromHtml } from "../documents.js";
+
+// These moved to ingest/documents.ts, which uploads and URLs both read from; kept exported here
+// because this module is the documented entry point for turning a source into text.
+export { htmlToText, titleFromHtml };
 
 export type SourceKind = "file" | "video" | "podcast" | "audio" | "slides" | "url";
 
@@ -156,30 +161,6 @@ async function transcribeRemoteAudio(audioUrl: string, name: string, opts: Sourc
   } finally {
     cleanup();
   }
-}
-
-export function titleFromHtml(html: string): string | undefined {
-  return html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]?.replace(/\s+/g, " ").trim();
-}
-
-export function htmlToText(html: string): string {
-  return normalize(
-    html
-      .replace(/<head[\s\S]*?<\/head>/i, " ")
-      .replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>|<nav[\s\S]*?<\/nav>|<footer[\s\S]*?<\/footer>/gi, " ")
-      .replace(/<(h[1-6])[^>]*>/gi, (_m, h: string) => `\n\n${"#".repeat(Number(h[1]))} `)
-      .replace(/<\/(p|div|li|h[1-6]|tr|br)>/gi, "\n\n")
-      .replace(/<[^>]+>/g, " ")
-      .replace(/&nbsp;/g, " ")
-      .replace(/&amp;/g, "&")
-      .replace(/&lt;/g, "<")
-      .replace(/&gt;/g, ">")
-      .replace(/&quot;/g, '"')
-      .replace(/&#39;/g, "'")
-      .split("\n")
-      .map((l) => l.trim())
-      .join("\n"),
-  );
 }
 
 /**

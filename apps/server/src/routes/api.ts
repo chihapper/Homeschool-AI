@@ -7,6 +7,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { ingestCourse } from "../agents/curriculum-agent.js";
 import { documentFromUpload, documentsFromUrl, type SourceDocument } from "../ingest/media/sources.js";
+import { UnsupportedFileError } from "../ingest/extract.js";
 import { annotateLastTurn, createSession, endSession, getSession, latencySummary, respond } from "../orchestrator/session.js";
 import { courses, learners, reports, sessions } from "../store/index.js";
 import { config, getSettings, MODEL_OPTIONS, REPO_ROOT, resetSettings, RuntimeSettingsSchema, updateSettings } from "../config.js";
@@ -114,21 +115,30 @@ export function registerApiRoutes(app: FastifyInstance): void {
       .map((n) => ({ name: n, size: fs.statSync(path.join(SAMPLES_DIR, n)).size }));
   });
 
-  /** Multipart: files (pdf, docx, pptx, md, txt, mp3, m4a, mp4, wav) plus optional `title` and `urls` (newline-separated). */
+  /** Multipart: files (documents, slides, scans, audio, video) plus optional `title` and `urls` (newline-separated). */
   app.post("/api/courses/upload", async (req, reply) => {
     const docs: SourceDocument[] = [];
     let title: string | undefined;
     const urls: string[] = [];
+    // A file we cannot read is the parent's problem to fix, not a server error: remember the first one
+    // and answer with it, but keep consuming the multipart stream so the request finishes cleanly.
+    let unreadable: string | undefined;
     for await (const part of req.parts()) {
       if (part.type === "file") {
         const buf = await part.toBuffer();
-        docs.push(await documentFromUpload(buf, part.filename, { onProgress: (m) => req.log.info(m) }));
+        try {
+          docs.push(await documentFromUpload(buf, part.filename, { onProgress: (m) => req.log.info(m) }));
+        } catch (err) {
+          if (!(err instanceof UnsupportedFileError)) throw err;
+          unreadable ??= err.message;
+        }
       } else if (part.fieldname === "title" && typeof part.value === "string") {
         title = part.value;
       } else if (part.fieldname === "urls" && typeof part.value === "string") {
         urls.push(...part.value.split(/\s+/).filter(Boolean));
       }
     }
+    if (unreadable) return reply.code(415).send({ error: unreadable });
     for (const u of urls) docs.push(...(await documentsFromUrl(u, { onProgress: (m) => req.log.info(m) })));
     if (!docs.length) return reply.code(400).send({ error: "Provide at least one file or URL." });
     const course = await ingestCourse(docs, { titleHint: title, onProgress: (m) => req.log.info(m) });
@@ -148,7 +158,12 @@ export function registerApiRoutes(app: FastifyInstance): void {
       } catch (err) {
         return reply.code(400).send({ error: err instanceof Error ? err.message : String(err) });
       }
-      docs.push(await documentFromUpload(fs.readFileSync(file), path.basename(file), { onProgress: (m) => req.log.info(m) }));
+      try {
+        docs.push(await documentFromUpload(fs.readFileSync(file), path.basename(file), { onProgress: (m) => req.log.info(m) }));
+      } catch (err) {
+        if (!(err instanceof UnsupportedFileError)) throw err;
+        return reply.code(415).send({ error: err.message });
+      }
     }
     for (const u of body.urls ?? []) docs.push(...(await documentsFromUrl(u, { episodes: body.episodes, lang: body.lang, onProgress: (m) => req.log.info(m) })));
     const course = await ingestCourse(docs, { titleHint: body.title, onProgress: (m) => req.log.info(m) });

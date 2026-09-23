@@ -57,7 +57,7 @@ export function CoursesPage({ courses, onChange }: { courses: Course[]; onChange
         <p className="muted">Upload lesson plans, chapters, worksheets, PowerPoint lectures, or recordings (PDF, DOCX, PPTX, Markdown, text, MP3, M4A, MP4), or paste links to YouTube or TED videos, a podcast feed, or a web page. The Curriculum Agent turns them into lessons and concepts the tutor teaches from, without adding outside content.</p>
         <div className="row">
           <label>Course title (optional)<input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Life Science 7" /></label>
-          <label>Files<input type="file" multiple accept=".pdf,.docx,.pptx,.md,.txt,.mp3,.m4a,.mp4,.wav,.webm" onChange={(e) => setFiles(Array.from(e.target.files ?? []))} /></label>
+          <label>Files<input type="file" multiple accept=".pdf,.docx,.epub,.odt,.rtf,.html,.htm,.md,.txt,.csv,.pptx,.png,.jpg,.jpeg,.gif,.webp,.zip,.mp3,.m4a,.mp4,.wav,.webm" onChange={(e) => setFiles(Array.from(e.target.files ?? []))} /></label>
         </div>
         <div className="row" style={{ marginTop: 8 }}>
           <label style={{ flex: 1 }}>Links (one per line)<textarea value={urls} onChange={(e) => setUrls(e.target.value)} rows={3} placeholder={"https://www.youtube.com/watch?v=...\nhttps://www.ted.com/talks/...\nhttps://example.com/podcast/feed.xml"} /></label>
