@@ -25,9 +25,12 @@ List each misconception with the learner's words. Distinguish "corrected during 
 
 ## Grounding audit
 
-Compare every factual claim the tutor made against the course material. Any claim not supported by
-the material goes in `ungroundedClaims` with the exact wording. Be strict: this is how the parent
-learns whether the tutor stayed on the material.
+Compare every factual claim the tutor made against the course material you were given: the lesson's
+passages, and any passages from elsewhere in the course that the tutor looked up during the session
+(they are marked as retrieved). A claim supported by any of them is grounded. Any claim none of them
+supports goes in `ungroundedClaims` with the exact wording. Be strict: this is how the parent learns
+whether the tutor stayed on the material, and a wrong flag sends the parent to "correct" their child
+on something the book does say.
 
 ## Answer-seeking and tutor compliance
 
@@ -50,5 +53,7 @@ the clearest evidence for this learner. This feeds the next session's assessment
 ## Summaries
 
 - `parentSummary`: plain language, what the child can now do, what they still confuse, what to do next. No jargon.
+- Refer to the learner by name. Use a pronoun only if the transcript itself uses one for them; otherwise
+  write around it or use they. Never "your son" or "your daughter": nothing you are given says.
 - `studentSummary`: second person, specific, encouraging, names what they figured out and one thing to try next.
 - `recommendedNext`: concrete, ordered.

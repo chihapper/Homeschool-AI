@@ -60,3 +60,13 @@ chunk is ready sooner.
 
 - **Backchannel filler**: emit "Hmm," or "Okay," immediately while Claude thinks. Cheap to add in `clm.ts`; risks sounding canned. Try only if measured TTFT stays above 1 s.
 - **Speculative reply**: start generating the most likely next tutor turn while the student is still speaking, using Hume's interim transcripts. Larger change; only worth it if the model is the bottleneck after everything above.
+
+## The wait a fast talker sees
+
+A turn is two calls: the reply the student hears, then the reflect pass (notes and the phase change),
+which runs while they listen and takes 4 to 19 s at medium effort (measured 2026-09-24, median about
+7 s). The next turn waits for that pass to land before it is composed (`settleReflection`), so a student
+who answers within a few seconds waits the remainder, on top of the usual time to first word. In text
+this did not bite; in voice, where a one-word answer is normal, it will. Options when it does: lower
+`reflectEffort`, or compose the next reply against the session as it stands and let a late phase change
+apply one turn later.

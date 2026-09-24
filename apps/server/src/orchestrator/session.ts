@@ -142,6 +142,9 @@ export function applyAdvance(session: Session, course: Course, lesson: Lesson, t
       return `OK: phase is now inquire (${rationale}).`;
     case "assess":
       if (session.phase !== "inquire" && session.phase !== "teach") return `Refused: cannot move to assess from ${session.phase}.`;
+      // Nothing recorded means nothing was taught: a session was seen moving to assess on a concept it had
+      // not started (2026-09-24), and then noting its own mistake.
+      if (!obsForConcept.some((o) => o.kind !== "engagement")) return `Refused: nothing is recorded for ${conceptId} yet. Teach it and record what the learner shows before assessing.`;
       session.phase = "assess";
       session.pendingDirectives.push("Now in ASSESS: ask for demonstrations, one per turn, and record at least two observations before advancing. No hints in this phase.");
       return `OK: phase is now assess (${rationale}).`;
@@ -182,11 +185,33 @@ export async function settleReflection(sessionId: string): Promise<void> {
   await reflections.get(sessionId)?.catch(() => {});
 }
 
+/** Sessions with a turn being composed right now. A second message for the same session must wait. */
+const inFlight = new Set<string>();
+
 /**
  * Handle one learner utterance and stream the agent's reply. Persists transcript, observations,
  * and phase changes. `userText` may be empty for the opening turn (agent speaks first).
+ *
+ * One turn at a time per session: two overlapping requests each read the session, and the second to
+ * finish overwrites the first, which is how a transcript came to hold the same student line twice with no
+ * reply between (2026-09-24).
  */
 export async function* respond(
+  sessionId: string,
+  userText: string,
+  expressions?: string[],
+  signal?: AbortSignal,
+): AsyncGenerator<string, RespondResult, void> {
+  if (inFlight.has(sessionId)) throw new Error("The tutor is still answering the previous message. Wait for that reply, then send again.");
+  inFlight.add(sessionId);
+  try {
+    return yield* respondTurn(sessionId, userText, expressions, signal);
+  } finally {
+    inFlight.delete(sessionId);
+  }
+}
+
+async function* respondTurn(
   sessionId: string,
   userText: string,
   expressions?: string[],
@@ -258,14 +283,19 @@ export async function* respond(
         if (!checked.success) return `Refused: incomplete observation (${checked.error.issues.map((i) => i.path.join(".")).join(", ") || "empty"}). Give conceptId, kind, evidence and note.`;
         const o = checked.data;
         // The reflect pass sees the whole exchange each turn, so it sometimes re-files evidence it already
-        // recorded. Duplicates would also inflate the two-observation gate on advancing, so drop them here.
-        const already = session.observations.some((x) => x.conceptId === o.conceptId && x.evidence.trim() === o.evidence.trim());
+        // recorded, usually re-quoted a little differently. Duplicates would also inflate the two-observation
+        // gate on advancing, so drop them here.
+        const already = session.observations.some((x) => x.conceptId === o.conceptId && sameEvidence(x.evidence, o.evidence));
         if (already) return `Already recorded that evidence for ${o.conceptId}; nothing added.`;
         session.observations.push(o);
         return `Recorded (${session.observations.filter((x) => x.conceptId === o.conceptId).length} observations for ${o.conceptId}).`;
       },
       onAdvance: (to, rationale) => applyAdvance(session, course, lesson, to, rationale),
       onThread: (thread) => setOpenThread(session, thread, priorThreadTurns),
+      // Remember what the tutor read, from anywhere in the course, so the assessor can see it too.
+      onLookup: (ids) => {
+        session.retrievedChunkIds = [...new Set([...(session.retrievedChunkIds ?? []), ...ids])];
+      },
     };
     result = yield* drain(tutorTurn(ctx, signal));
 
@@ -353,10 +383,35 @@ export function annotateLastTurn(sessionId: string, patch: Partial<TurnLatency>)
   sessions.put(session);
 }
 
-/** End the session and, when a lesson was taught, produce the mastery report. */
+/**
+ * Two observations are the same evidence if one quotes the other, allowing for re-quoting: case, punctuation,
+ * an ellipsis, a trimmed or extended quotation.
+ */
+export function sameEvidence(a: string, b: string): boolean {
+  const key = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const ka = key(a);
+  const kb = key(b);
+  if (!ka || !kb) return ka === kb;
+  if (ka === kb) return true;
+  const [short, long] = ka.length <= kb.length ? [ka, kb] : [kb, ka];
+  return short.length >= 24 && long.includes(short.slice(0, 40));
+}
+
+/**
+ * End the session and, when a lesson was taught, produce the mastery report.
+ *
+ * Waits for a reflect pass still running for this session: it saves the session when it finishes, and
+ * without the wait it saved an older copy over the closed one (2026-09-24: a session with a report was
+ * left in phase "assess" and offered for resumption).
+ */
 export async function endSession(sessionId: string): Promise<{ session: Session; report?: MasteryReport }> {
+  await settleReflection(sessionId);
   const session = sessions.require(sessionId);
   const { learner, course, lesson } = resolve(session);
+  if (session.phase === "complete") {
+    const existing = reports.get(sessionId);
+    if (existing) return { session, report: existing };
+  }
   session.phase = "complete";
   session.endedAt = new Date().toISOString();
   sessions.put(session);

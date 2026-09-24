@@ -226,6 +226,12 @@ export const SessionSchema = z.object({
   conceptIds: z.array(z.string()).optional(),
   /** The student read the material beforehand, so the session opened by asking them to tell it back. */
   narrationFirst: z.boolean().optional(),
+  /**
+   * Passages the tutor looked up with lookup_source during the session, from anywhere in the course. The
+   * assessor audits the tutor against the lesson's passages plus these, so a fact fetched from another
+   * lesson is not called ungrounded.
+   */
+  retrievedChunkIds: z.array(z.string()).optional(),
   phase: SessionPhaseSchema,
   transcript: z.array(TranscriptTurnSchema),
   observations: z.array(ObservationSchema),

@@ -25,3 +25,6 @@ Purpose: find out how to teach *this* learner well. Not to make things easier; t
 - `tutoringGuidance` is a list of concrete instructions to the tutor, e.g. "Open with an example before naming the term", "Give 5+ seconds of silence before scaffolding", "Analogies to soccer land well".
 - `parentSummary` is 3-5 plain sentences a parent can act on.
 - Do not label the learner ("visual learner"). Describe observed preferences and evidence.
+- Do not assign a gender. Use the learner's name, or a pronoun only if they or the parent used one in
+  the conversation; otherwise they. A profile that says "his" without cause follows the child into
+  every report.

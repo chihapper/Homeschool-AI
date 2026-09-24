@@ -38,12 +38,15 @@ describe("progress: where the learner stands across sessions", () => {
     expect(p.latestParentSummary).toBe("summary 2026-09-08");
   });
 
-  it("does not let a session that never reached a concept erase the level earned earlier", () => {
-    const notReached = mastery("consuls", 0, { nextStep: "Not reached this session." });
-    expect(wasAssessed(notReached)).toBe(false);
-    expect(wasAssessed(mastery("consuls", 0, { evidence: ["could not say what a consul was"] }))).toBe(true);
+  it("does not let a session that never reached a concept erase the level earned earlier, or show it as a zero", () => {
+    const notReached = mastery("consuls", 0, { evidence: ["Not reached. The session ended before this concept."], nextStep: "Not reached this session." });
+    expect(wasAssessed(notReached)).toBe(false); // the assessor's scale defines 0 as "no evidence"
+    expect(wasAssessed(mastery("consuls", 1))).toBe(true);
     const p = buildProgress([report("2026-09-01", [mastery("consuls", 3)]), report("2026-09-08", [mastery("senate", 1), notReached])], course, "maya", "c1")!;
     expect(p.concepts.find((c) => c.conceptId === "consuls")).toMatchObject({ level: 3, asOf: "2026-09-01", previousLevel: undefined });
+    // A concept never reached in any session does not appear at all.
+    const q = buildProgress([report("2026-09-08", [mastery("senate", 2), notReached])], course, "maya", "c1")!;
+    expect(q.concepts.map((c) => c.conceptId)).toEqual(["senate"]);
   });
 
   it("lists only the latest session's misconceptions as the things to revisit", () => {

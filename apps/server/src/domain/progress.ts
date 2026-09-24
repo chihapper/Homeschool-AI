@@ -44,12 +44,12 @@ export interface ProgressSummary {
 }
 
 /**
- * The assessor writes an entry for every concept the session walked, level 0 with no evidence when the
- * session ended before reaching it. That is "not assessed", not "lost", so it must not overwrite a level
- * earned earlier.
+ * The assessor writes an entry for every concept the session walked, level 0 when the session ended before
+ * reaching it (its scale defines 0 as "no evidence"). That is "not assessed", not "lost": it must not
+ * overwrite a level earned earlier, and it must not appear to a parent as a failing grade.
  */
 export function wasAssessed(c: ConceptMastery): boolean {
-  return c.level > 0 || c.evidence.length > 0 || c.misconceptions.length > 0;
+  return c.level > 0;
 }
 
 const counts = (r: MasteryReport): Counts => ({
