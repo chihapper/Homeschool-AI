@@ -29,7 +29,7 @@
  */
 import { config } from "../config.js";
 import type { Concept, Course, Learner, Lesson, Observation, Session, SessionPhase } from "../domain/types.js";
-import { ChunkIndex } from "../ingest/retrieval.js";
+import { ChunkIndex, searchWithLearner } from "../ingest/retrieval.js";
 import { buildSystem, prewarm, streamTurn, transcriptToMessages, type AgentTool, type AgentSpec, type TurnResult } from "./base.js";
 import { openThread, THREAD_PATIENCE, THREAD_PREFIX } from "../orchestrator/notes.js";
 import { walkedConceptIds } from "../domain/focus.js";
@@ -199,7 +199,8 @@ export function tutorTools(ctx: TutorContext, mode: "speak" | "reflect" = "speak
     definition: {
       name: "lookup_source",
       description:
-        "Search the course material for passages about a topic. Call this whenever the learner asks something not covered by the current concept's passages, or before stating any fact you are not certain is in the material.",
+        "Search the course material for passages about a topic. Call this whenever the learner asks something not covered by the current concept's passages, or before stating any fact you are not certain is in the material. " +
+        "The learner's latest words are searched as well, so a thing they named is found even if your query describes it differently.",
       input_schema: {
         type: "object",
         properties: { query: { type: "string", description: "What to look for, in plain words." } },
@@ -209,8 +210,9 @@ export function tutorTools(ctx: TutorContext, mode: "speak" | "reflect" = "speak
       strict: true,
     },
     run: ({ query }) => {
-      const hits = ctx.index.search(query, 4);
-      if (!hits.length) return "No passages in the course material match that. Tell the learner the material does not cover it.";
+      const learnerText = [...ctx.session.transcript].reverse().find((t) => t.role === "user")?.content;
+      const hits = searchWithLearner(ctx.index, query, learnerText);
+      if (!hits.length) return "No passages in the course material match that. Tell the learner the passages you can see do not cover it.";
       ctx.onLookup?.(hits.map((h) => h.chunk.id));
       return hits.map((h) => `<passage id="${h.chunk.id}" heading="${h.chunk.headingPath.join(" > ")}">\n${h.chunk.text}\n</passage>`).join("\n\n");
     },
