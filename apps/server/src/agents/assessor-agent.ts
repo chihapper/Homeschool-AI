@@ -29,7 +29,7 @@ export const assessorAgent: AgentSpec = {
  * the tutor looked up elsewhere in the course during the session. Without the second part, a fact the
  * tutor fetched from another lesson was reported to the parent as invented (2026-09-24).
  */
-export function assessmentMaterial(session: Session, course: Course, lesson: Lesson): { concepts: Concept[]; material: string } {
+export function assessmentMaterial(session: Session, course: Course, lesson: Lesson): { concepts: Concept[]; material: string; wholeCourse: boolean } {
   // Only what the session walked: a concept the parent skipped gets no "not reached" row in the report.
   const walked = new Set(walkedConceptIds(session, course, lesson));
   const concepts = course.concepts.filter((c) => walked.has(c.id));
@@ -50,17 +50,28 @@ export function assessmentMaterial(session: Session, course: Course, lesson: Les
     .filter((id) => !shown.has(id))
     .map((id) => chunkById.get(id))
     .filter((ch): ch is NonNullable<typeof ch> => Boolean(ch));
+  const passage = (ch: (typeof course.chunks)[number]): string => `<passage id="${ch.id}" heading="${ch.headingPath.join(" > ")}">\n${ch.text}\n</passage>`;
   const retrievedBlock = retrieved.length
-    ? `\n\n<retrieved_passages>\nPassages from elsewhere in the same course that the tutor looked up during this session. A claim supported by one of these is grounded.\n${retrieved
-        .map((ch) => `<passage id="${ch.id}" heading="${ch.headingPath.join(" > ")}">\n${ch.text}\n</passage>`)
-        .join("\n")}\n</retrieved_passages>`
+    ? `\n\n<retrieved_passages>\nPassages from elsewhere in the same course that the tutor looked up during this session. A claim supported by one of these is grounded.\n${retrieved.map(passage).join("\n")}\n</retrieved_passages>`
     : "";
-  return { concepts, material: conceptBlocks.join("\n\n") + retrievedBlock };
+  // The rest of the course, when it fits: "the material" a parent means is the whole course, and without it
+  // the assessor told a parent the book does not mention coinage when another lesson does (2026-09-24).
+  for (const ch of retrieved) shown.add(ch.id);
+  const rest = course.chunks.filter((ch) => !shown.has(ch.id));
+  const restChars = rest.reduce((a, ch) => a + ch.text.length, 0);
+  const restBlock =
+    rest.length && restChars <= REST_OF_COURSE_BUDGET_CHARS
+      ? `\n\n<rest_of_course>\nThe remainder of the family's material for this course, for checking the tutor's claims. A claim supported here is grounded too.\n${rest.map(passage).join("\n")}\n</rest_of_course>`
+      : "";
+  return { concepts, material: conceptBlocks.join("\n\n") + retrievedBlock + restBlock, wholeCourse: rest.length === 0 || restBlock.length > 0 };
 }
+
+/** About 50k tokens: a unit-sized course fits; a whole textbook does not, and then only what the tutor read is added. */
+export const REST_OF_COURSE_BUDGET_CHARS = 200_000;
 
 export async function assessSession(args: { session: Session; learner: Learner; course: Course; lesson: Lesson }): Promise<MasteryReport> {
   const { session, learner, course, lesson } = args;
-  const { concepts, material } = assessmentMaterial(session, course, lesson);
+  const { concepts, material, wholeCourse } = assessmentMaterial(session, course, lesson);
   const transcript = session.transcript
     .map((t) => `${t.role === "user" ? learner.name : "Tutor"}${t.expressions?.length ? ` [${t.expressions.join(", ")}]` : ""}: ${t.content}`)
     .join("\n");
@@ -83,7 +94,10 @@ export async function assessSession(args: { session: Session; learner: Learner; 
         role: "user",
         content:
           `Assess this session on lesson "${lesson.title}". Produce one entry in concepts for EVERY concept listed in the material, even if level is 0.\n\n` +
-          "The tutor may draw on any passage in the course, not only this lesson's: the material below holds the lesson's passages and, in <retrieved_passages>, whatever the tutor looked up elsewhere in the course during the session. A claim supported by any of them is grounded; flag only claims none of them support.\n\n" +
+          "The tutor may draw on any passage in the course, not only this lesson's. The material below holds the lesson's passages, then in <retrieved_passages> whatever the tutor looked up elsewhere in the course during the session" +
+          (wholeCourse
+            ? ", then in <rest_of_course> everything else in the course, so you have the family's whole material. A claim supported anywhere in it is grounded; flag only claims nothing in it supports.\n\n"
+            : ". The course is too large to include whole, so you do not have all of it: a claim supported by any passage here is grounded, flag only claims none of them support, and never assert that the material does not say something.\n\n") +
           (session.narrationFirst
             ? `This session opened with ${learner.name} telling back the material unprompted, before the tutor had asked anything. That first exchange is independent evidence: weigh it like any unhinted answer.\n\n`
             : "") +

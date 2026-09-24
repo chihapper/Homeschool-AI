@@ -35,13 +35,12 @@ graded work lives.
 pages, plus column-aware text for the mostly-textual ones.
 **Trigger:** any family whose unit is mostly workbook pages.
 
-## 2. Two things the first Ancient Rome session showed (2026-09-23)
+## 2. What the first Ancient Rome sessions showed (2026-09-23/24)
 
-- **The grounding audit only sees the lesson's own passages.** The assessor gets the walked concepts'
-  source chunks; the tutor's `lookup_source` searches the whole course. So when the tutor endorsed
-  "Latin comes from Latium", which is in lesson 1's material but not in the Government lesson's, the
-  audit flagged it as ungrounded. Fix: log the passages the tutor retrieved during the session and hand
-  them to the assessor alongside the lesson's, or retrieve for each audited claim.
+- **Fixed:** the grounding audit saw only the lesson's own passages and told a parent to correct facts
+  that were in the book. The assessor now audits against the lesson's passages, the passages the tutor
+  looked up (`Session.retrievedChunkIds`), and the rest of the course when it fits 200k characters;
+  above that it is told it does not have everything and must not claim the book is silent.
 - **A narration produces evidence for several concepts at once**, but the phase machine walks one
   concept at a time: the reflect pass filed the student's consul evidence under concept 2 while the
   session was still on concept 1, and the tutor had to come back for concept 1's two observations before

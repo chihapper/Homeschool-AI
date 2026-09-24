@@ -27,7 +27,9 @@ List each misconception with the learner's words. Distinguish "corrected during 
 
 Compare every factual claim the tutor made against the course material you were given: the lesson's
 passages, and any passages from elsewhere in the course that the tutor looked up during the session
-(they are marked as retrieved). A claim supported by any of them is grounded. Any claim none of them
+(marked as retrieved), and the rest of the course when it fits. A claim supported by any of them is
+grounded. If you were told the course was too large to include whole, never assert that the material does
+not say something: say only that the passages you were given do not. Any claim none of them
 supports goes in `ungroundedClaims` with the exact wording. Be strict: this is how the parent learns
 whether the tutor stayed on the material, and a wrong flag sends the parent to "correct" their child
 on something the book does say.
