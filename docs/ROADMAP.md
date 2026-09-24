@@ -4,6 +4,9 @@ What is deliberately not built yet, each with the trigger that would start it an
 step. The scope this sits on is in [ARCHITECTURE.md](ARCHITECTURE.md): one unit of the family's own
 material at a time, a Socratic session, a report to the parent; not a curriculum, a scheduler, or a grader.
 
+Every item here, plus the smaller fixes from the first real sessions, is tracked as a GitHub issue
+(chihapper/Homeschool-AI issues 1 to 14, filed 2026-09-24); the issues carry the detail, this file the shape.
+
 ## 1. Workbook and activity pages (first)
 
 Much homeschool material is activity pages, not prose: matching, cut-and-paste, fill-in-the-blank, map
