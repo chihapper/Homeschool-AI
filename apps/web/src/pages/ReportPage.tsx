@@ -5,10 +5,10 @@ const LEVELS = ["No evidence", "Recalls", "Explains", "Applies", "Extends"];
 
 /** What changed since the previous time this concept was assessed, in words a parent reads at a glance. */
 function trend(c: ConceptProgress): string {
-  if (c.previousLevel === undefined) return "first time";
+  if (c.previousLevel === undefined) return "new";
   if (c.level > c.previousLevel) return `up from ${c.previousLevel}`;
   if (c.level < c.previousLevel) return `down from ${c.previousLevel}`;
-  return `same as before (${c.previousLevel})`;
+  return `same (${c.previousLevel})`;
 }
 
 export function ReportPage({ report, courses, learners }: { report: Report | null; courses: Course[]; learners: Learner[] }) {
@@ -83,6 +83,7 @@ export function ReportPage({ report, courses, learners }: { report: Report | nul
               <span className="stat"><strong>{plural(progress.latest.answerSeekingTurns, "turn")}</strong> asking for the answer last session · {progress.totals.answerSeekingTurns} in all</span>
             </div>
             <h3>Mastery by concept</h3>
+            <p className="muted small">Levels: 1 recalls · 2 explains · 3 applies to a new case · 4 extends or teaches back. "Since last time" compares with the previous session that assessed that concept; "new" means this is the first. Concepts a session did not reach are not listed.</p>
             <table className="table">
               <thead><tr><th>Concept</th><th>Level</th><th>Since last time</th><th>Still confuses</th><th>Assessed</th></tr></thead>
               <tbody>

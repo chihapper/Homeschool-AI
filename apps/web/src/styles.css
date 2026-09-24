@@ -107,6 +107,9 @@ details summary { cursor: pointer; }
 .profile p { margin: 6px 0; }
 
 /* Focus: what the parent has unticked stays visible but dimmed, so a skip is easy to undo. */
-.skipped > summary, .concept.skipped { opacity: 0.55; }
+.lesson-row { display: flex; align-items: flex-start; gap: 8px; }
+.lesson-row > .focus-toggle { margin-top: 10px; }
+.lesson-row > details { flex: 1; min-width: 0; }
+.lesson-row.skipped > details > summary, .concept.skipped { opacity: 0.55; }
 .focus-toggle { cursor: pointer; }
 .focus-toggle input { vertical-align: middle; margin: 0 2px 0 0; }

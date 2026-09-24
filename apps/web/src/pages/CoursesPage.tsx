@@ -134,11 +134,13 @@ function CourseCard({ course: c, onDelete, onChange }: { course: Course; onDelet
       {keptLessons.length === 0 && <p className="warn small">Every lesson is skipped. Keep at least one concept somewhere, or no session can start on this course.</p>}
       {focusErr && <p className="error small">Could not save focus: {focusErr}</p>}
       {c.lessons.map((l) => (
-        <details key={l.id} className={`lesson${lessonSkipped(l.id) ? " skipped" : ""}`}>
+        // The tick sits beside the expandable header, not inside it, so ticking never opens or closes the lesson.
+        <div key={l.id} className={`lesson-row${lessonSkipped(l.id) ? " skipped" : ""}`}>
+          <label className="focus-toggle">
+            <input type="checkbox" checked={!lessonSkipped(l.id)} disabled={saving} onChange={() => toggleLesson(l.id)} title={lessonSkipped(l.id) ? "Skipped: tick to teach this lesson" : "Taught: untick to skip this lesson"} />
+          </label>
+          <details className="lesson">
           <summary>
-            <label className="focus-toggle" onClick={(e) => e.stopPropagation()}>
-              <input type="checkbox" checked={!lessonSkipped(l.id)} disabled={saving} onChange={() => toggleLesson(l.id)} title={lessonSkipped(l.id) ? "Skipped: tick to teach this lesson" : "Taught: untick to skip this lesson"} />
-            </label>{" "}
             <strong>{l.title}</strong> <span className="muted small">· {l.conceptIds.length} concepts{lessonSkipped(l.id) ? " · skipped" : ""} · id {l.id}</span>
           </summary>
           <div className="indent">
@@ -165,7 +167,8 @@ function CourseCard({ course: c, onDelete, onChange }: { course: Course; onDelet
               );
             })}
           </div>
-        </details>
+          </details>
+        </div>
       ))}
       <details onToggle={(e) => (e.target as HTMLDetailsElement).open && loadChunks()}>
         <summary className="muted">Source passages (verbatim, what the tutor is allowed to assert)</summary>

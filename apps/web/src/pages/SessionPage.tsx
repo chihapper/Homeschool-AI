@@ -138,7 +138,8 @@ function SessionInner({ courses, learners, health, session, onSession, onReport,
   // Sessions that can be resumed (left without assessing, or a browser refresh).
   useEffect(() => {
     if (session) return;
-    api.sessions().then((list) => setOpen(list.filter((s) => s.phase !== "complete"))).catch(() => setOpen([]));
+    // A session with a report is finished whatever its phase says (older records predate the fix that closes them).
+    api.sessions().then((list) => setOpen(list.filter((s) => s.phase !== "complete" && !s.hasReport))).catch(() => setOpen([]));
   }, [session]);
 
   useEffect(() => {
@@ -476,7 +477,7 @@ function SessionInner({ courses, learners, health, session, onSession, onReport,
             <button className="primary" disabled={busy || ending} onClick={end}>{ending ? "Assessing..." : "End session & assess"}</button>
           </div>
         </div>
-        {ending && <p className="muted">The assessor is reading the whole transcript with <code>{health?.model}</code>. This takes one to three minutes at high effort.</p>}
+        {ending && <p className="muted">The assessor is reading the whole transcript{health?.model ? <> with <code>{health.model}</code></> : null}. This takes one to three minutes at high effort.</p>}
         {evi.error && mode === "evi" && <p className="error">{evi.error.message}</p>}
         {mode === "evi" && humeError && <p className="error">Hume: {humeError}</p>}
         {mode === "evi" && evi.status.value === "disconnected" && !humeError && !evi.error && <p className="warn small">Hume closed the voice connection. Leave and begin again, or switch to the browser voice mode.</p>}
