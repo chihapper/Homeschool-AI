@@ -1,7 +1,7 @@
 /**
  * Text-mode tutoring session in the terminal (no Hume needed). Good for tuning skills.
  *
- *   npm run chat -- --learner "Maya" --course <courseId> [--lesson <lessonId>] [--skip-intake]
+ *   npm run chat -- --learner "Maya" --course <courseId> [--lesson <lessonId>] [--skip-intake] [--narration-first]
  *   npm run chat -- --learner-id <id> --course <courseId>
  */
 import readline from "node:readline/promises";
@@ -33,7 +33,7 @@ async function main(): Promise<void> {
     courseId = all[0].id;
     console.log(`Using course: ${all[0].title} (${courseId})`);
   }
-  const session = createSession({ learnerId, courseId, lessonId: opt("--lesson"), skipIntake: args.includes("--skip-intake") });
+  const session = createSession({ learnerId, courseId, lessonId: opt("--lesson"), skipIntake: args.includes("--skip-intake"), narrationFirst: args.includes("--narration-first") });
   console.log(`Session ${session.id} · phase=${session.phase}. Type /end to finish, /state to inspect.\n`);
 
   const rl = readline.createInterface({ input: stdin, output: stdout });

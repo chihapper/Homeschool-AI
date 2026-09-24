@@ -105,3 +105,11 @@ details summary { cursor: pointer; }
 .chunk { margin: 10px 0; }
 .passage { white-space: pre-wrap; font-family: inherit; font-size: 13px; background: #f7f5ef; padding: 8px 10px; border-radius: 8px; margin: 4px 0; }
 .profile p { margin: 6px 0; }
+
+/* Focus: what the parent has unticked stays visible but dimmed, so a skip is easy to undo. */
+.lesson-row { display: flex; align-items: flex-start; gap: 8px; }
+.lesson-row > .focus-toggle { margin-top: 10px; }
+.lesson-row > details { flex: 1; min-width: 0; }
+.lesson-row.skipped > details > summary, .concept.skipped { opacity: 0.55; }
+.focus-toggle { cursor: pointer; }
+.focus-toggle input { vertical-align: middle; margin: 0 2px 0 0; }

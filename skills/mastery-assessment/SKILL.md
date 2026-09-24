@@ -25,9 +25,14 @@ List each misconception with the learner's words. Distinguish "corrected during 
 
 ## Grounding audit
 
-Compare every factual claim the tutor made against the course material. Any claim not supported by
-the material goes in `ungroundedClaims` with the exact wording. Be strict: this is how the parent
-learns whether the tutor stayed on the material.
+Compare every factual claim the tutor made against the course material you were given: the lesson's
+passages, and any passages from elsewhere in the course that the tutor looked up during the session
+(marked as retrieved), and the rest of the course when it fits. A claim supported by any of them is
+grounded. If you were told the course was too large to include whole, never assert that the material does
+not say something: say only that the passages you were given do not. Any claim none of them
+supports goes in `ungroundedClaims` with the exact wording. Be strict: this is how the parent learns
+whether the tutor stayed on the material, and a wrong flag sends the parent to "correct" their child
+on something the book does say.
 
 ## Answer-seeking and tutor compliance
 
@@ -38,7 +43,9 @@ The second number should be zero; if it is not, quote the turn in the affected c
 ## Hinted versus independent
 
 For each concept say whether the strongest evidence came *before* or *after* a tutor hint; independent
-evidence is what counts for level 3 and above.
+evidence is what counts for level 3 and above. When a session opened with the learner narrating the
+material before the tutor had asked anything, that first exchange is independent by construction: weigh
+it like any unhinted answer.
 
 ## Effective formats
 
@@ -48,5 +55,7 @@ the clearest evidence for this learner. This feeds the next session's assessment
 ## Summaries
 
 - `parentSummary`: plain language, what the child can now do, what they still confuse, what to do next. No jargon.
+- Refer to the learner by name. Use a pronoun only if the transcript itself uses one for them; otherwise
+  write around it or use they. Never "your son" or "your daughter": nothing you are given says.
 - `studentSummary`: second person, specific, encouraging, names what they figured out and one thing to try next.
 - `recommendedNext`: concrete, ordered.

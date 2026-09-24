@@ -3,7 +3,9 @@
 export interface Lesson { id: string; title: string; objectives: string[]; conceptIds: string[]; guidingQuestions: string[]; practiceItems: string[]; order: number }
 export interface Concept { id: string; name: string; summary: string; keyFacts: string[]; commonMisconceptions: string[]; sourceChunkIds: string[]; prerequisites: string[] }
 export interface Chunk { id: string; source: string; headingPath: string[]; text: string; order: number }
-export interface Course { id: string; title: string; subject: string; level: string; description: string; lessons: Lesson[]; concepts: Concept[]; chunkCount: number; sources?: Array<{ name: string; kind: string; url?: string }>; createdAt: string }
+/** The parent's decision about how much of a course the tutor teaches. Absent means everything. */
+export interface CourseFocus { skippedLessonIds: string[]; skippedConceptIds: string[]; lessonOrder?: string[] }
+export interface Course { id: string; title: string; subject: string; level: string; description: string; lessons: Lesson[]; concepts: Concept[]; chunkCount: number; sources?: Array<{ name: string; kind: string; url?: string }>; focus?: CourseFocus; createdAt: string }
 export interface Profile {
   intakePreferences: string[]; demonstrationPreferences: string[]; challengeTolerance: string; pace: string; verbalLevel: string;
   interests: string[]; priorKnowledge: string[]; observedGaps: string[]; parentSummary: string; tutoringGuidance: string[];
@@ -13,7 +15,7 @@ export type Phase = "intake" | "teach" | "inquire" | "assess" | "wrap-up" | "com
 export interface Latency { ttftMs: number; totalMs: number; iterations: number; cacheReadTokens: number; cacheWriteTokens: number; inputTokens: number; outputTokens: number; suppressedChars?: number; thinkingChars?: number; toolsBeforeSpeech?: boolean; reflectMs?: number; reflectThinkingChars?: number; firstAudioMs?: number; transcriptMs?: number; interrupted?: boolean }
 export interface Turn { role: "user" | "assistant"; content: string; at: string; expressions?: string[]; latency?: Latency }
 export interface Observation { at: string; conceptId: string; kind: "understanding" | "partial" | "misconception" | "gap" | "engagement"; evidence: string; note: string }
-export interface Session { id: string; learnerId: string; courseId?: string; lessonId?: string; conceptIndex: number; phase: Phase; transcript: Turn[]; observations: Observation[]; pendingDirectives: string[]; startedAt: string; endedAt?: string }
+export interface Session { id: string; learnerId: string; courseId?: string; lessonId?: string; conceptIndex: number; conceptIds?: string[]; narrationFirst?: boolean; phase: Phase; transcript: Turn[]; observations: Observation[]; pendingDirectives: string[]; startedAt: string; endedAt?: string }
 export interface SessionSummary { id: string; learnerId: string; courseId?: string; lessonId?: string; phase: Phase; conceptIndex: number; turns: number; observations: number; startedAt: string; endedAt?: string; hasReport: boolean }
 export interface LatencySummary { turns: number; ttftP50Ms: number; ttftMaxMs: number; totalP50Ms: number; cacheHitRate: number; firstAudioP50Ms?: number }
 export interface Report {
@@ -21,6 +23,14 @@ export interface Report {
   concepts: Array<{ conceptId: string; level: number; evidence: string[]; misconceptions: string[]; nextStep: string }>;
   parentSummary: string; studentSummary: string; recommendedNext: string[]; ungroundedClaims: string[]; effectiveFormats: string[];
   answerSeekingTurns: number; tutorAnswerGiveaways: number;
+}
+export interface ConceptProgress { conceptId: string; name: string; level: number; previousLevel?: number; asOf: string; misconceptions: string[] }
+export interface ProgressCounts { ungroundedClaims: number; tutorAnswerGiveaways: number; answerSeekingTurns: number }
+/** Where a student stands on a course, across every report so far (mirrors domain/progress.ts). */
+export interface ProgressSummary {
+  learnerId: string; courseId: string; sessionsAssessed: number; latestSessionAt: string; concepts: ConceptProgress[];
+  misconceptionsAtLatestSession: Array<{ conceptId: string; name: string; misconceptions: string[] }>;
+  latestRecommendedNext: string[]; latestParentSummary: string; totals: ProgressCounts; latest: ProgressCounts;
 }
 export interface RuntimeSettings {
   model: string; tutorModel: string; tutorEffort: string; analysisEffort: string; reflectEffort: string; tutorThinking: "adaptive" | "disabled"; prewarmCache: boolean; refusalFallbacks: boolean;
@@ -48,6 +58,8 @@ export const api = {
   courses: () => fetch("/api/courses").then(j<Course[]>),
   chunks: (courseId: string) => fetch(`/api/courses/${courseId}/chunks`).then(j<Chunk[]>),
   deleteCourse: (id: string) => fetch(`/api/courses/${id}`, { method: "DELETE" }).then(j<{ ok: true }>),
+  /** Save the parent's focus for a course. Applies to sessions started afterwards. */
+  setFocus: (courseId: string, focus: CourseFocus) => fetch(`/api/courses/${courseId}/focus`, json("PUT", focus)).then(j<Course>),
   samples: () => fetch("/api/samples").then(j<Array<{ name: string; size: number }>>),
   ingestSamples: (samples: string[], title?: string) => fetch("/api/courses/ingest", json("POST", { samples, title: title || undefined })).then(j<Course>),
   uploadCourse: (files: File[], title: string, urls: string[] = []) => {
@@ -64,7 +76,7 @@ export const api = {
   deleteLearner: (id: string) => fetch(`/api/learners/${id}`, { method: "DELETE" }).then(j<{ ok: true }>),
 
   sessions: () => fetch("/api/sessions").then(j<SessionSummary[]>),
-  createSession: (body: { learnerId: string; courseId?: string; lessonId?: string; skipIntake?: boolean }) => fetch("/api/sessions", json("POST", body)).then(j<Session>),
+  createSession: (body: { learnerId: string; courseId?: string; lessonId?: string; skipIntake?: boolean; narrationFirst?: boolean }) => fetch("/api/sessions", json("POST", body)).then(j<Session>),
   session: (id: string) => fetch(`/api/sessions/${id}`).then(j<Session>),
   deleteSession: (id: string) => fetch(`/api/sessions/${id}`, { method: "DELETE" }).then(j<{ ok: true }>),
   latency: (sessionId: string) => fetch(`/api/sessions/${sessionId}/latency`).then(j<LatencySummary>),
@@ -74,6 +86,8 @@ export const api = {
 
   reports: () => fetch("/api/reports").then(j<Report[]>),
   report: (sessionId: string) => fetch(`/api/reports/${sessionId}`).then(j<Report>),
+  /** 404 (thrown as an Error with the server's message) until the student has a completed session on the course. */
+  progress: (learnerId: string, courseId: string) => fetch(`/api/progress/${learnerId}/${courseId}`).then(j<ProgressSummary>),
 
   humeToken: () => fetch("/api/hume/token").then(j<{ accessToken: string; configId: string | null; clmSecret: string | null }>),
 

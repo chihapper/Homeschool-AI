@@ -29,9 +29,10 @@
  */
 import { config } from "../config.js";
 import type { Concept, Course, Learner, Lesson, Observation, Session, SessionPhase } from "../domain/types.js";
-import { ChunkIndex } from "../ingest/retrieval.js";
+import { ChunkIndex, searchWithLearner } from "../ingest/retrieval.js";
 import { buildSystem, prewarm, streamTurn, transcriptToMessages, type AgentTool, type AgentSpec, type TurnResult } from "./base.js";
 import { openThread, THREAD_PATIENCE, THREAD_PREFIX } from "../orchestrator/notes.js";
+import { walkedConceptIds } from "../domain/focus.js";
 
 export const tutorAgent: AgentSpec = {
   name: "Socratic Tutor",
@@ -81,6 +82,8 @@ export interface TutorContext {
   onAdvance: (to: AdvanceTarget, rationale: string) => string;
   /** Name what the dialogue is still working on, for the next spoken turn (reflect pass only). */
   onThread?: (thread: string) => string;
+  /** Passages lookup_source returned, so the session can remember what the tutor read (speak call). */
+  onLookup?: (chunkIds: string[]) => void;
 }
 
 const PHASE_GUIDANCE: Record<SessionPhase, string> = {
@@ -100,8 +103,11 @@ export function buildTutorContext(ctx: TutorContext, mode: "speak" | "reflect" =
   const profile = learner.profile;
   const blocks: string[] = [];
 
-  // Course-level block is stable for the whole session (good cache hit rate).
-  const lessonConcepts = course.concepts.filter((c) => lesson.conceptIds.includes(c.id));
+  // Course-level block is stable for the whole session (good cache hit rate). It lists the session's frozen
+  // walk, so a concept the parent skipped is simply absent, and a focus edit mid-session changes nothing here.
+  const lessonConcepts = walkedConceptIds(session, course, lesson)
+    .map((id) => course.concepts.find((c) => c.id === id))
+    .filter((c): c is Concept => Boolean(c));
   blocks.push(
     `<course title="${course.title}" subject="${course.subject}" level="${course.level}">\n${course.description}\n</course>\n\n` +
       `<lesson title="${lesson.title}">\nObjectives:\n${lesson.objectives.map((o) => `- ${o}`).join("\n")}\n\n` +
@@ -139,9 +145,17 @@ export function buildTutorContext(ctx: TutorContext, mode: "speak" | "reflect" =
       `Source passages:\n${sourceText || "(none linked; use lookup_source)"}\n</current_concept>`,
   );
 
-  const recent = session.observations.filter((o) => o.conceptId === concept.id).slice(-6);
-  if (recent.length) {
-    blocks.push(`<observations_so_far>\n${recent.map((o) => `- [${o.kind}] ${o.evidence} (${o.note})`).join("\n")}\n</observations_so_far>`);
+  // Everything already on file for this concept (so the reflect pass does not file it again), plus a count
+  // for the others. Measured 2026-09-24: with only the last six shown, one quote was recorded four times.
+  const mine = session.observations.filter((o) => o.conceptId === concept.id).slice(-12);
+  const elsewhere = new Map<string, number>();
+  for (const o of session.observations) if (o.conceptId !== concept.id) elsewhere.set(o.conceptId, (elsewhere.get(o.conceptId) ?? 0) + 1);
+  if (mine.length || elsewhere.size) {
+    blocks.push(
+      `<observations_so_far>\n${mine.map((o) => `- [${o.kind}] ${o.evidence} (${o.note})`).join("\n")}` +
+        (elsewhere.size ? `\nAlready recorded for other concepts: ${[...elsewhere].map(([id, n]) => `${id} (${n})`).join(", ")}.` : "") +
+        `\n</observations_so_far>`,
+    );
   }
 
   // The phase is what kind of work this turn does; the thread is what the work is on. One dialogue, so
@@ -164,11 +178,12 @@ export function buildTutorContext(ctx: TutorContext, mode: "speak" | "reflect" =
   if (machineDirectives.length) blocks.push(`<orchestrator>\n${machineDirectives.join("\n")}\n</orchestrator>`);
   blocks.push(
     mode === "speak"
-      ? "You are speaking to the learner now and they are waiting, so answer straight away: two to four sentences ending in your single question. " +
+      ? "You are speaking to the learner now and they are waiting, so answer straight away: two to four sentences ending in your single question, and nothing after it. " +
+        "Do not answer your own question, and do not narrate a pause, a hesitation, or a reaction the learner has not actually given: their last message is the only thing they have said. " +
         "Do not stop to weigh whether they are ready to move on and do not take notes; that happens after you speak, in a separate pass you do not run here. " +
         "If you need a passage from the material to answer honestly, call lookup_source first, then speak. Never mention tools, phases, or the profile out loud."
       : "The learner has just heard your reply (the last assistant message) and is listening; nothing you write here reaches them, so write nothing. " +
-        "Take your notes now: call record_observation for every piece of evidence in the exchange you have not already recorded, quoting the learner, " +
+        "Take your notes now: call record_observation for what the learner showed in their LATEST reply only, quoting them; everything from earlier turns is already on file above, so do not record it again, " +
         "and call advance when the phase is genuinely finished. " +
         "This is also the only place you get to think before teaching: the next spoken turn happens fast and cannot weigh anything. " +
         "So decide what this dialogue is still working on and call open_thread with it in one sentence — a question they answered around, a claim that contradicts something they said earlier, " +
@@ -184,7 +199,8 @@ export function tutorTools(ctx: TutorContext, mode: "speak" | "reflect" = "speak
     definition: {
       name: "lookup_source",
       description:
-        "Search the course material for passages about a topic. Call this whenever the learner asks something not covered by the current concept's passages, or before stating any fact you are not certain is in the material.",
+        "Search the course material for passages about a topic. Call this whenever the learner asks something not covered by the current concept's passages, or before stating any fact you are not certain is in the material. " +
+        "The learner's latest words are searched as well, so a thing they named is found even if your query describes it differently.",
       input_schema: {
         type: "object",
         properties: { query: { type: "string", description: "What to look for, in plain words." } },
@@ -194,8 +210,10 @@ export function tutorTools(ctx: TutorContext, mode: "speak" | "reflect" = "speak
       strict: true,
     },
     run: ({ query }) => {
-      const hits = ctx.index.search(query, 4);
-      if (!hits.length) return "No passages in the course material match that. Tell the learner the material does not cover it.";
+      const learnerText = [...ctx.session.transcript].reverse().find((t) => t.role === "user")?.content;
+      const hits = searchWithLearner(ctx.index, query, learnerText);
+      if (!hits.length) return "No passages in the course material match that. Tell the learner the passages you can see do not cover it.";
+      ctx.onLookup?.(hits.map((h) => h.chunk.id));
       return hits.map((h) => `<passage id="${h.chunk.id}" heading="${h.chunk.headingPath.join(" > ")}">\n${h.chunk.text}\n</passage>`).join("\n\n");
     },
   };

@@ -7,10 +7,11 @@
  * The LLM agents *request* transitions via the `advance` tool; the orchestrator validates them
  * (e.g. no next-concept without recorded evidence) and owns all persistence.
  */
-import type { Course, Learner, Lesson, MasteryReport, Observation, Session, TranscriptTurn } from "../domain/types.js";
+import { ObservationSchema, type Course, type Learner, type Lesson, type MasteryReport, type Observation, type Session, type TranscriptTurn } from "../domain/types.js";
 import type { TurnLatency } from "../llm/client.js";
 import type { TurnResult } from "../agents/base.js";
 import { ChunkIndex } from "../ingest/retrieval.js";
+import { effectiveConceptIds, effectiveLessons, isConceptKept, walkedConceptIds } from "../domain/focus.js";
 import { courses, learners, reports, sessions } from "../store/index.js";
 import { openThread, setOpenThread } from "./notes.js";
 import { finalizeProfile, profilerTurn } from "../agents/profiler-agent.js";
@@ -34,7 +35,19 @@ export interface CreateSessionArgs {
   lessonId?: string;
   /** Skip the intake even if the learner has no profile yet. */
   skipIntake?: boolean;
+  /** The student has already read the material: open by asking them to tell it back, then question from that. */
+  narrationFirst?: boolean;
 }
+
+/**
+ * Charlotte Mason families run this loop by hand: the child reads, tells it back uninterrupted, and only
+ * then is questioned. The directive rides in pendingDirectives, so it survives an intake conversation and
+ * is consumed by the first teaching turn. The socratic-method skill says how to conduct the narration.
+ */
+export const NARRATION_DIRECTIVE =
+  "The student has already read this material. Open by asking them to tell back what they read, in their own words, and then say nothing while they do: " +
+  "no corrections and no questions mid-narration; if they pause, at most \"take your time, what else?\". Once they stop, work from what they said and what they " +
+  "left out, as the socratic-method skill describes under \"Narration first\". Do this before anything else queued here.";
 
 export function createSession(args: CreateSessionArgs): Session {
   const learner = learners.require(args.learnerId);
@@ -42,21 +55,33 @@ export function createSession(args: CreateSessionArgs): Session {
   let lesson: Lesson | undefined;
   if (args.courseId) {
     course = courses.require(args.courseId);
-    lesson = args.lessonId ? course.lessons.find((l) => l.id === args.lessonId) : course.lessons[0];
-    if (!lesson) throw new Error(`Lesson ${args.lessonId ?? "(first)"} not found in course ${course.id}`);
+    lesson = args.lessonId ? course.lessons.find((l) => l.id === args.lessonId) : effectiveLessons(course)[0];
+    if (!lesson) {
+      throw new Error(args.lessonId ? `Lesson ${args.lessonId} not found in course ${course.id}` : `Course ${course.id} has no lesson left to teach: every lesson is skipped in its focus.`);
+    }
   }
   const needsIntake = !learner.profile && !args.skipIntake;
   if (!needsIntake && !course) throw new Error("A course is required unless the session is an intake.");
+  // The parent's focus is read here, once. The walk is frozen on the session so a later edit cannot change
+  // what a running session teaches or the tutor's cached prompt prefix.
+  const conceptIds = course && lesson ? effectiveConceptIds(course, lesson) : undefined;
+  if (course && lesson && !conceptIds?.length) throw new Error(`Lesson "${lesson.title}" has no concepts left to teach: change the course's focus or pick another lesson.`);
+  const opening: string[] = [];
+  // A narration is itself retrieval, so a narration-first session does not also open with a spaced-retrieval question.
+  if (course && !needsIntake && !args.narrationFirst) opening.push(...retrievalDirectives(learner, course));
+  if (course && args.narrationFirst) opening.push(NARRATION_DIRECTIVE);
   const session: Session = {
     id: sessions.newId(),
     learnerId: learner.id,
     courseId: course?.id,
     lessonId: lesson?.id,
     conceptIndex: 0,
+    conceptIds,
+    narrationFirst: course && args.narrationFirst ? true : undefined,
     phase: needsIntake ? "intake" : "teach",
     transcript: [],
     observations: [],
-    pendingDirectives: course && !needsIntake ? retrievalDirectives(learner, course) : [],
+    pendingDirectives: opening,
     startedAt: new Date().toISOString(),
   };
   const saved = sessions.put(session);
@@ -76,7 +101,8 @@ export function retrievalDirectives(learner: Learner, course: Course): string[] 
     .list()
     .filter((r) => r.learnerId === learner.id && r.courseId === course.id)
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-  const mastered = prior.flatMap((r) => r.concepts.filter((c) => c.level >= 2).map((c) => ({ conceptId: c.conceptId, at: r.createdAt })));
+  // Only material the parent still teaches: a skipped concept is not quizzed, even if it was mastered before the skip.
+  const mastered = prior.flatMap((r) => r.concepts.filter((c) => c.level >= 2 && isConceptKept(course, c.conceptId)).map((c) => ({ conceptId: c.conceptId, at: r.createdAt })));
   if (!mastered.length) return [];
   const oldest = mastered[0];
   const concept = course.concepts.find((c) => c.id === oldest.conceptId);
@@ -87,7 +113,7 @@ export function retrievalDirectives(learner: Learner, course: Course): string[] 
 }
 
 function tutorContextFor(session: Session, learner: Learner, course: Course, lesson: Lesson): TutorContext | undefined {
-  const concept = course.concepts.find((c) => c.id === lesson.conceptIds[session.conceptIndex]);
+  const concept = course.concepts.find((c) => c.id === walkedConceptIds(session, course, lesson)[session.conceptIndex]);
   if (!concept) return undefined;
   return { session, learner, course, lesson, concept, index: indexFor(course), onObservation: () => "", onAdvance: () => "" };
 }
@@ -105,7 +131,8 @@ function resolve(session: Session): { learner: Learner; course?: Course; lesson?
 
 /** Apply a validated transition. Returns the message the tutor sees as the tool result. */
 export function applyAdvance(session: Session, course: Course, lesson: Lesson, to: AdvanceTarget, rationale: string): string {
-  const conceptId = lesson.conceptIds[session.conceptIndex];
+  const walk = walkedConceptIds(session, course, lesson);
+  const conceptId = walk[session.conceptIndex];
   const obsForConcept = session.observations.filter((o) => o.conceptId === conceptId);
   switch (to) {
     case "inquire":
@@ -115,6 +142,9 @@ export function applyAdvance(session: Session, course: Course, lesson: Lesson, t
       return `OK: phase is now inquire (${rationale}).`;
     case "assess":
       if (session.phase !== "inquire" && session.phase !== "teach") return `Refused: cannot move to assess from ${session.phase}.`;
+      // Nothing recorded means nothing was taught: a session was seen moving to assess on a concept it had
+      // not started (2026-09-24), and then noting its own mistake.
+      if (!obsForConcept.some((o) => o.kind !== "engagement")) return `Refused: nothing is recorded for ${conceptId} yet. Teach it and record what the learner shows before assessing.`;
       session.phase = "assess";
       session.pendingDirectives.push("Now in ASSESS: ask for demonstrations, one per turn, and record at least two observations before advancing. No hints in this phase.");
       return `OK: phase is now assess (${rationale}).`;
@@ -122,16 +152,16 @@ export function applyAdvance(session: Session, course: Course, lesson: Lesson, t
       if (session.phase !== "assess") return "Refused: assess the current concept first (advance to 'assess').";
       const assessObs = obsForConcept.filter((o) => o.kind !== "engagement");
       if (assessObs.length < 2) return `Refused: only ${assessObs.length} observation(s) recorded for ${conceptId}. Record evidence of the learner's demonstration first.`;
-      if (session.conceptIndex + 1 >= lesson.conceptIds.length) {
+      if (session.conceptIndex + 1 >= walk.length) {
         session.phase = "wrap-up";
         session.pendingDirectives.push("All concepts in this lesson are done. Wrap up the session.");
         return "OK: that was the last concept. Phase is now wrap-up.";
       }
       session.conceptIndex += 1;
       session.phase = "teach";
-      const next = course.concepts.find((c) => c.id === lesson.conceptIds[session.conceptIndex]);
-      session.pendingDirectives.push(`Moving on to the next concept: ${next?.name ?? lesson.conceptIds[session.conceptIndex]}. Start by eliciting what the learner already thinks.`);
-      return `OK: moved to concept ${session.conceptIndex + 1} of ${lesson.conceptIds.length}: ${next?.name}.`;
+      const next = course.concepts.find((c) => c.id === walk[session.conceptIndex]);
+      session.pendingDirectives.push(`Moving on to the next concept: ${next?.name ?? walk[session.conceptIndex]}. Start by eliciting what the learner already thinks.`);
+      return `OK: moved to concept ${session.conceptIndex + 1} of ${walk.length}: ${next?.name}.`;
     }
   }
 }
@@ -155,11 +185,33 @@ export async function settleReflection(sessionId: string): Promise<void> {
   await reflections.get(sessionId)?.catch(() => {});
 }
 
+/** Sessions with a turn being composed right now. A second message for the same session must wait. */
+const inFlight = new Set<string>();
+
 /**
  * Handle one learner utterance and stream the agent's reply. Persists transcript, observations,
  * and phase changes. `userText` may be empty for the opening turn (agent speaks first).
+ *
+ * One turn at a time per session: two overlapping requests each read the session, and the second to
+ * finish overwrites the first, which is how a transcript came to hold the same student line twice with no
+ * reply between (2026-09-24).
  */
 export async function* respond(
+  sessionId: string,
+  userText: string,
+  expressions?: string[],
+  signal?: AbortSignal,
+): AsyncGenerator<string, RespondResult, void> {
+  if (inFlight.has(sessionId)) throw new Error("The tutor is still answering the previous message. Wait for that reply, then send again.");
+  inFlight.add(sessionId);
+  try {
+    return yield* respondTurn(sessionId, userText, expressions, signal);
+  } finally {
+    inFlight.delete(sessionId);
+  }
+}
+
+async function* respondTurn(
   sessionId: string,
   userText: string,
   expressions?: string[],
@@ -209,7 +261,7 @@ export async function* respond(
     result = yield* drain(profilerTurn({ session, learner, course, onFinish: (reason) => (intakeFinished = reason) }, signal));
   } else {
     if (!course || !lesson) throw new Error("Session has no course/lesson.");
-    const concept = course.concepts.find((c) => c.id === lesson.conceptIds[session.conceptIndex]);
+    const concept = course.concepts.find((c) => c.id === walkedConceptIds(session, course, lesson)[session.conceptIndex]);
     if (!concept) throw new Error("Current concept not found.");
     const directives = session.pendingDirectives;
     // The thread is not a one-shot directive: it lives until the dialogue resolves it. Remember how many
@@ -224,16 +276,26 @@ export async function* respond(
       lesson,
       concept,
       index: indexFor(course),
-      onObservation: (o: Observation) => {
+      onObservation: (raw: Observation) => {
+        // A tool call can arrive with an empty or partial payload (seen 2026-09-23: `{}`). Pushing it would
+        // make the session unsaveable, so refuse it here and let the model retry.
+        const checked = ObservationSchema.safeParse(raw);
+        if (!checked.success) return `Refused: incomplete observation (${checked.error.issues.map((i) => i.path.join(".")).join(", ") || "empty"}). Give conceptId, kind, evidence and note.`;
+        const o = checked.data;
         // The reflect pass sees the whole exchange each turn, so it sometimes re-files evidence it already
-        // recorded. Duplicates would also inflate the two-observation gate on advancing, so drop them here.
-        const already = session.observations.some((x) => x.conceptId === o.conceptId && x.evidence.trim() === o.evidence.trim());
+        // recorded, usually re-quoted a little differently. Duplicates would also inflate the two-observation
+        // gate on advancing, so drop them here.
+        const already = session.observations.some((x) => x.conceptId === o.conceptId && sameEvidence(x.evidence, o.evidence));
         if (already) return `Already recorded that evidence for ${o.conceptId}; nothing added.`;
         session.observations.push(o);
         return `Recorded (${session.observations.filter((x) => x.conceptId === o.conceptId).length} observations for ${o.conceptId}).`;
       },
       onAdvance: (to, rationale) => applyAdvance(session, course, lesson, to, rationale),
       onThread: (thread) => setOpenThread(session, thread, priorThreadTurns),
+      // Remember what the tutor read, from anywhere in the course, so the assessor can see it too.
+      onLookup: (ids) => {
+        session.retrievedChunkIds = [...new Set([...(session.retrievedChunkIds ?? []), ...ids])];
+      },
     };
     result = yield* drain(tutorTurn(ctx, signal));
 
@@ -321,10 +383,35 @@ export function annotateLastTurn(sessionId: string, patch: Partial<TurnLatency>)
   sessions.put(session);
 }
 
-/** End the session and, when a lesson was taught, produce the mastery report. */
+/**
+ * Two observations are the same evidence if one quotes the other, allowing for re-quoting: case, punctuation,
+ * an ellipsis, a trimmed or extended quotation.
+ */
+export function sameEvidence(a: string, b: string): boolean {
+  const key = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const ka = key(a);
+  const kb = key(b);
+  if (!ka || !kb) return ka === kb;
+  if (ka === kb) return true;
+  const [short, long] = ka.length <= kb.length ? [ka, kb] : [kb, ka];
+  return short.length >= 24 && long.includes(short.slice(0, 40));
+}
+
+/**
+ * End the session and, when a lesson was taught, produce the mastery report.
+ *
+ * Waits for a reflect pass still running for this session: it saves the session when it finishes, and
+ * without the wait it saved an older copy over the closed one (2026-09-24: a session with a report was
+ * left in phase "assess" and offered for resumption).
+ */
 export async function endSession(sessionId: string): Promise<{ session: Session; report?: MasteryReport }> {
+  await settleReflection(sessionId);
   const session = sessions.require(sessionId);
   const { learner, course, lesson } = resolve(session);
+  if (session.phase === "complete") {
+    const existing = reports.get(sessionId);
+    if (existing) return { session, report: existing };
+  }
   session.phase = "complete";
   session.endedAt = new Date().toISOString();
   sessions.put(session);

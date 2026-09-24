@@ -18,6 +18,29 @@ export function tokenize(s: string): string[] {
     .filter((t) => t.length > 1 && !STOP.has(t));
 }
 
+export interface Hit {
+  chunk: SourceChunk;
+  score: number;
+}
+
+/**
+ * The tutor's query plus the learner's own words. The tutor tends to search for the idea ("what the
+ * Etruscans gave Rome") while the learner named the thing ("I heard coinage"); the one chunk with the rare
+ * word ranks first for the learner's words and nowhere for the tutor's (seen 2026-09-24, and the tutor then
+ * told the learner the material does not mention coinage). Up to `extra` passages found only through the
+ * learner's words are appended after the tutor's hits.
+ */
+export function searchWithLearner(index: ChunkIndex, query: string, learnerText: string | undefined, k = 4, extra = 2): Hit[] {
+  const hits = index.search(query, k);
+  if (!learnerText?.trim()) return hits;
+  const seen = new Set(hits.map((h) => h.chunk.id));
+  const more = index
+    .search(learnerText, k + extra)
+    .filter((h) => !seen.has(h.chunk.id))
+    .slice(0, extra);
+  return [...hits, ...more];
+}
+
 export class ChunkIndex {
   private readonly docs: Array<{ chunk: SourceChunk; tf: Map<string, number>; len: number }>;
   private readonly df = new Map<string, number>();
@@ -34,7 +57,7 @@ export class ChunkIndex {
     this.avgLen = this.docs.reduce((a, d) => a + d.len, 0) / Math.max(1, this.docs.length);
   }
 
-  search(query: string, k = 4): Array<{ chunk: SourceChunk; score: number }> {
+  search(query: string, k = 4): Hit[] {
     const q = tokenize(query);
     if (!q.length || !this.docs.length) return [];
     const N = this.docs.length;

@@ -19,6 +19,7 @@ import mammoth from "mammoth";
 import JSZip from "jszip";
 import { epubToText, htmlToText, looksBinary, normalize, odtToText, rtfToText } from "./documents.js";
 import { isImage, transcribeImage } from "./ocr.js";
+import { pagerender, type PdfPageLike } from "./pdf-text.js";
 
 const require = createRequire(import.meta.url);
 
@@ -85,8 +86,9 @@ export async function extractTextFromBuffer(buffer: Buffer, fileName: string, de
   switch (ext) {
     case ".pdf": {
       // pdf-parse v1 is CommonJS; load lazily so the module isn't required for non-PDF runs.
-      const pdfParse = require("pdf-parse") as (data: Buffer) => Promise<{ text: string }>;
-      const { text } = await pdfParse(buffer);
+      const pdfParse = require("pdf-parse") as (data: Buffer, options?: { pagerender: (page: PdfPageLike) => Promise<string> }) => Promise<{ text: string }>;
+      // Pages are joined by glyph geometry (pdf-text.ts): the default renderer fuses the words of a scan's OCR layer.
+      const { text } = await pdfParse(buffer, { pagerender });
       const out = normalize(text);
       if (!out) {
         throw new UnsupportedFileError(

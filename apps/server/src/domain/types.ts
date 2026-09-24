@@ -53,6 +53,21 @@ export const LessonSchema = z.object({
 });
 export type Lesson = z.infer<typeof LessonSchema>;
 
+/**
+ * The parent's decision about how much of a course the tutor teaches. Homeschool parents skip and
+ * substitute parts of any curriculum as a matter of course, so this is their call, never an agent's.
+ * Kept separate from Lesson/Concept because those schemas are reused for structured outputs.
+ */
+export const CourseFocusSchema = z.object({
+  /** Lessons the parent chose not to teach at all. */
+  skippedLessonIds: z.array(z.string()),
+  /** Concepts skipped inside lessons that are otherwise kept. */
+  skippedConceptIds: z.array(z.string()),
+  /** The parent's preferred lesson order, by id; lessons not listed follow in their ingested order. */
+  lessonOrder: z.array(z.string()).optional(),
+});
+export type CourseFocus = z.infer<typeof CourseFocusSchema>;
+
 export const CourseSchema = z.object({
   id: z.string(),
   title: z.string(),
@@ -68,6 +83,8 @@ export const CourseSchema = z.object({
   sources: z
     .array(z.object({ name: z.string(), kind: z.enum(["file", "video", "podcast", "audio", "slides", "url"]), url: z.string().optional() }))
     .optional(),
+  /** Absent means everything is taught (courses built before focus existed, and fresh ingests). See domain/focus.ts. */
+  focus: CourseFocusSchema.optional(),
   createdAt: z.string(),
 });
 export type Course = z.infer<typeof CourseSchema>;
@@ -199,8 +216,22 @@ export const SessionSchema = z.object({
   learnerId: z.string(),
   courseId: z.string().optional(),
   lessonId: z.string().optional(),
-  /** Index into lesson.conceptIds of the concept currently being worked. */
+  /** Index into the session's concept walk (conceptIds below) of the concept currently being worked. */
   conceptIndex: z.number().int(),
+  /**
+   * The concepts this session walks, in order: the lesson's concepts minus the parent's skips, frozen at
+   * creation so a later focus edit changes neither the walk nor the tutor's cached prompt. Absent on
+   * sessions created before focus existed; readers fall back to the lesson's list (domain/focus.ts).
+   */
+  conceptIds: z.array(z.string()).optional(),
+  /** The student read the material beforehand, so the session opened by asking them to tell it back. */
+  narrationFirst: z.boolean().optional(),
+  /**
+   * Passages the tutor looked up with lookup_source during the session, from anywhere in the course. The
+   * assessor audits the tutor against the lesson's passages plus these, so a fact fetched from another
+   * lesson is not called ungrounded.
+   */
+  retrievedChunkIds: z.array(z.string()).optional(),
   phase: SessionPhaseSchema,
   transcript: z.array(TranscriptTurnSchema),
   observations: z.array(ObservationSchema),

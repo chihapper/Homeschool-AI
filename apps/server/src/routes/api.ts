@@ -9,6 +9,9 @@ import { ingestCourse } from "../agents/curriculum-agent.js";
 import { documentFromUpload, documentsFromUrl, type SourceDocument } from "../ingest/media/sources.js";
 import { UnsupportedFileError } from "../ingest/extract.js";
 import { annotateLastTurn, createSession, endSession, getSession, latencySummary, respond } from "../orchestrator/session.js";
+import { CourseFocusSchema } from "../domain/types.js";
+import { sanitizeFocus } from "../domain/focus.js";
+import { buildProgress } from "../domain/progress.js";
 import { courses, learners, reports, sessions } from "../store/index.js";
 import { config, getSettings, MODEL_OPTIONS, REPO_ROOT, resetSettings, RuntimeSettingsSchema, updateSettings } from "../config.js";
 import { checkReadiness } from "../doctor.js";
@@ -16,7 +19,7 @@ import { humeConfigured, mintAccessToken } from "../voice/hume.js";
 import { listHumeVoices } from "../voice/tts-hume.js";
 
 const LearnerBody = z.object({ name: z.string().min(1), age: z.number().int().optional(), gradeLevel: z.string().optional() });
-const SessionBody = z.object({ learnerId: z.string(), courseId: z.string().optional(), lessonId: z.string().optional(), skipIntake: z.boolean().optional() });
+const SessionBody = z.object({ learnerId: z.string(), courseId: z.string().optional(), lessonId: z.string().optional(), skipIntake: z.boolean().optional(), narrationFirst: z.boolean().optional() });
 const IngestBody = z
   .object({
     urls: z.array(z.string().url()).optional(),
@@ -106,6 +109,12 @@ export function registerApiRoutes(app: FastifyInstance): void {
     courses.require(req.params.id);
     courses.delete(req.params.id);
     return { ok: true };
+  });
+  /** The parent's focus: which lessons and concepts the tutor teaches. A session reads it once, when it starts. */
+  app.put("/api/courses/:id/focus", async (req: FastifyRequest<{ Params: { id: string } }>) => {
+    const course = courses.require(req.params.id);
+    const focus = sanitizeFocus(course, CourseFocusSchema.parse(req.body));
+    return courseSummary(courses.put({ ...course, focus }));
   });
   app.get("/api/samples", async () => {
     if (!fs.existsSync(SAMPLES_DIR)) return [];
@@ -259,6 +268,15 @@ export function registerApiRoutes(app: FastifyInstance): void {
   app.get("/api/reports/:sessionId", async (req: FastifyRequest<{ Params: { sessionId: string } }>, reply) => {
     const r = reports.get(req.params.sessionId);
     return r ?? reply.code(404).send({ error: "No report for that session yet." });
+  });
+
+  // ---- Progress ------------------------------------------------------------
+  /** Where a learner stands on a course, read across every report so far. */
+  app.get("/api/progress/:learnerId/:courseId", async (req: FastifyRequest<{ Params: { learnerId: string; courseId: string } }>, reply) => {
+    const course = courses.require(req.params.courseId);
+    learners.require(req.params.learnerId);
+    const progress = buildProgress(reports.list(), course, req.params.learnerId, req.params.courseId);
+    return progress ?? reply.code(404).send({ error: "No completed sessions yet for this student and course." });
   });
 
   // ---- Hume ----------------------------------------------------------------

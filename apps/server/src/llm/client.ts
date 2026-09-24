@@ -2,6 +2,7 @@
  * One Anthropic client for the whole server, plus small helpers shared by the agents.
  */
 import Anthropic from "@anthropic-ai/sdk";
+import type { MessageStreamParams } from "@anthropic-ai/sdk/resources/messages/messages.js";
 import { config } from "../config.js";
 
 export const anthropic = new Anthropic();
@@ -64,6 +65,48 @@ export interface TurnLatency {
   transcriptMs?: number;
   /** The learner barged in; the reply was cut short and what was spoken is what the transcript holds. */
   interrupted?: boolean;
+}
+
+/**
+ * A structured-output request that streams, so a long generation is not lost to the request timeout.
+ *
+ * The SDK's timeout covers the wait for the first bytes of a response; on a non-streaming call the whole
+ * generation has to fit inside it, and a big extraction does not (measured 2026-09-23: a 94-chunk
+ * curriculum extraction at high effort ran fifteen minutes and failed with "Request timed out"). Streaming
+ * keeps bytes flowing and the SDK clears its timer once the response starts. The final message carries
+ * `parsed_output`, validated against the schema exactly as `messages.parse` would. Callers still check
+ * `stop_reason` before trusting the result.
+ */
+export async function streamParsed<T>(
+  params: MessageStreamParams,
+  opts: { onProgress?: (charsSoFar: number) => void; timeout?: number } = {},
+): Promise<{ message: Anthropic.Message; parsed: T | null }> {
+  const stream = anthropic.messages.stream(params, { timeout: opts.timeout ?? 30 * 60 * 1000 });
+  if (opts.onProgress) {
+    let chars = 0;
+    stream.on("text", (delta) => {
+      chars += delta.length;
+      opts.onProgress?.(chars);
+    });
+  }
+  // The SDK parses the JSON inside finalMessage(); when the output was cut off at max_tokens that parse
+  // throws an "unterminated string" error before the caller can read stop_reason, so the reason is caught
+  // here from the stream itself and named.
+  let stopReason: string | null = null;
+  stream.on("streamEvent", (event) => {
+    if (event.type === "message_delta" && event.delta.stop_reason) stopReason = event.delta.stop_reason;
+  });
+  let message: Anthropic.Message;
+  try {
+    message = await stream.finalMessage();
+  } catch (err) {
+    if (stopReason === "max_tokens") {
+      throw new Error(`The model hit its output limit (max_tokens ${params.max_tokens}) before finishing, so the structured output is cut off. Ask for less at a time.`);
+    }
+    throw err;
+  }
+  const parsed = (message as { parsed_output?: unknown }).parsed_output ?? null;
+  return { message, parsed: parsed as T | null };
 }
 
 /** Extract concatenated text from a response's content blocks. */

@@ -5,7 +5,7 @@
  * and processes large sources in batches of chunks that are merged deterministically.
  */
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
-import { anthropic, assertNotRefused } from "../llm/client.js";
+import { assertNotRefused, streamParsed } from "../llm/client.js";
 import { config } from "../config.js";
 import { CurriculumExtractionSchema, type Course, type CurriculumExtraction, type SourceChunk } from "../domain/types.js";
 import { chunkDocument, slug } from "../ingest/chunk.js";
@@ -28,8 +28,19 @@ export const curriculumAgent: AgentSpec = {
   },
 };
 
-/** Rough budget per extraction call, in characters of source text. */
-const BATCH_CHARS = 120_000;
+/**
+ * Budget per extraction call, in characters of source text. The binding limit is the output, not the
+ * input: at this level of detail the model writes roughly 0.6-1.4 characters of course JSON per character
+ * of source (measured 2026-09-23 on the 49-page Ancient Rome guide: 142k chars in one call was cut off at
+ * 85,558 characters, the 32k-token ceiling of the time). With `MAX_OUTPUT_TOKENS` below (about 170k
+ * characters of JSON) a 100k-character part has ample room. A unit that size or less is one call; a bigger
+ * one is split into balanced parts that run in parallel, and `mergeExtractions` concatenates their lessons
+ * and dedupes concepts by id.
+ */
+export const BATCH_CHARS = 100_000;
+
+/** Opus 5 and Sonnet 5 allow up to 128k output tokens on a streamed request; 64k covers a full part with margin. */
+const MAX_OUTPUT_TOKENS = 64_000;
 
 export interface IngestOptions {
   titleHint?: string;
@@ -41,11 +52,14 @@ export async function ingestCourse(docs: Array<ExtractedDocument | SourceDocumen
   if (!chunks.length) throw new Error("No text could be extracted from the uploaded material.");
 
   const batches = batchChunks(chunks, BATCH_CHARS);
-  const extractions: CurriculumExtraction[] = [];
-  for (const [i, batch] of batches.entries()) {
-    opts.onProgress?.(`Extracting batch ${i + 1}/${batches.length} (${batch.length} chunks)`);
-    extractions.push(await extractBatch(batch, opts.titleHint, i, batches.length, docs));
-  }
+  // Parts are independent ("extract only what is in this part"), so they run at the same time: a unit that
+  // splits in two takes as long as one part, not two.
+  const extractions: CurriculumExtraction[] = await Promise.all(
+    batches.map((batch, i) => {
+      opts.onProgress?.(`Extracting batch ${i + 1}/${batches.length} (${batch.length} chunks)`);
+      return extractBatch(batch, opts.titleHint, i, batches.length, docs, opts.onProgress);
+    }),
+  );
 
   const merged = mergeExtractions(extractions);
   const id = `${slug(opts.titleHint ?? merged.title)}-${Date.now().toString(36)}`;
@@ -66,7 +80,14 @@ export async function ingestCourse(docs: Array<ExtractedDocument | SourceDocumen
   return courses.put(course);
 }
 
-async function extractBatch(batch: SourceChunk[], titleHint: string | undefined, index: number, total: number, docs: Array<ExtractedDocument | SourceDocument>): Promise<CurriculumExtraction> {
+async function extractBatch(
+  batch: SourceChunk[],
+  titleHint: string | undefined,
+  index: number,
+  total: number,
+  docs: Array<ExtractedDocument | SourceDocument>,
+  onProgress?: (msg: string) => void,
+): Promise<CurriculumExtraction> {
   const system = buildSystem(curriculumAgent, []);
   const spoken = docs.filter((d) => "kind" in d && (d.kind === "video" || d.kind === "podcast" || d.kind === "audio")).map((d) => d.fileName);
   const slides = docs.filter((d) => "kind" in d && d.kind === "slides").map((d) => d.fileName);
@@ -83,24 +104,47 @@ async function extractBatch(batch: SourceChunk[], titleHint: string | undefined,
     .filter(Boolean)
     .join("\n");
 
-  const response = await anthropic.messages.parse({
-    model: curriculumAgent.model,
-    max_tokens: 32_000,
-    system: system.map((b) => ({ type: "text" as const, text: b.text, cache_control: b.cache_control })),
-    output_config: { effort: curriculumAgent.effort, format: zodOutputFormat(CurriculumExtractionSchema) },
-    messages: [{ role: "user", content: `${instructions}\n\n<material>\n${material}\n</material>` }],
-  }, { timeout: 30 * 60 * 1000 }); // explicit timeout: without one the SDK refuses a 32k-token non-streaming request (>10 min at its throughput estimate)
-  assertNotRefused(response);
-  if (!response.parsed_output) throw new Error("Curriculum extraction returned no parsable output.");
-  return response.parsed_output;
+  // Streamed: a unit-sized batch at high effort generates for ten minutes or more, longer than any
+  // non-streaming request survives (see streamParsed).
+  let reported = 0;
+  const { message, parsed } = await streamParsed<CurriculumExtraction>(
+    {
+      model: curriculumAgent.model,
+      max_tokens: MAX_OUTPUT_TOKENS,
+      system: system.map((b) => ({ type: "text" as const, text: b.text, cache_control: b.cache_control })),
+      output_config: { effort: curriculumAgent.effort, format: zodOutputFormat(CurriculumExtractionSchema) },
+      messages: [{ role: "user", content: `${instructions}\n\n<material>\n${material}\n</material>` }],
+    },
+    {
+      onProgress: (chars) => {
+        if (chars - reported < 20_000) return;
+        reported = chars;
+        onProgress?.(`Still extracting part ${index + 1}/${total}: ${Math.round(chars / 1000)}k characters of course structure so far`);
+      },
+    },
+  );
+  assertNotRefused(message);
+  if (message.stop_reason === "max_tokens") {
+    throw new Error(`Curriculum extraction hit the output limit on part ${index + 1}/${total} (${batch.length} chunks). Lower BATCH_CHARS in curriculum-agent.ts so each part is smaller.`);
+  }
+  if (!parsed) throw new Error("Curriculum extraction returned no parsable output.");
+  return parsed;
 }
 
+/**
+ * Split chunks into the fewest parts of at most `maxChars`, balanced rather than greedily filled: a 142k
+ * unit becomes two parts of ~71k, not 100k + 42k, so neither part sits right under the output ceiling.
+ * Chunks keep their order; a single chunk larger than `maxChars` becomes a part of its own.
+ */
 export function batchChunks(chunks: SourceChunk[], maxChars: number): SourceChunk[][] {
+  const total = chunks.reduce((a, c) => a + c.text.length, 0);
+  const parts = Math.max(1, Math.ceil(total / maxChars));
+  const target = Math.ceil(total / parts);
   const out: SourceChunk[][] = [];
   let cur: SourceChunk[] = [];
   let len = 0;
   for (const c of chunks) {
-    if (len + c.text.length > maxChars && cur.length) {
+    if (cur.length && len + c.text.length > target && out.length < parts - 1) {
       out.push(cur);
       cur = [];
       len = 0;

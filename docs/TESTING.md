@@ -69,6 +69,33 @@ Do this three times with different personas (novice who needs teaching first, co
 
 **One reply per turn.** The tutor's tools (`record_observation`, `advance`) run after it speaks. Once its reply contains a question, anything the model writes after the tools is dropped and counted ("chars dropped after tools" on the turn line); if it advanced before asking, it gets one more segment to ask. A turn line that shows dropped text is the model trying to talk twice; a rising count across a session is worth a skill edit.
 
+## Stage 1b: a real unit (the Ancient Rome guide)
+
+The bundled sample is two pages. A real unit is the Fords' *Ancient Rome* parent's guide from Saint
+Emmelia Ministries: 49 scanned pages, twelve topical sections, no lessons or quizzes of its own. It is
+not in the repo; ingest it from wherever it is:
+
+```bash
+npm run ingest -- --title "Ancient Rome" "C:\Users\<you>\Downloads\8 Ancient Rome.pdf"
+```
+
+1. **Two parts, in parallel.** The console shows `Extracting batch 1/2` and `2/2` at once (the unit is
+   142k characters; a part is at most 100k so the course JSON it produces stays well inside the output ceiling), then
+   progress lines every 20k characters of output. Expect ten to fifteen minutes at high effort. Open
+   `data/courses/<id>.json`: a chunk under FOOD or CLOTHING reads as spaced prose (the scan's text layer
+   fuses words; `ingest/pdf-text.ts` joins them by geometry); expect roughly one lesson per section,
+   Activities as practice items, and key facts that appear verbatim in the chunks.
+2. **Focus.** Courses tab: untick two sections (say Religion and Leisure). The card's count line drops,
+   and the Session tab's lesson list no longer offers them.
+3. **Narration first.** Session tab: a 7th-grade student, the Government lesson, tick "Already read
+   this", Begin. The opening turn asks for a narration, not a question; after the narration it probes
+   from what was said and what was left out. "Concept X of Y kept" shows the reduced count.
+4. **Stage 1 script**, items 4 to 7: answer-seeking, the advance gate, an off-material question ("who
+   was Hannibal?").
+5. **Report.** Only kept concepts appear; the grounding audit is clean or names the exact claim.
+6. **Progress.** Reports tab, Progress panel: every concept reads "first time". A second short session on
+   the same lesson turns the column into "up from", "down from" or "same as before".
+
 ## Stage 2: media ingestion
 
 **File formats.** Read directly: `.pdf`, `.docx`, `.epub`, `.odt`, `.rtf`, `.html`, `.md`, `.txt` and
