@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { api, type Readiness, type RuntimeSettings, type SettingsView } from "../api";
+import { useEffect, useRef, useState } from "react";
+import { api, type Readiness, type RuntimeSettings, type SettingsView, type TtsProvider, type VoiceModelOption, type VoiceOption, type VoicePreview } from "../api";
 
 /** Plain-language notes shown next to each setting. */
 const HELP: Record<keyof RuntimeSettings, string> = {
@@ -11,10 +11,16 @@ const HELP: Record<keyof RuntimeSettings, string> = {
   reflectEffort: "The tutor takes its notes and decides whether to move on in a second pass that runs while the student is listening to the reply, so this costs the student no waiting. Raise it if the tutor's observations or phase changes look careless.",
   prewarmCache: "Write the tutor's prompt cache when a session starts, so the first turn is a cache hit instead of a cold write.",
   refusalFallbacks: "If the safety classifier refuses a turn, retry it on a fallback model automatically instead of showing the canned fallback line.",
+  ttsProvider: "Who voices the tutor in browser voice mode. A switch applies from the next reply, even in a session already running: both providers deliver the same audio format.",
   ttsVoice: "The tutor's voice, from Hume's Voice Library. Pick a warm, clear adult voice; the list is fetched live from your Hume account.",
   ttsVersion: "Octave 2 gets the first audio out in about 0.6 s; Octave 1 is slower but honours per-sentence acting notes (not used here yet).",
   ttsInstant: "Instant mode trades a little expressiveness for lower first-audio latency. Leave it on for the live tutor.",
   ttsBatchSentences: "Sentences the model has already written are sent to the voice together, so its pace and pitch carry across them instead of restarting at every sentence. The first sentence still goes alone so the reply starts fast. Turn off to hear the difference.",
+  elevenVoiceId: "Every voice on your ElevenLabs account: premade, cloned, designed, and any saved from the Voice Library. The play button next to the list plays ElevenLabs' own sample of the voice, which costs no credits.",
+  elevenVoiceName: "",
+  elevenModel: "Flash v2.5 is the fastest (about 75 ms before audio starts) but reads numbers digit by digit. v3 Conversational is more expressive at about 280 ms and costs the same credits. Multilingual v2 is richer, slower, and costs double.",
+  elevenStability: "Lower gives a livelier, more varied read; higher a steadier, flatter one. 0.5 is ElevenLabs' default.",
+  elevenSpeed: "Speaking rate. 1 is the voice's natural pace; the range ElevenLabs allows is 0.7 to 1.2.",
   sttMinSilenceMs: "How long the student can pause mid-thought before the transcriber decides they are done, when it is confident the sentence is complete. Raise it if the tutor keeps cutting the student off.",
   sttMaxSilenceMs: "The longest pause before a turn ends no matter what. Lower it if the tutor feels slow to respond.",
 };
@@ -28,8 +34,13 @@ export function SettingsPage({ onChange }: { onChange: () => Promise<void> }) {
   const [busy, setBusy] = useState(false);
   const [readiness, setReadiness] = useState<Readiness | null>(null);
   const [checking, setChecking] = useState(false);
-  const [voices, setVoices] = useState<Array<{ id: string; name: string }>>([]);
-  const [voicesErr, setVoicesErr] = useState<string | null>(null);
+  // The voice list follows the provider shown in the toggle, saved or not.
+  const [voices, setVoices] = useState<{ provider: TtsProvider; list: VoiceOption[]; error?: string } | null>(null);
+  const [models, setModels] = useState<{ list: VoiceModelOption[]; source: string; error?: string } | null>(null);
+  const [preview, setPreview] = useState<VoicePreview | null>(null);
+  const [previewBusy, setPreviewBusy] = useState(false);
+  const [previewErr, setPreviewErr] = useState<string | null>(null);
+  const player = useRef<HTMLAudioElement | null>(null);
 
   const load = async () => {
     const v = await api.settings();
@@ -39,8 +50,32 @@ export function SettingsPage({ onChange }: { onChange: () => Promise<void> }) {
   useEffect(() => {
     void load().catch((e) => setMsg((e as Error).message));
     void check(false);
-    api.voices().then(setVoices).catch((e) => setVoicesErr((e as Error).message));
   }, []);
+
+  const provider = draft?.ttsProvider;
+  useEffect(() => {
+    if (!provider) return;
+    let live = true;
+    setVoices(null);
+    api
+      .voices(provider)
+      .then((list) => live && setVoices({ provider, list }))
+      .catch((e) => live && setVoices({ provider, list: [], error: (e as Error).message }));
+    if (provider === "elevenlabs" && !models) {
+      api
+        .voiceModels()
+        .then((m) => live && setModels({ list: m.models, source: m.source, error: m.error }))
+        .catch((e) => live && setModels({ list: [], source: "none", error: (e as Error).message }));
+    }
+    return () => {
+      live = false;
+    };
+  }, [provider]);
+
+  // A new sample replaces the old one; free the old clip's memory.
+  useEffect(() => () => {
+    if (preview) URL.revokeObjectURL(preview.url);
+  }, [preview]);
 
   const check = async (ping: boolean) => {
     setChecking(true);
@@ -83,10 +118,38 @@ export function SettingsPage({ onChange }: { onChange: () => Promise<void> }) {
     }
   };
 
+  const testVoice = async () => {
+    if (!draft) return;
+    setPreviewBusy(true);
+    setPreviewErr(null);
+    try {
+      const p = await api.previewVoice(draft);
+      setPreview(p);
+      // The element renders with the new clip on the next paint; play it as soon as it exists.
+      requestAnimationFrame(() => void player.current?.play().catch(() => {}));
+    } catch (e) {
+      setPreviewErr((e as Error).message);
+    } finally {
+      setPreviewBusy(false);
+    }
+  };
+
   if (!view || !draft) return <p className="muted">{msg ?? "Loading settings..."}</p>;
   const dirty = JSON.stringify(draft) !== JSON.stringify(view.effective);
   const set = <K extends keyof RuntimeSettings>(k: K, v: RuntimeSettings[K]) => setDraft({ ...draft, [k]: v });
   const changed = (k: keyof RuntimeSettings) => view.overrides[k] !== undefined;
+  const providers = view.options.ttsProviders;
+  const selected = providers.find((p) => p.id === draft.ttsProvider) ?? providers[0];
+  const voiceList = voices?.provider === draft.ttsProvider ? voices : null;
+
+  const saveBar = (
+    <div className="row" style={{ marginTop: 12 }}>
+      <button className="primary" disabled={!dirty || busy} onClick={save}>{busy ? "Saving..." : "Save"}</button>
+      <button className="ghost" disabled={busy || !Object.keys(view.overrides).length} onClick={reset}>Reset to .env defaults</button>
+      {dirty && <span className="warn small">Unsaved changes</span>}
+      {msg && <span className="muted">{msg}</span>}
+    </div>
+  );
 
   const modelField = (k: "tutorModel" | "model") => (
     <label>
@@ -108,8 +171,152 @@ export function SettingsPage({ onChange }: { onChange: () => Promise<void> }) {
     </label>
   );
 
+  // ---- Hume fields -------------------------------------------------------------
+  const humeFields = (
+    <div className="grid3">
+      <label>
+        Tutor voice {changed("ttsVoice") && <span className="pill">changed</span>}
+        {voiceList?.list.length ? (
+          <select value={voiceList.list.some((v) => v.name === draft.ttsVoice) ? draft.ttsVoice : "__custom"} onChange={(e) => { if (e.target.value !== "__custom") set("ttsVoice", e.target.value); }}>
+            {!voiceList.list.some((v) => v.name === draft.ttsVoice) && <option value="__custom">{draft.ttsVoice} (custom)</option>}
+            {voiceList.list.map((v) => <option key={v.id} value={v.name}>{v.name}</option>)}
+          </select>
+        ) : null}
+        <input value={draft.ttsVoice} onChange={(e) => set("ttsVoice", e.target.value)} placeholder="or type: Ava Song, HUME_AI:<name>, CUSTOM_VOICE:<id>" />
+        <span className="hint">.env: {view.defaults.ttsVoice}{!voiceList ? " · loading voices..." : voiceList.error ? ` · could not list voices: ${voiceList.error}` : ""}</span>
+        <span className="hint">{HELP.ttsVoice}</span>
+      </label>
+      <label>
+        Octave version {changed("ttsVersion") && <span className="pill">changed</span>}
+        <select value={draft.ttsVersion} onChange={(e) => set("ttsVersion", e.target.value as RuntimeSettings["ttsVersion"])}>
+          <option value="2">2 (fastest)</option>
+          <option value="1">1</option>
+        </select>
+        <span className="hint">.env: {view.defaults.ttsVersion}</span>
+        <span className="hint">{HELP.ttsVersion}</span>
+      </label>
+      <label className="check">
+        <span><input type="checkbox" checked={draft.ttsInstant} onChange={(e) => set("ttsInstant", e.target.checked)} /> Instant mode {changed("ttsInstant") && <span className="pill">changed</span>}</span>
+        <span className="hint">{HELP.ttsInstant}</span>
+      </label>
+    </div>
+  );
+
+  // ---- ElevenLabs fields -------------------------------------------------------
+  const currentVoice = voiceList?.list.find((v) => v.id === draft.elevenVoiceId);
+  const modelList = models?.list ?? [];
+  const currentModel = modelList.find((m) => m.id === draft.elevenModel);
+  const playSample = (url?: string) => {
+    if (url) void new Audio(url).play().catch(() => {});
+  };
+  const elevenFields = (
+    <div className="grid3">
+      <label>
+        Tutor voice {(changed("elevenVoiceId") || changed("elevenVoiceName")) && <span className="pill">changed</span>}
+        <span className="row" style={{ gap: 6, flexWrap: "nowrap" }}>
+          <select
+            style={{ flex: 1, minWidth: 0 }}
+            value={draft.elevenVoiceId}
+            disabled={!voiceList?.list.length}
+            onChange={(e) => {
+              const v = voiceList?.list.find((x) => x.id === e.target.value);
+              setDraft({ ...draft, elevenVoiceId: e.target.value, elevenVoiceName: v?.name ?? "" });
+            }}
+          >
+            {!currentVoice && <option value={draft.elevenVoiceId}>{draft.elevenVoiceName || draft.elevenVoiceId}{voiceList?.list.length ? " (not in your account's list)" : ""}</option>}
+            {voiceList?.list.map((v) => <option key={v.id} value={v.id}>{v.name}{v.description ? ` · ${v.description}` : ""}</option>)}
+          </select>
+          <button type="button" className="ghost small" disabled={!currentVoice?.previewUrl} onClick={() => playSample(currentVoice?.previewUrl)} title="Play ElevenLabs' sample of this voice (no credits)">▶ sample</button>
+        </span>
+        <input value={draft.elevenVoiceId} onChange={(e) => setDraft({ ...draft, elevenVoiceId: e.target.value.trim(), elevenVoiceName: voiceList?.list.find((x) => x.id === e.target.value.trim())?.name ?? "" })} placeholder="or paste a voice id" />
+        <span className="hint">
+          .env: {view.defaults.elevenVoiceName || view.defaults.elevenVoiceId}
+          {!voiceList ? " · loading voices..." : voiceList.error ? ` · could not list voices: ${voiceList.error}` : ` · ${voiceList.list.length} voices on your account`}
+        </span>
+        <span className="hint">{HELP.elevenVoiceId}</span>
+      </label>
+      <label>
+        Model {changed("elevenModel") && <span className="pill">changed</span>}
+        <select value={draft.elevenModel} onChange={(e) => set("elevenModel", e.target.value)}>
+          {!currentModel && <option value={draft.elevenModel}>{draft.elevenModel}</option>}
+          {modelList.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+        </select>
+        {currentModel?.note && <span className="hint"><strong>{currentModel.id}</strong>: {currentModel.note}</span>}
+        <span className="hint">.env: {view.defaults.elevenModel}{models?.source === "built-in" ? " · showing the documented real-time models until your account can be asked" : ""}</span>
+        <span className="hint">{HELP.elevenModel}</span>
+      </label>
+      <label>
+        Stability: {draft.elevenStability.toFixed(2)} {changed("elevenStability") && <span className="pill">changed</span>}
+        <input type="range" min={0} max={1} step={0.05} value={draft.elevenStability} onChange={(e) => set("elevenStability", Number(e.target.value))} />
+        <span className="hint">.env: {view.defaults.elevenStability}</span>
+        <span className="hint">{HELP.elevenStability}</span>
+      </label>
+      <label>
+        Speed: {draft.elevenSpeed.toFixed(2)}× {changed("elevenSpeed") && <span className="pill">changed</span>}
+        <input type="range" min={0.7} max={1.2} step={0.05} value={draft.elevenSpeed} onChange={(e) => set("elevenSpeed", Number(e.target.value))} />
+        <span className="hint">.env: {view.defaults.elevenSpeed}</span>
+        <span className="hint">{HELP.elevenSpeed}</span>
+      </label>
+    </div>
+  );
+
   return (
     <>
+      <div className="card">
+        <h2>Voice</h2>
+        <p className="muted">Browser voice mode: the student talks, AssemblyAI turns it into text, and the provider chosen here speaks the tutor's reply. Hume EVI mode (on the Session tab) is separate and always uses Hume.</p>
+        <div className="row" style={{ alignItems: "center" }}>
+          <div className="segmented" role="radiogroup" aria-label="Voice provider">
+            {providers.map((p) => (
+              <button key={p.id} type="button" role="radio" aria-checked={draft.ttsProvider === p.id} className={draft.ttsProvider === p.id ? "on" : ""} onClick={() => set("ttsProvider", p.id)}>
+                <span className={`dot ${p.ready ? "ok" : "warn"}`} aria-hidden="true" /> {p.label}
+              </button>
+            ))}
+          </div>
+          {changed("ttsProvider") && <span className="pill">changed</span>}
+          {draft.ttsProvider !== view.effective.ttsProvider && <span className="warn small">Not saved yet: sessions still use {providers.find((p) => p.id === view.effective.ttsProvider)?.label}.</span>}
+        </div>
+        <p className="small" style={{ marginTop: 6 }}>
+          {selected.ready ? (
+            <span className="muted">{HELP.ttsProvider}</span>
+          ) : (
+            <span className="warn">{selected.problem} Add it to <code>.env</code> and restart the server. Until then, voice mode shows the tutor's reply as text only.</span>
+          )}
+        </p>
+        <h3>{selected.label}</h3>
+        {draft.ttsProvider === "elevenlabs" ? elevenFields : humeFields}
+        <div className="row" style={{ marginTop: 12, alignItems: "center" }}>
+          <button type="button" className="ghost" disabled={previewBusy || !selected.ready} onClick={testVoice} title="Speaks one short tutor line with the settings above, saved or not">{previewBusy ? "Speaking..." : "▶ Test this voice"}</button>
+          {preview && <audio ref={player} controls src={preview.url} style={{ height: 32 }} />}
+          <span className="muted small">
+            {preview
+              ? `${preview.provider === "elevenlabs" ? "ElevenLabs" : "Hume"}: first audio after ${preview.firstAudioMs} ms, done in ${preview.totalMs} ms · ${preview.characters} characters of credits`
+              : "Speaks one tutor line with the settings above, saved or not. Uses about 100 characters of credits."}
+          </span>
+          {previewErr && <span className="error small">{previewErr}</span>}
+        </div>
+        <h3>Turn-taking (both providers)</h3>
+        <div className="grid3">
+          <label className="check">
+            <span><input type="checkbox" checked={draft.ttsBatchSentences} onChange={(e) => set("ttsBatchSentences", e.target.checked)} /> Batch sentences per voice request {changed("ttsBatchSentences") && <span className="pill">changed</span>}</span>
+            <span className="hint">{HELP.ttsBatchSentences}</span>
+          </label>
+          <label>
+            End of turn: short pause (ms) {changed("sttMinSilenceMs") && <span className="pill">changed</span>}
+            <input type="number" min={100} max={5000} step={50} value={draft.sttMinSilenceMs} onChange={(e) => set("sttMinSilenceMs", Number(e.target.value))} />
+            <span className="hint">.env: {view.defaults.sttMinSilenceMs}</span>
+            <span className="hint">{HELP.sttMinSilenceMs}</span>
+          </label>
+          <label>
+            End of turn: longest pause (ms) {changed("sttMaxSilenceMs") && <span className="pill">changed</span>}
+            <input type="number" min={200} max={10000} step={50} value={draft.sttMaxSilenceMs} onChange={(e) => set("sttMaxSilenceMs", Number(e.target.value))} />
+            <span className="hint">.env: {view.defaults.sttMaxSilenceMs}</span>
+            <span className="hint">{HELP.sttMaxSilenceMs}</span>
+          </label>
+        </div>
+        {saveBar}
+      </div>
+
       <div className="card">
         <h2>Model settings</h2>
         <p className="muted">Runtime overrides, saved to <code>data/settings.json</code>. They win over <code>.env</code> until you reset. Every agent reads them on each call, so no restart is needed.</p>
@@ -146,57 +353,7 @@ export function SettingsPage({ onChange }: { onChange: () => Promise<void> }) {
             <span className="hint">{HELP.refusalFallbacks}</span>
           </label>
         </div>
-        <h3>Voice (browser mode: AssemblyAI in, Hume Octave out)</h3>
-        <div className="grid3">
-          <label>
-            Tutor voice {changed("ttsVoice") && <span className="pill">changed</span>}
-            {voices.length ? (
-              <select value={voices.some((v) => v.name === draft.ttsVoice) ? draft.ttsVoice : "__custom"} onChange={(e) => { if (e.target.value !== "__custom") set("ttsVoice", e.target.value); }}>
-                {!voices.some((v) => v.name === draft.ttsVoice) && <option value="__custom">{draft.ttsVoice} (custom)</option>}
-                {voices.map((v) => <option key={v.id} value={v.name}>{v.name}</option>)}
-              </select>
-            ) : (
-              <input value={draft.ttsVoice} onChange={(e) => set("ttsVoice", e.target.value)} />
-            )}
-            <input value={draft.ttsVoice} onChange={(e) => set("ttsVoice", e.target.value)} placeholder="or type: Ava Song, HUME_AI:<name>, CUSTOM_VOICE:<id>" />
-            <span className="hint">.env: {view.defaults.ttsVoice}{voicesErr ? ` · could not list voices: ${voicesErr}` : ""}</span>
-            <span className="hint">{HELP.ttsVoice}</span>
-          </label>
-          <label>
-            Octave version {changed("ttsVersion") && <span className="pill">changed</span>}
-            <select value={draft.ttsVersion} onChange={(e) => set("ttsVersion", e.target.value as RuntimeSettings["ttsVersion"])}>
-              <option value="2">2 (fastest)</option>
-              <option value="1">1</option>
-            </select>
-            <span className="hint">.env: {view.defaults.ttsVersion}</span>
-            <span className="hint">{HELP.ttsVersion}</span>
-          </label>
-          <label className="check">
-            <span><input type="checkbox" checked={draft.ttsInstant} onChange={(e) => set("ttsInstant", e.target.checked)} /> Instant mode {changed("ttsInstant") && <span className="pill">changed</span>}</span>
-            <span className="hint">{HELP.ttsInstant}</span>
-          </label>
-          <label className="check">
-            <span><input type="checkbox" checked={draft.ttsBatchSentences} onChange={(e) => set("ttsBatchSentences", e.target.checked)} /> Batch sentences per voice request {changed("ttsBatchSentences") && <span className="pill">changed</span>}</span>
-            <span className="hint">{HELP.ttsBatchSentences}</span>
-          </label>
-          <label>
-            End of turn: short pause (ms) {changed("sttMinSilenceMs") && <span className="pill">changed</span>}
-            <input type="number" min={100} max={5000} step={50} value={draft.sttMinSilenceMs} onChange={(e) => set("sttMinSilenceMs", Number(e.target.value))} />
-            <span className="hint">.env: {view.defaults.sttMinSilenceMs}</span>
-            <span className="hint">{HELP.sttMinSilenceMs}</span>
-          </label>
-          <label>
-            End of turn: longest pause (ms) {changed("sttMaxSilenceMs") && <span className="pill">changed</span>}
-            <input type="number" min={200} max={10000} step={50} value={draft.sttMaxSilenceMs} onChange={(e) => set("sttMaxSilenceMs", Number(e.target.value))} />
-            <span className="hint">.env: {view.defaults.sttMaxSilenceMs}</span>
-            <span className="hint">{HELP.sttMaxSilenceMs}</span>
-          </label>
-        </div>
-        <div className="row" style={{ marginTop: 12 }}>
-          <button className="primary" disabled={!dirty || busy} onClick={save}>{busy ? "Saving..." : "Save"}</button>
-          <button className="ghost" disabled={busy || !Object.keys(view.overrides).length} onClick={reset}>Reset to .env defaults</button>
-          {msg && <span className="muted">{msg}</span>}
-        </div>
+        {saveBar}
       </div>
 
       <div className="card">
@@ -204,10 +361,10 @@ export function SettingsPage({ onChange }: { onChange: () => Promise<void> }) {
           <h2 style={{ margin: 0 }}>Readiness</h2>
           <div className="row">
             <button className="ghost" disabled={checking} onClick={() => check(false)}>{checking ? "Checking..." : "Re-check"}</button>
-            <button className="ghost" disabled={checking} onClick={() => check(true)} title="Makes one tiny API call with the tutor model and reports its response time">Re-check with API ping</button>
+            <button className="ghost" disabled={checking} onClick={() => check(true)} title="Makes one tiny Claude API call and, with an ElevenLabs key, reads the account's credits">Re-check with API ping</button>
           </div>
         </div>
-        <p className="muted">The same checks as <code>npm run doctor</code>. FAIL rows block a stage; WARN rows are optional features.</p>
+        <p className="muted">The same checks as <code>npm run doctor</code>. FAIL rows block a stage; WARN rows are optional features. The ping also reads your ElevenLabs credits and when they reset.</p>
         {readiness ? (
           <>
             <table className="table">

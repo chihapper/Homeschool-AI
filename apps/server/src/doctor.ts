@@ -6,7 +6,8 @@ import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
-import { config, REPO_ROOT } from "./config.js";
+import { config, REPO_ROOT, ttsVoiceLabel } from "./config.js";
+import { elevenCredits, elevenKeyProblem } from "./voice/tts-elevenlabs.js";
 
 const run = promisify(execFile);
 
@@ -88,11 +89,34 @@ export async function checkReadiness(opts: { ping?: boolean } = {}): Promise<Rea
       add(2, "warn", "Speech-to-text", "STT_PROVIDER=none: podcasts and caption-less videos will be refused.");
   }
 
-  // --- Stage 3: voice in the browser (AssemblyAI in, Hume Octave out) ---------------
+  // --- Stage 3: voice in the browser (AssemblyAI in; Hume Octave or ElevenLabs out, chosen in Settings) ---
   const stt = config.voice.sttProvider === "assemblyai" && Boolean(config.voice.assemblyAiKey);
   add(3, stt ? "ok" : "warn", "Speech-to-text: AssemblyAI (ASSEMBLYAI_API_KEY)", stt ? `model ${config.voice.assemblyAiModel}, end of turn after ${config.sttMinSilenceMs}-${config.sttMaxSilenceMs} ms of silence` : "Needed for the student to talk instead of type. Free key at assemblyai.com.");
-  const tts = config.voice.ttsProvider === "hume" && Boolean(config.hume.apiKey);
-  add(3, tts ? "ok" : "warn", "Text-to-speech: Hume Octave (HUME_API_KEY)", tts ? `Octave ${config.ttsVersion}, voice "${config.ttsVoice}"${config.ttsInstant ? ", instant mode" : ""}` : "Needed for the tutor to speak. Without it, voice mode shows text only.");
+  const elevenProblem = elevenKeyProblem(config.elevenlabs.apiKey);
+  const voices = [
+    { id: "hume", item: "Text-to-speech: Hume Octave (HUME_API_KEY)", ready: Boolean(config.hume.apiKey), problem: "HUME_API_KEY is not set.", detail: `Octave ${config.ttsVersion}, voice "${config.ttsVoice}"${config.ttsInstant ? ", instant mode" : ""}. The key's presence is checked, not the balance.` },
+    { id: "elevenlabs", item: "Text-to-speech: ElevenLabs (ELEVENLABS_API_KEY)", ready: !elevenProblem, problem: elevenProblem, detail: `${config.elevenModel}, voice "${config.ttsProvider === "elevenlabs" ? ttsVoiceLabel() : config.elevenVoiceName || config.elevenVoiceId}"` },
+  ] as const;
+  for (const v of voices) {
+    const selected = v.id === config.ttsProvider;
+    const note = v.ready
+      ? selected
+        ? `Selected. ${v.detail}`
+        : "Available: switch to it in Settings, Voice."
+      : selected
+        ? `Selected in Settings, but ${v.problem} Voice mode will show the tutor's text only.`
+        : `Optional. ${v.problem}`;
+    add(3, v.ready ? "ok" : "warn", v.item, note);
+  }
+  if (opts.ping && config.elevenlabs.apiKey) {
+    try {
+      const c = await elevenCredits();
+      const left = Math.max(0, c.limit - c.used);
+      add(3, "ok", "ElevenLabs credits", `${c.tier ?? "plan"}: ${left.toLocaleString()} of ${c.limit.toLocaleString()} characters left${c.resetsAt ? `, resets ${c.resetsAt.slice(0, 10)}` : ""}`);
+    } catch (err) {
+      add(3, config.ttsProvider === "elevenlabs" ? "fail" : "warn", "ElevenLabs credits", err instanceof Error ? err.message : String(err));
+    }
+  }
 
   // --- Stage 3 (alternative): Hume EVI speech-to-speech, which calls us through a public URL ----
   const hume = Boolean(config.hume.apiKey && config.hume.secretKey);

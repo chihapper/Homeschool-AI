@@ -59,6 +59,14 @@ Video and podcast ingestion needs two extra pieces: the `yt-dlp` binary (`pip in
 video sites, and a speech-to-text provider for anything without captions (`DEEPGRAM_API_KEY`, or a
 local `whisper` CLI with `STT_PROVIDER=whisper-cli`). YouTube captions need only `yt-dlp`.
 
+## Voice mode in the browser
+
+The student talks into the web app, AssemblyAI turns it into text, and the tutor's reply is spoken by
+**ElevenLabs** or **Hume Octave**. Pick the provider with the toggle at the top of **Settings, Voice**;
+the voice, model and sound fields below it change with the provider, and **Test this voice** speaks one
+line with the unsaved settings (about 100 characters of credits). Needs `ASSEMBLYAI_API_KEY` plus the
+chosen provider's key. The microphone works in Chrome at `http://localhost:5173`.
+
 ## Voice mode (Hume EVI)
 
 1. Get a Hume API key and secret key; put them in `.env`.
@@ -82,7 +90,9 @@ brain behind it, so voice and text sessions share the same tutor, state, and rep
 | `CLAUDE_TUTOR_MODEL`, `CLAUDE_TUTOR_EFFORT` | Live tutor model and effort. Default `claude-opus-5` at `low` effort for voice latency. |
 | `CLAUDE_REFUSAL_FALLBACKS` | Server-side fallback to another Claude model if a safety classifier declines a turn. Default on. |
 | `CLAUDE_TUTOR_THINKING`, `CLAUDE_PREWARM_CACHE` | Latency knobs; see [docs/LATENCY.md](docs/LATENCY.md). |
-| `HUME_API_KEY`, `HUME_SECRET_KEY`, `HUME_CONFIG_ID`, `PUBLIC_URL`, `CLM_SECRET` | Voice layer. |
+| `ASSEMBLYAI_API_KEY` | Browser voice: the student's speech to text. |
+| `VOICE_TTS`, `ELEVENLABS_API_KEY`, `HUME_API_KEY` | Browser voice: who speaks the tutor's reply, ElevenLabs or Hume Octave. `VOICE_TTS` is only the default; the toggle at the top of Settings, Voice switches it from the next reply. An ElevenLabs key starts with `sk_`. |
+| `HUME_API_KEY`, `HUME_SECRET_KEY`, `HUME_CONFIG_ID`, `PUBLIC_URL`, `CLM_SECRET` | Hume EVI voice mode (Hume runs the conversation loop). |
 | `YTDLP_BIN`, `STT_PROVIDER`, `DEEPGRAM_API_KEY`, `WHISPER_BIN` | Video and podcast ingestion. |
 
 ## Project layout

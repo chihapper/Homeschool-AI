@@ -13,10 +13,12 @@ import { CourseFocusSchema } from "../domain/types.js";
 import { sanitizeFocus } from "../domain/focus.js";
 import { buildProgress } from "../domain/progress.js";
 import { courses, learners, reports, sessions } from "../store/index.js";
-import { config, getSettings, MODEL_OPTIONS, REPO_ROOT, resetSettings, RuntimeSettingsSchema, updateSettings } from "../config.js";
+import { activeTtsProvider, config, getSettings, MODEL_OPTIONS, REPO_ROOT, resetSettings, RuntimeSettingsSchema, ttsVoiceLabel, updateSettings } from "../config.js";
 import { checkReadiness } from "../doctor.js";
 import { humeConfigured, mintAccessToken } from "../voice/hume.js";
-import { listHumeVoices } from "../voice/tts-hume.js";
+import { pcm16ToWav } from "../voice/pcm.js";
+import { ELEVEN_FALLBACK_MODELS, elevenKeyProblem, listElevenModels, listElevenVoices, speakElevenLabs } from "../voice/tts-elevenlabs.js";
+import { listHumeVoices, speakHume } from "../voice/tts-hume.js";
 
 const LearnerBody = z.object({ name: z.string().min(1), age: z.number().int().optional(), gradeLevel: z.string().optional() });
 const SessionBody = z.object({ learnerId: z.string(), courseId: z.string().optional(), lessonId: z.string().optional(), skipIntake: z.boolean().optional(), narrationFirst: z.boolean().optional() });
@@ -31,6 +33,9 @@ const IngestBody = z
   })
   .refine((b) => (b.urls?.length ?? 0) + (b.samples?.length ?? 0) > 0, { message: "Provide at least one url or sample." });
 const MessageBody = z.object({ text: z.string().default(""), expressions: z.array(z.string()).optional() });
+/** "Test this voice" in Settings: the draft settings, unsaved, so a parent hears a choice before keeping it. */
+const PreviewBody = z.object({ settings: RuntimeSettingsSchema.partial().optional(), text: z.string().trim().min(1).max(400).optional() });
+const PREVIEW_TEXT = "Hi! I'm your tutor. Before I tell you anything, what do you already remember about how Rome began?";
 /** Voice timings the browser measured for the latest tutor turn (the Hume EVI path measures them client-side). */
 const TurnLatencyBody = z.object({ firstAudioMs: z.number().int().min(0).max(120_000).optional(), transcriptMs: z.number().int().min(0).max(120_000).optional() });
 
@@ -54,15 +59,31 @@ function health() {
     hume: humeConfigured(),
     voice: {
       stt: config.voice.sttProvider === "assemblyai" && config.voice.assemblyAiKey ? "assemblyai" : "none",
-      tts: config.voice.ttsProvider === "hume" && config.hume.apiKey ? "hume" : "none",
-      ttsVoice: s.ttsVoice,
+      /** The provider that will actually speak: the selected one if its key is present, else none (text only). */
+      tts: activeTtsProvider(),
+      /** The provider selected in Settings, whether or not its key is present. */
+      ttsProvider: s.ttsProvider,
+      ttsVoice: ttsVoiceLabel(),
       ttsVersion: s.ttsVersion,
+      ttsModel: s.elevenModel,
     },
   };
 }
 
 function settingsView() {
-  return { ...getSettings(), options: { models: [...MODEL_OPTIONS], efforts: RuntimeSettingsSchema.shape.tutorEffort.options, thinking: RuntimeSettingsSchema.shape.tutorThinking.options } };
+  const elevenProblem = elevenKeyProblem(config.elevenlabs.apiKey);
+  return {
+    ...getSettings(),
+    options: {
+      models: [...MODEL_OPTIONS],
+      efforts: RuntimeSettingsSchema.shape.tutorEffort.options,
+      thinking: RuntimeSettingsSchema.shape.tutorThinking.options,
+      ttsProviders: [
+        { id: "hume", label: "Hume Octave", ready: Boolean(config.hume.apiKey), problem: config.hume.apiKey ? undefined : "HUME_API_KEY is not set in .env." },
+        { id: "elevenlabs", label: "ElevenLabs", ready: !elevenProblem, problem: elevenProblem },
+      ],
+    },
+  };
 }
 
 function sampleFile(name: string): string {
@@ -91,13 +112,63 @@ export function registerApiRoutes(app: FastifyInstance): void {
     return settingsView();
   });
   app.get("/api/doctor", async (req: FastifyRequest<{ Querystring: { ping?: string } }>) => checkReadiness({ ping: req.query.ping === "true" || req.query.ping === "1" }));
-  /** Hume Voice Library, for the voice picker in Settings. */
-  app.get("/api/voice/voices", async (_req, reply) => {
+  /** The voices a provider offers, for the voice picker in Settings (?provider=hume|elevenlabs; default the selected one). */
+  app.get("/api/voice/voices", async (req: FastifyRequest<{ Querystring: { provider?: string } }>, reply) => {
+    const provider = req.query.provider === "elevenlabs" || req.query.provider === "hume" ? req.query.provider : config.ttsProvider;
     try {
+      if (provider === "elevenlabs") {
+        if (!config.elevenlabs.apiKey) return reply.code(400).send({ error: elevenKeyProblem(undefined) });
+        return await listElevenVoices();
+      }
       return await listHumeVoices();
     } catch (err) {
       return reply.code(502).send({ error: err instanceof Error ? err.message : String(err) });
     }
+  });
+  /** ElevenLabs models for the picker: the account's list, or the documented real-time ones when the account cannot be asked. */
+  app.get("/api/voice/models", async () => {
+    if (!config.elevenlabs.apiKey) return { models: ELEVEN_FALLBACK_MODELS, source: "built-in", error: elevenKeyProblem(undefined) };
+    try {
+      return { models: await listElevenModels(), source: "account" };
+    } catch (err) {
+      return { models: ELEVEN_FALLBACK_MODELS, source: "built-in", error: err instanceof Error ? err.message : String(err) };
+    }
+  });
+  /**
+   * Speak one line with the given (unsaved) settings and return it as a WAV the browser can play. Spends
+   * that line's characters of the provider's credits. Headers carry the first-audio time and the provider.
+   */
+  app.post("/api/voice/preview", async (req, reply) => {
+    let body: z.infer<typeof PreviewBody>;
+    try {
+      body = PreviewBody.parse(req.body ?? {});
+    } catch (err) {
+      return reply.code(400).send({ error: err instanceof Error ? err.message : String(err) });
+    }
+    const s = { ...getSettings().effective, ...(body.settings ?? {}) };
+    const text = body.text ?? PREVIEW_TEXT;
+    const t0 = performance.now();
+    let firstMs: number | undefined;
+    const parts: Buffer[] = [];
+    try {
+      const chunks =
+        s.ttsProvider === "elevenlabs"
+          ? speakElevenLabs(text, { voiceId: s.elevenVoiceId, model: s.elevenModel, stability: s.elevenStability, speed: s.elevenSpeed })
+          : speakHume(text, { voice: s.ttsVoice, version: s.ttsVersion, instant: s.ttsInstant, trailingSilence: 0.3 });
+      for await (const c of chunks) {
+        firstMs ??= Math.round(performance.now() - t0);
+        parts.push(c.pcm);
+      }
+    } catch (err) {
+      return reply.code(502).send({ error: err instanceof Error ? err.message : String(err) });
+    }
+    return reply
+      .header("content-type", "audio/wav")
+      .header("x-provider", s.ttsProvider)
+      .header("x-first-audio-ms", String(firstMs ?? 0))
+      .header("x-total-ms", String(Math.round(performance.now() - t0)))
+      .header("x-characters", String(text.length))
+      .send(pcm16ToWav(Buffer.concat(parts), config.voice.playbackSampleRate));
   });
 
   // ---- Courses -------------------------------------------------------------

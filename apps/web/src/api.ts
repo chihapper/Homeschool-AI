@@ -32,13 +32,22 @@ export interface ProgressSummary {
   misconceptionsAtLatestSession: Array<{ conceptId: string; name: string; misconceptions: string[] }>;
   latestRecommendedNext: string[]; latestParentSummary: string; totals: ProgressCounts; latest: ProgressCounts;
 }
+export type TtsProvider = "hume" | "elevenlabs";
 export interface RuntimeSettings {
   model: string; tutorModel: string; tutorEffort: string; analysisEffort: string; reflectEffort: string; tutorThinking: "adaptive" | "disabled"; prewarmCache: boolean; refusalFallbacks: boolean;
+  ttsProvider: TtsProvider;
   ttsVoice: string; ttsVersion: "1" | "2"; ttsInstant: boolean; ttsBatchSentences: boolean; sttMinSilenceMs: number; sttMaxSilenceMs: number;
+  elevenVoiceId: string; elevenVoiceName: string; elevenModel: string; elevenStability: number; elevenSpeed: number;
 }
-export interface SettingsView { effective: RuntimeSettings; defaults: RuntimeSettings; overrides: Partial<RuntimeSettings>; options: { models: string[]; efforts: string[]; thinking: string[] } }
+/** A text-to-speech provider as Settings offers it: whether its key is in .env, and what is wrong if not. */
+export interface TtsProviderOption { id: TtsProvider; label: string; ready: boolean; problem?: string }
+export interface SettingsView { effective: RuntimeSettings; defaults: RuntimeSettings; overrides: Partial<RuntimeSettings>; options: { models: string[]; efforts: string[]; thinking: string[]; ttsProviders: TtsProviderOption[] } }
+export interface VoiceOption { id: string; name: string; description?: string; previewUrl?: string; category?: string }
+export interface VoiceModelOption { id: string; name: string; note?: string }
+/** A spoken sample of the draft voice settings, ready to play, and how fast the first audio came back. */
+export interface VoicePreview { url: string; provider: string; firstAudioMs: number; totalMs: number; characters: number }
 export interface Readiness { rows: Array<{ status: "ok" | "warn" | "fail"; item: string; note: string; stage: 0 | 1 | 2 | 3 }>; blocking: number; optional: number; checkedAt: string }
-export interface Health { ok: boolean; model: string; tutorModel: string; tutorEffort: string; tutorThinking: string; hume: boolean; voice: { stt: "assemblyai" | "none"; tts: "hume" | "none"; ttsVoice: string; ttsVersion: string } }
+export interface Health { ok: boolean; model: string; tutorModel: string; tutorEffort: string; tutorThinking: string; hume: boolean; voice: { stt: "assemblyai" | "none"; tts: TtsProvider | "none"; ttsProvider: TtsProvider; ttsVoice: string; ttsVersion: string; ttsModel: string } }
 
 async function j<T>(res: Response): Promise<T> {
   if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error ?? `${res.status} ${res.statusText}`);
@@ -53,7 +62,16 @@ export const api = {
   saveSettings: (patch: Partial<RuntimeSettings>) => fetch("/api/settings", json("PUT", patch)).then(j<SettingsView>),
   resetSettings: () => fetch("/api/settings", { method: "DELETE" }).then(j<SettingsView>),
   doctor: (ping: boolean) => fetch(`/api/doctor?ping=${ping}`).then(j<Readiness>),
-  voices: () => fetch("/api/voice/voices").then(j<Array<{ id: string; name: string }>>),
+  voices: (provider: TtsProvider) => fetch(`/api/voice/voices?provider=${provider}`).then(j<VoiceOption[]>),
+  /** ElevenLabs models: the account's list, or the documented real-time ones ("built-in") when the account cannot be asked. */
+  voiceModels: () => fetch("/api/voice/models").then(j<{ models: VoiceModelOption[]; source: "account" | "built-in"; error?: string }>),
+  /** Speak a sample line with unsaved settings. Spends that line's characters of the provider's credits. */
+  previewVoice: async (settings: Partial<RuntimeSettings>, text?: string): Promise<VoicePreview> => {
+    const res = await fetch("/api/voice/preview", json("POST", { settings, text }));
+    if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error ?? `${res.status} ${res.statusText}`);
+    const n = (h: string) => Number(res.headers.get(h) ?? 0);
+    return { url: URL.createObjectURL(await res.blob()), provider: res.headers.get("x-provider") ?? "", firstAudioMs: n("x-first-audio-ms"), totalMs: n("x-total-ms"), characters: n("x-characters") };
+  },
 
   courses: () => fetch("/api/courses").then(j<Course[]>),
   chunks: (courseId: string) => fetch(`/api/courses/${courseId}/chunks`).then(j<Chunk[]>),

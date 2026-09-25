@@ -63,7 +63,9 @@ const TALK_LABEL: Record<VoiceState, string> = {
 };
 
 function SessionInner({ courses, learners, health, session, onSession, onReport, humeError, clearHumeError }: Props & { humeError: string | null; clearHumeError: () => void }) {
-  const voiceReady = Boolean(health?.voice.stt === "assemblyai" && health?.voice.tts === "hume");
+  const voiceReady = Boolean(health?.voice.stt === "assemblyai" && health?.voice.tts && health.voice.tts !== "none");
+  // Which provider speaks, in words: "ElevenLabs eleven_flash_v2_5" or "Hume Octave 2".
+  const ttsLabel = health?.voice.ttsProvider === "elevenlabs" ? `ElevenLabs ${health.voice.ttsModel}` : `Hume Octave ${health?.voice.ttsVersion ?? ""}`;
   const [learnerId, setLearnerId] = useState("");
   const [courseId, setCourseId] = useState("");
   const [lessonId, setLessonId] = useState("");
@@ -410,7 +412,7 @@ function SessionInner({ courses, learners, health, session, onSession, onReport,
             <label>
               Mode
               <select value={mode} onChange={(e) => setMode(e.target.value as Mode)}>
-                <option value="voice">{voiceReady ? "Voice: talk to the tutor" : "Voice (not configured)"}</option>
+                <option value="voice">{voiceReady ? `Voice: talk to the tutor (${health?.voice.ttsProvider === "elevenlabs" ? "ElevenLabs" : "Hume"})` : "Voice (not configured)"}</option>
                 <option value="text">Text</option>
                 <option value="evi">Voice via Hume EVI (needs a public URL)</option>
               </select>
@@ -422,8 +424,8 @@ function SessionInner({ courses, learners, health, session, onSession, onReport,
             <button className="primary" disabled={!learnerId || !courseId || busy || (mode === "voice" && !voiceReady)} onClick={start}>{busy ? "Starting..." : "Begin"}</button>
           </div>
           {course && startable.length === 0 && <p className="warn small">Every lesson in this course is skipped in its Focus (Courses tab). Keep at least one concept to start a session.</p>}
-          {mode === "voice" && !voiceReady && <p className="warn small">Browser voice needs ASSEMBLYAI_API_KEY (speech-to-text) and HUME_API_KEY (text-to-speech). See Settings › Readiness.</p>}
-          {mode === "voice" && voiceReady && <p className="muted small">The tutor speaks first. Click Talk (or just wait for it to listen), speak, and pause when you are done. Speech-to-text: AssemblyAI · voice: {health?.voice.ttsVoice} (Hume Octave {health?.voice.ttsVersion}).</p>}
+          {mode === "voice" && !voiceReady && <p className="warn small">Browser voice needs ASSEMBLYAI_API_KEY (speech-to-text) and {health?.voice.ttsProvider === "elevenlabs" ? "ELEVENLABS_API_KEY" : "HUME_API_KEY"} (text-to-speech for the provider selected in Settings, Voice). See Settings › Readiness.</p>}
+          {mode === "voice" && voiceReady && <p className="muted small">The tutor speaks first. Click Talk (or just wait for it to listen), speak, and pause when you are done. Speech-to-text: AssemblyAI · voice: {health?.voice.ttsVoice} ({ttsLabel}). Switch provider in Settings, Voice.</p>}
           {learner && !learner.profile && !skipIntake && <p className="muted">{learner.name} has no profile yet, so the session opens with a short intake conversation before the lesson. Reset a profile from the Students tab to run intake again.</p>}
           {health && <p className="muted small">Tutor: <code>{health.tutorModel}</code> @ {health.tutorEffort}, {health.tutorThinking} thinking. Change in Settings before starting.</p>}
           {err && <p className="error">{err}</p>}
@@ -570,7 +572,7 @@ function SessionInner({ courses, learners, health, session, onSession, onReport,
             </tbody>
           </table>
           {health && <p className="muted small">Tutor <code>{health.tutorModel}</code> @ {health.tutorEffort} · {health.tutorThinking}</p>}
-          {mode === "voice" && voiceInfo && <p className="muted small">Speech-to-text {voiceInfo.stt} · voice {voiceInfo.voice} · {voiceInfo.playbackSampleRate / 1000} kHz playback</p>}
+          {mode === "voice" && voiceInfo && <p className="muted small">Speech-to-text {voiceInfo.stt} · voice {voiceInfo.voice}{voiceInfo.tts !== "none" ? ` (${voiceInfo.tts === "elevenlabs" ? "ElevenLabs" : "Hume"}${voiceInfo.ttsModel ? ` ${voiceInfo.ttsModel}` : ""})` : " (text only)"} · {voiceInfo.playbackSampleRate / 1000} kHz playback</p>}
           <details>
             <summary className="muted small">Raw session state</summary>
             <pre className="raw">{JSON.stringify({ ...session, transcript: `(${session.transcript.length} turns)` }, null, 2)}</pre>

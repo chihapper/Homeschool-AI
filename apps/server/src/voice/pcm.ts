@@ -58,6 +58,67 @@ export function gapAfter(sentence: string, paraBreak = false): number {
   return paraBreak ? Math.max(base, SENTENCE_GAP_MS.paragraph) : base;
 }
 
+/**
+ * Turns a byte stream into whole 16-bit samples. A network chunk can end halfway through a sample, and
+ * the browser reads every frame as Int16, so an odd byte sent on its own would shift every later sample
+ * into noise. The odd byte waits for the next chunk instead. The first `fadeMs` are faded in so a clip
+ * never starts with a click.
+ */
+export class Pcm16Stream {
+  private carry: Buffer | undefined;
+  private emitted = 0;
+  private readonly fadeSamples: number;
+
+  constructor(rate: number, fadeMs = 5) {
+    this.fadeSamples = Math.max(0, Math.round((rate * fadeMs) / 1000));
+  }
+
+  push(chunk: Uint8Array): Buffer {
+    let bytes = Buffer.from(chunk);
+    if (this.carry) {
+      bytes = Buffer.concat([this.carry, bytes]);
+      this.carry = undefined;
+    }
+    if (bytes.length % 2) {
+      this.carry = bytes.subarray(bytes.length - 1);
+      bytes = bytes.subarray(0, bytes.length - 1);
+    }
+    if (!bytes.length) return Buffer.alloc(0);
+    const out = Buffer.from(bytes);
+    const n = out.length / 2;
+    for (let i = 0; i < n && this.emitted + i < this.fadeSamples; i++) {
+      const g = (this.emitted + i) / this.fadeSamples;
+      out.writeInt16LE(Math.round(out.readInt16LE(i * 2) * g), i * 2);
+    }
+    this.emitted += n;
+    return out;
+  }
+
+  /** Samples emitted so far. A trailing odd byte at the very end is half a sample and is dropped. */
+  get samples(): number {
+    return this.emitted;
+  }
+}
+
+/** A playable WAV file (RIFF, 16-bit mono) around raw PCM, for previews in the browser. */
+export function pcm16ToWav(pcm: Buffer, rate: number): Buffer {
+  const header = Buffer.alloc(44);
+  header.write("RIFF", 0, "ascii");
+  header.writeUInt32LE(36 + pcm.length, 4);
+  header.write("WAVE", 8, "ascii");
+  header.write("fmt ", 12, "ascii");
+  header.writeUInt32LE(16, 16); // fmt chunk size
+  header.writeUInt16LE(1, 20); // PCM
+  header.writeUInt16LE(1, 22); // mono
+  header.writeUInt32LE(rate, 24);
+  header.writeUInt32LE(rate * 2, 28); // byte rate
+  header.writeUInt16LE(2, 32); // block align
+  header.writeUInt16LE(16, 34); // bits per sample
+  header.write("data", 36, "ascii");
+  header.writeUInt32LE(pcm.length, 40);
+  return Buffer.concat([header, pcm]);
+}
+
 /** Peak level of a PCM chunk as a fraction of full scale (0..1). Cheap voice-activity signal. */
 export function peakPcm16(pcm: Buffer): number {
   let peak = 0;

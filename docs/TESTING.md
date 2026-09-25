@@ -127,7 +127,10 @@ into textbook prose.
 Two keys and no tunnel: AssemblyAI streams the student's speech to text as they talk and signals the
 end of their turn the moment they stop; Hume Octave speaks the tutor's reply sentence by sentence while
 the model is still writing the next one. Both were the winners of the character engine's bake-off and
-the adapters are ported from there (`apps/server/src/voice/stt-assemblyai.ts`, `tts-hume.ts`).
+the adapters are ported from there (`apps/server/src/voice/stt-assemblyai.ts`, `tts-hume.ts`,
+`tts-elevenlabs.ts`). The tutor's voice is ElevenLabs or Hume Octave, switched with the toggle at the top of
+Settings, Voice; **Test this voice** there speaks one line with the unsaved settings and reports the
+first-audio time, which is the quickest way to compare voices and models before a session.
 
 ```bash
 # .env: ASSEMBLYAI_API_KEY=...   HUME_API_KEY=...   (HUME_TTS_VOICE defaults to "Ava Song")

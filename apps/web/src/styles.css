@@ -113,3 +113,13 @@ details summary { cursor: pointer; }
 .lesson-row.skipped > details > summary, .concept.skipped { opacity: 0.55; }
 .focus-toggle { cursor: pointer; }
 .focus-toggle input { vertical-align: middle; margin: 0 2px 0 0; }
+
+/* Voice provider toggle: one segmented control at the top of Settings; the fields below follow it. */
+.segmented { display: inline-flex; border: 1px solid #d8d2c4; border-radius: 10px; overflow: hidden; background: #fff; }
+.segmented button { font: inherit; border: none; background: none; padding: 9px 18px; cursor: pointer; color: var(--ink); display: inline-flex; align-items: center; gap: 8px; }
+.segmented button + button { border-left: 1px solid #d8d2c4; }
+.segmented button.on { background: var(--accent); color: #fff; }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.dot.ok { background: #3b9b5a; }
+.dot.warn { background: #d99a1e; }
+input[type="range"] { width: 100%; accent-color: var(--accent); }

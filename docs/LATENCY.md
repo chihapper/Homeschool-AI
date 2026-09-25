@@ -70,3 +70,22 @@ who answers within a few seconds waits the remainder, on top of the usual time t
 this did not bite; in voice, where a one-word answer is normal, it will. Options when it does: lower
 `reflectEffort`, or compose the next reply against the session as it stands and let a late phase change
 apply one turn later.
+
+## Two voices for the tutor (2026-09-24)
+
+Browser voice mode can speak through ElevenLabs as well as Hume Octave (`ttsProvider`, the toggle at the
+top of Settings, Voice). Both deliver 24 kHz PCM, so the switch applies from the next reply without
+reconnecting. Measured 2026-09-24 on this machine (Starter plan, voice George):
+
+| ElevenLabs model | First audio, direct | Through "Test this voice" | Stitching (`previous_request_ids`) |
+|---|---|---|---|
+| Flash v2.5 | 236 ms | 162-209 ms | works (277 ms stitched) |
+| v3 Conversational | 263 ms | 247 ms | refused: HTTP 400 `unsupported_model` |
+| Multilingual v2 | 1,328 ms | not measured | works |
+
+Direct numbers follow one warm-up request per model. Hume Octave 2 measured about 0.6 s here earlier.
+In a live voice session over the app's WebSocket (Flash v2.5, Sonnet 5 at low effort, text input, so no
+transcription delay), first audio came 1.62 s and 1.79 s after the turn started, about 0.23 to 0.63 s
+after the model's first word: the voice is no longer the slow part, the model is. Between 20 and 54 of
+each clip's roughly 180 network chunks arrived with an odd byte count, which is why ElevenLabs audio goes
+through `Pcm16Stream`; no odd-length frame reached the browser.

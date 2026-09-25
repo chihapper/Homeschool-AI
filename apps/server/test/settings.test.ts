@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { config, envDefaults, getSettings, resetSettings, updateSettings, useSettingsFile } from "../src/config.js";
+import { config, envDefaults, getSettings, resetSettings, ttsVoiceLabel, updateSettings, useSettingsFile } from "../src/config.js";
 import { tutorAgent } from "../src/agents/tutor-agent.js";
 import { assessorAgent } from "../src/agents/assessor-agent.js";
 
@@ -34,6 +34,21 @@ describe("runtime settings", () => {
     expect(() => updateSettings({ tutorEffort: "turbo" })).toThrow();
     expect(() => updateSettings({ tutorModel: "" })).toThrow();
     expect(config.tutorEffort).toBe("medium");
+  });
+
+  it("switches the voice provider and validates the ElevenLabs settings", () => {
+    updateSettings({ ttsProvider: "elevenlabs", elevenVoiceId: "abc123", elevenVoiceName: "Matilda", elevenModel: "eleven_v3_conversational", elevenStability: 0.35, elevenSpeed: 0.9 });
+    expect(config.ttsProvider).toBe("elevenlabs");
+    expect(config.elevenModel).toBe("eleven_v3_conversational");
+    expect(ttsVoiceLabel()).toBe("Matilda");
+    updateSettings({ elevenVoiceName: "" });
+    expect(ttsVoiceLabel()).toBe("abc123"); // an id with no stored name still reads as something
+    for (const bad of [{ ttsProvider: "cartesia" }, { elevenStability: 1.5 }, { elevenSpeed: 1.3 }, { elevenSpeed: 0.5 }, { elevenVoiceId: "" }]) {
+      expect(() => updateSettings(bad)).toThrow();
+    }
+    updateSettings({ ttsProvider: "hume" });
+    expect(ttsVoiceLabel()).toBe(config.ttsVoice);
+    resetSettings();
   });
 
   it("drops overrides that restate the default, and reset returns to the environment", () => {

@@ -12,12 +12,14 @@
  */
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { WebSocket } from "ws";
-import { config } from "../config.js";
+import { activeTtsProvider, config, ttsVoiceLabel } from "../config.js";
 import type { Course } from "../domain/types.js";
 import { annotateLastTurn, respond } from "../orchestrator/session.js";
 import { courses, sessions } from "../store/index.js";
+import { gapAfter, silencePcm16 } from "./pcm.js";
 import { SentenceChunker, type Segment } from "./sentence-chunker.js";
 import { AssemblyAIStream } from "./stt-assemblyai.js";
+import { ELEVEN_SAMPLE_RATE, freshRequestIds, rememberRequest, speakElevenLabs, type StitchedRequest } from "./tts-elevenlabs.js";
 import { speakHume, trailingSilenceFor, type Utterance } from "./tts-hume.js";
 
 /** A tiny async queue: the text producer pushes sentences, the speech consumer awaits them. */
@@ -101,7 +103,14 @@ interface Conn {
   micWanted: boolean;
   /** Hume generation id of the last sentence, so prosody carries across sentences and turns. */
   lastGeneration: string | undefined;
+  /** ElevenLabs requests that played to the end, for stitching; only valid for the voice and model they were made with. */
+  eleven: { key: string; requests: StitchedRequest[] };
   closed: boolean;
+}
+
+/** One speech request for ElevenLabs: the batch's sentences as one text, so the voice reads them as a run. */
+export function elevenText(batch: Segment[]): string {
+  return batch.map((s) => cleanForSpeech(s.text)).filter(Boolean).join(" ");
 }
 
 export function registerLiveVoiceRoutes(app: FastifyInstance): void {
@@ -131,6 +140,7 @@ export function registerLiveVoiceRoutes(app: FastifyInstance): void {
       turn: null,
       micWanted: false,
       lastGeneration: undefined,
+      eleven: { key: "", requests: [] },
       closed: false,
     };
     const log = req.log;
@@ -141,8 +151,10 @@ export function registerLiveVoiceRoutes(app: FastifyInstance): void {
       phase: session.phase,
       conceptIndex: session.conceptIndex,
       stt: config.voice.sttProvider === "assemblyai" && config.voice.assemblyAiKey ? "assemblyai" : "none",
-      tts: config.voice.ttsProvider === "hume" && config.hume.apiKey ? "hume" : "none",
-      voice: config.ttsVoice,
+      // Both providers deliver 24 kHz, so a provider switch in Settings applies from the next reply without reconnecting.
+      tts: activeTtsProvider(),
+      voice: ttsVoiceLabel(),
+      ttsModel: config.ttsProvider === "elevenlabs" ? config.elevenModel : `Octave ${config.ttsVersion}`,
       micSampleRate: config.voice.micSampleRate,
       playbackSampleRate: config.voice.playbackSampleRate,
     });
@@ -153,7 +165,9 @@ export function registerLiveVoiceRoutes(app: FastifyInstance): void {
       const abort = new AbortController();
       const ms = (): number => Math.round(performance.now() - t0);
       const marks: Record<string, number> = { transcript_ready: transcriptMs };
-      const speak = config.voice.ttsProvider === "hume" && Boolean(config.hume.apiKey);
+      // Read once per turn: a reply is never voiced half by one provider and half by the other.
+      const provider = activeTtsProvider();
+      const speak = provider !== "none";
 
       // Resolved once the learner has heard everything; see Conn.turn.
       let spoken = (): void => {};
@@ -202,21 +216,47 @@ export function registerLiveVoiceRoutes(app: FastifyInstance): void {
             let batch: Segment[] = [first];
             if (batching) ({ batch, endSeen } = takeBatch(first, () => q.tryNext()));
             if (!speak || abort.signal.aborted) continue; // drain
-            const utterances: Utterance[] = batch
-              .map((seg, i) => ({ text: cleanForSpeech(seg.text), trailingSilence: trailingSilenceFor(seg.text, i === batch.length - 1, seg.paraBreak) }))
-              .filter((u) => u.text);
-            if (!utterances.length) continue;
+            const startAudio = (): void => {
+              if (audioStarted) return;
+              audioStarted = true;
+              marks.first_audio = ms();
+              send({ type: "audio_start" });
+            };
             try {
+              if (provider === "elevenlabs") {
+                const text = elevenText(batch);
+                if (!text) continue;
+                // Stitching ids only mean something for the voice and model that produced them.
+                const key = `${config.elevenVoiceId}|${config.elevenModel}`;
+                if (conn.eleven.key !== key) conn.eleven = { key, requests: [] };
+                marks.tts_requests = (marks.tts_requests ?? 0) + 1;
+                log.debug({ sentences: batch.length, chars: text.length }, "tts request (elevenlabs)");
+                let requestId: string | undefined;
+                const opts = { voiceId: config.elevenVoiceId, model: config.elevenModel, stability: config.elevenStability, speed: config.elevenSpeed, previousRequestIds: freshRequestIds(conn.eleven.requests), signal: abort.signal };
+                for await (const chunk of speakElevenLabs(text, opts)) {
+                  requestId = chunk.requestId ?? requestId;
+                  startAudio();
+                  sendAudio(chunk.pcm);
+                }
+                if (!abort.signal.aborted) {
+                  // Played to the end, so the next request may be stitched to it.
+                  if (requestId) conn.eleven.requests = rememberRequest(conn.eleven.requests, requestId);
+                  // A breath before the next request; within one request the voice paces itself.
+                  const last = batch[batch.length - 1];
+                  sendAudio(silencePcm16(gapAfter(last.text, last.paraBreak), ELEVEN_SAMPLE_RATE));
+                }
+                continue;
+              }
+              const utterances: Utterance[] = batch
+                .map((seg, i) => ({ text: cleanForSpeech(seg.text), trailingSilence: trailingSilenceFor(seg.text, i === batch.length - 1, seg.paraBreak) }))
+                .filter((u) => u.text);
+              if (!utterances.length) continue;
               const opts = { voice: config.ttsVoice, version: config.ttsVersion, instant: config.ttsInstant, continuation: conn.lastGeneration, signal: abort.signal };
               marks.tts_requests = (marks.tts_requests ?? 0) + 1;
               log.debug({ sentences: utterances.length, chars: utterances.reduce((a, u) => a + u.text.length, 0) }, "tts request");
               for await (const chunk of speakHume(utterances, opts)) {
                 if (chunk.generationId) conn.lastGeneration = chunk.generationId;
-                if (!audioStarted) {
-                  audioStarted = true;
-                  marks.first_audio = ms();
-                  send({ type: "audio_start" });
-                }
+                startAudio();
                 sendAudio(chunk.pcm);
               }
             } catch (err) {

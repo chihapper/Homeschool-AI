@@ -16,8 +16,10 @@ export interface ReadyMessage {
   phase: Phase;
   conceptIndex: number;
   stt: "assemblyai" | "none";
-  tts: "hume" | "none";
+  tts: "hume" | "elevenlabs" | "none";
   voice: string;
+  /** "Octave 2" for Hume, the model id for ElevenLabs. */
+  ttsModel?: string;
   micSampleRate: number;
   playbackSampleRate: number;
 }

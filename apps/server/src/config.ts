@@ -48,6 +48,16 @@ const dataDir = path.resolve(REPO_ROOT, env("DATA_DIR", "data")!);
 export const EffortSchema = z.enum(["low", "medium", "high", "xhigh", "max"]);
 export type Effort = z.infer<typeof EffortSchema>;
 
+/** Who voices the tutor in browser voice mode. Hume EVI mode is separate and always Hume. */
+export const TTS_PROVIDERS = ["hume", "elevenlabs"] as const;
+export type TtsProvider = (typeof TTS_PROVIDERS)[number];
+
+/** A number from the environment, or the fallback when it is missing or outside [min, max]. */
+function envNumber(name: string, min: number, max: number, fallback: number): number {
+  const n = Number(env(name));
+  return Number.isFinite(n) && n >= min && n <= max ? n : fallback;
+}
+
 export const RuntimeSettingsSchema = z.object({
   /** Model used by the offline agents (curriculum, profile extraction, assessor). */
   model: z.string().min(1),
@@ -65,6 +75,8 @@ export const RuntimeSettingsSchema = z.object({
   prewarmCache: z.boolean(),
   /** Route safety-classifier refusals to a fallback model automatically. */
   refusalFallbacks: z.boolean(),
+  /** Who voices the tutor in browser voice mode. Read at the start of every turn, so a switch applies to the next reply. */
+  ttsProvider: z.enum(TTS_PROVIDERS),
   /** Hume voice for the tutor: a Voice Library name ("Ava Song"), or "CUSTOM_VOICE:<id>" for a saved voice. */
   ttsVoice: z.string().min(1),
   /** Octave model version. "2" is faster; "1" honours per-utterance acting descriptions. */
@@ -73,6 +85,16 @@ export const RuntimeSettingsSchema = z.object({
   ttsInstant: z.boolean(),
   /** Send the sentences already waiting as one request so the voice keeps its cadence across them. Off = one request per sentence. */
   ttsBatchSentences: z.boolean(),
+  /** ElevenLabs voice id, picked from the account's voice list in Settings. */
+  elevenVoiceId: z.string().min(1),
+  /** That voice's display name, kept with the id so status lines need no API call. */
+  elevenVoiceName: z.string(),
+  /** ElevenLabs model id. Flash v2.5 is the fastest (about 75 ms); v3 Conversational costs the same credits and is more expressive. */
+  elevenModel: z.string().min(1),
+  /** 0 to 1. Lower gives a broader emotional range; higher a steadier, flatter read. */
+  elevenStability: z.number().min(0).max(1),
+  /** 0.7 to 1.2. Speaking rate; 1 is the voice's natural pace. */
+  elevenSpeed: z.number().min(0.7).max(1.2),
   /** Silence, in ms, before the transcriber decides the student has finished a thought (short pauses). */
   sttMinSilenceMs: z.number().int().min(100).max(5000),
   /** Silence, in ms, after which a turn ends regardless of how confident the transcriber is. */
@@ -90,10 +112,17 @@ export const envDefaults: RuntimeSettings = {
   tutorThinking: env("CLAUDE_TUTOR_THINKING", "adaptive") === "disabled" ? "disabled" : "adaptive",
   prewarmCache: env("CLAUDE_PREWARM_CACHE", "true") !== "false",
   refusalFallbacks: env("CLAUDE_REFUSAL_FALLBACKS", "true") !== "false",
+  ttsProvider: env("VOICE_TTS", "hume") === "elevenlabs" ? "elevenlabs" : "hume",
   ttsVoice: env("HUME_TTS_VOICE", "Ava Song")!,
   ttsVersion: env("HUME_TTS_VERSION", "2") === "1" ? "1" : "2",
   ttsInstant: env("HUME_TTS_INSTANT", "true") !== "false",
   ttsBatchSentences: env("HUME_TTS_BATCH", "true") !== "false",
+  // George, a premade voice used in ElevenLabs' own quickstart. Any voice from the account's list works.
+  elevenVoiceId: env("ELEVENLABS_VOICE_ID", "JBFqnCBsd6RMkjVDRZzb")!,
+  elevenVoiceName: env("ELEVENLABS_VOICE_NAME", env("ELEVENLABS_VOICE_ID") ? "" : "George")!,
+  elevenModel: env("ELEVENLABS_MODEL", "eleven_flash_v2_5")!,
+  elevenStability: envNumber("ELEVENLABS_STABILITY", 0, 1, 0.5),
+  elevenSpeed: envNumber("ELEVENLABS_SPEED", 0.7, 1.2, 1),
   sttMinSilenceMs: Number(env("ASSEMBLYAI_MIN_TURN_SILENCE", "400")),
   sttMaxSilenceMs: Number(env("ASSEMBLYAI_MAX_TURN_SILENCE", "1500")),
 };
@@ -188,8 +217,26 @@ export const config = {
   get prewarmCache(): boolean {
     return effective().prewarmCache;
   },
+  get ttsProvider(): TtsProvider {
+    return effective().ttsProvider;
+  },
   get ttsVoice(): string {
     return effective().ttsVoice;
+  },
+  get elevenVoiceId(): string {
+    return effective().elevenVoiceId;
+  },
+  get elevenVoiceName(): string {
+    return effective().elevenVoiceName;
+  },
+  get elevenModel(): string {
+    return effective().elevenModel;
+  },
+  get elevenStability(): number {
+    return effective().elevenStability;
+  },
+  get elevenSpeed(): number {
+    return effective().elevenSpeed;
   },
   get ttsVersion(): "1" | "2" {
     return effective().ttsVersion;
@@ -216,8 +263,6 @@ export const config = {
     sttProvider: env("VOICE_STT", "assemblyai") as "assemblyai" | "none",
     assemblyAiKey: env("ASSEMBLYAI_API_KEY"),
     assemblyAiModel: env("ASSEMBLYAI_SPEECH_MODEL", "universal-3-5-pro")!,
-    /** Text-to-speech for the tutor: hume (Octave) or none (text only). */
-    ttsProvider: env("VOICE_TTS", "hume") as "hume" | "none",
     /** Sample rates: what the browser sends, what Hume returns, what we send back to the browser. */
     micSampleRate: 16_000,
     humeSampleRate: Number(env("HUME_TTS_SAMPLE_RATE", "48000")),
@@ -234,6 +279,12 @@ export const config = {
   },
   /** yt-dlp binary used for YouTube / TED / other video and audio URLs. */
   ytDlpBin: env("YTDLP_BIN", "yt-dlp")!,
+
+  /** ElevenLabs text-to-speech, the alternative to Hume Octave in browser voice mode. */
+  elevenlabs: {
+    /** The key itself (starts with "sk_"), not the key ID that the dashboard lists beside it. */
+    apiKey: env("ELEVENLABS_API_KEY"),
+  },
 
   hume: {
     apiKey: env("HUME_API_KEY"),
@@ -255,6 +306,18 @@ export const config = {
  */
 export function resolveUserPath(p: string): string {
   return path.resolve(process.env.INIT_CWD ?? process.cwd(), p);
+}
+
+/** The provider browser voice will use right now: the one selected in Settings, if its key is present. */
+export function activeTtsProvider(): TtsProvider | "none" {
+  const provider = config.ttsProvider;
+  const key = provider === "elevenlabs" ? config.elevenlabs.apiKey : config.hume.apiKey;
+  return key ? provider : "none";
+}
+
+/** The selected provider's voice, as a person would name it. */
+export function ttsVoiceLabel(): string {
+  return config.ttsProvider === "elevenlabs" ? config.elevenVoiceName || config.elevenVoiceId : config.ttsVoice;
 }
 
 export function requireAnthropicKey(): void {
