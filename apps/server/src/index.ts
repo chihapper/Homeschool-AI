@@ -5,7 +5,7 @@ import Fastify from "fastify";
 import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
 import websocket from "@fastify/websocket";
-import { config, requireAnthropicKey, activeTtsProvider, ttsVoiceLabel } from "./config.js";
+import { config, requireAnthropicKey, activeTtsProvider, ttsModelLabel, ttsVoiceLabel } from "./config.js";
 import { registerApiRoutes } from "./routes/api.js";
 import { registerClmRoutes } from "./voice/clm.js";
 import { registerLiveVoiceRoutes } from "./voice/live.js";
@@ -26,7 +26,7 @@ async function main(): Promise<void> {
   const app = await buildServer();
   await app.listen({ port: config.port, host: config.host });
   app.log.info(`Model: ${config.model} (tutor: ${config.tutorModel} @ ${config.tutorEffort})`);
-  app.log.info(`Browser voice: speech-to-text ${config.voice.sttProvider === "assemblyai" && config.voice.assemblyAiKey ? "AssemblyAI" : "off"}, text-to-speech ${activeTtsProvider() === "none" ? `off (${config.ttsProvider} selected, key missing)` : config.ttsProvider === "elevenlabs" ? `ElevenLabs ${config.elevenModel} (${ttsVoiceLabel()})` : `Hume Octave ${config.ttsVersion} (${config.ttsVoice})`}`);
+  app.log.info(`Browser voice: speech-to-text ${config.voice.sttProvider === "assemblyai" && config.voice.assemblyAiKey ? "AssemblyAI" : "off"}, text-to-speech ${activeTtsProvider() === "none" ? `off (${config.ttsProvider} selected, key missing)` : `${{ hume: "Hume", elevenlabs: "ElevenLabs", inworld: "Inworld" }[config.ttsProvider]} ${ttsModelLabel()} (${ttsVoiceLabel()})`}`);
   app.log.info(config.hume.apiKey ? `Hume EVI: CLM at ${config.hume.publicUrl ?? "(set PUBLIC_URL)"}/clm/chat/completions` : "Hume EVI not configured");
 }
 

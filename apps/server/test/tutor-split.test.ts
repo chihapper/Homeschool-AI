@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { buildTutorContext, tutorTools, type TutorContext } from "../src/agents/tutor-agent.js";
+import { buildTutorContext, passagesForLatestReply, tutorTools, type TutorContext } from "../src/agents/tutor-agent.js";
 import { openThread, setOpenThread, THREAD_PATIENCE, THREAD_PREFIX } from "../src/orchestrator/notes.js";
-import type { Concept, Course, Learner, Lesson, Session } from "../src/domain/types.js";
+import type { Concept, Course, Learner, Lesson, Session, SourceChunk } from "../src/domain/types.js";
 
 const concept: Concept = { id: "photosynthesis-definition", name: "What photosynthesis is", summary: "Plants make their own food using light.", keyFacts: ["Plants cannot eat the way animals do."], commonMisconceptions: ["Plants eat soil."], sourceChunkIds: [], prerequisites: [] };
 const lesson: Lesson = { id: "l1", title: "Lesson 1", objectives: ["The student can explain photosynthesis."], conceptIds: [concept.id], guidingQuestions: [], practiceItems: [], order: 0 };
@@ -105,6 +105,28 @@ describe("the tutor's turn is split into speaking and reflecting", () => {
       transcript: [...opened.transcript, { role: "assistant", content: "Good. Now, what is photosynthesis?", at: "" }, { role: "user", content: "Plants make food.", at: "" }],
     };
     expect(buildTutorContext({ ...ctx, course: c, session: later }, "reflect").at(-1)).not.toMatch(/spaced-retrieval/);
+  });
+
+  it("hands the tutor the passages matching the learner's latest words, so it need not stop to look them up", () => {
+    const aeneas = { id: "c-aeneas", text: "Romulus and Remus were descendants of Aeneas, a hero of the Trojan War.", headingPath: ["Founding"] } as unknown as SourceChunk;
+    const index = { search: (q: string) => (/aeneas/i.test(q) ? [{ chunk: aeneas, score: 4 }] : []) };
+    const asked: Session = {
+      ...session,
+      transcript: [
+        { role: "assistant", content: "Any questions about the founding story?", at: "" },
+        { role: "user", content: "Isn't there more legend about Aeneas fleeing the Trojan War?", at: "" },
+      ],
+    };
+    const c = { ...ctx, session: asked, index } as unknown as TutorContext;
+    const speak = buildTutorContext(c, "speak");
+    expect(speak.find((b) => b.startsWith("<passages_for_this_turn>"))).toContain("descendants of Aeneas");
+    expect(speak.at(-1)).toMatch(/never announce or narrate a lookup/);
+    // The reflect pass sees the same passages: only the last block differs.
+    expect(buildTutorContext(c, "reflect").slice(0, -1)).toEqual(speak.slice(0, -1));
+    // A short reply fetches nothing, and a passage the concept already shows is not repeated.
+    const yes = { ...c, session: { ...asked, transcript: [asked.transcript[0], { role: "user" as const, content: "Yes.", at: "" }] } } as TutorContext;
+    expect(buildTutorContext(yes, "speak").some((b) => b.startsWith("<passages_for_this_turn>"))).toBe(false);
+    expect(passagesForLatestReply({ ...c, concept: { ...concept, sourceChunkIds: ["c-aeneas"] } } as TutorContext)).toEqual([]);
   });
 
   it("keeps the cached prefix identical across both calls, so only the last block differs", () => {

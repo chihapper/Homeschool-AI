@@ -15,7 +15,8 @@ deterministic orchestrator; Vite/React front end; file-backed JSON in `data/` (g
 **State on 2026-09-25:** `main` is at the merge of pull request #15 ("Homeschool content and app
 scoping"), commit `c8ef7db`, with 107 unit tests. Branch `feature/elevenlabs-voice` (not pushed) adds three
 commits on top: the stage-direction fix (`4da593e`), the ElevenLabs switch (`82c8e5d`) and Inworld with its
-pause slider; 150 tests. Typecheck is clean in both workspaces. The first real
+pause slider, then the lookup fix (the tutor gets passages matching the learner's words first); 151 tests.
+Typecheck is clean in both workspaces. The first real
 unit, the Fords' *Ancient Rome* parent's guide from Saint Emmelia Ministries (49 scanned pages), is
 ingested as a course in `data/courses/ancient-rome-muemem4s.json` (31 lessons, 110 concepts) and has
 been taught in four sessions, three of them assessed. Text mode works with an Anthropic key alone.
@@ -70,6 +71,8 @@ decision on hosting (issue #13) before any pilot. No deadline has been set.
   "your son" from nothing; the user's records carry no gender.
 - **Research and report-writing subagents run on Sonnet, not Fable** (user, 2026-09-23); the main
   session does the analysis.
+- **Git has no author identity on this machine**: commit with `git -c user.name="Claude" -c user.email="noreply@anthropic.com"`,
+  as the earlier history does, rather than changing the user's git config.
 - **Commits end with the `Co-Authored-By` line the harness gives for the model in use** (it changed from
   Fable 5.1 to Opus 5.5 on 2026-09-24); pull request descriptions end with the Claude Code attribution
   line. Commit or merge when the user asks; they have been merging branches themselves via "merge into
@@ -127,7 +130,7 @@ Gotchas that cost real time this week:
 
 ## Work queue
 
-The backlog is GitHub issues 1 to 14 and 16 to 24 on chihapper/Homeschool-AI (15 was the merged pull
+The backlog is GitHub issues 1 to 14 and 16 to 25 on chihapper/Homeschool-AI (15 was the merged pull
 request); run `gh issue list`. Ordering and blockers only here.
 
 **User-side**
@@ -146,6 +149,11 @@ request); run `gh issue list`. Ordering and blockers only here.
 
 **Claude-side, in order**
 
+0a. Done 2026-09-25 (the fourth commit on the branch): the tutor narrated a lookup aloud ("I want to check that against the
+   material before I answer you straight", asked about Aeneas). It now gets the passages matching the learner's
+   latest words before it speaks (`passagesForLatestReply`, top 2, skipped for replies under 3 content words) and
+   is told never to announce a lookup. Live: the Aeneas question answered in one pass, 2.7 s instead of 6.7 s; a
+   Twelve Tables question from another lesson answered from the fetched passage, recorded for the grounding audit.
 0. Done 2026-09-24 (commit `4da593e` on `feature/elevenlabs-voice`): the stage-direction leak. The tutor
    asked its question, called `lookup_source`, and the pass after the lookup narrated itself aloud,
    because the spaced-retrieval directive told the speaking call to record an observation it has no tool

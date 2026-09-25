@@ -28,8 +28,8 @@
  * thread is what the work is on.
  */
 import { config } from "../config.js";
-import type { Concept, Course, Learner, Lesson, Observation, Session, SessionPhase } from "../domain/types.js";
-import { ChunkIndex, searchWithLearner } from "../ingest/retrieval.js";
+import type { Concept, Course, Learner, Lesson, Observation, Session, SessionPhase, SourceChunk } from "../domain/types.js";
+import { ChunkIndex, searchWithLearner, tokenize } from "../ingest/retrieval.js";
 import { buildSystem, prewarm, streamTurn, transcriptToMessages, type AgentTool, type AgentSpec, type TurnResult } from "./base.js";
 import { openThread, THREAD_PATIENCE, THREAD_PREFIX } from "../orchestrator/notes.js";
 import { walkedConceptIds } from "../domain/focus.js";
@@ -97,6 +97,29 @@ const PHASE_GUIDANCE: Record<SessionPhase, string> = {
 
 /** Number of leading context blocks that are stable for the whole session (course+lesson, learner). Cached. */
 export const STABLE_CONTEXT_BLOCKS = 2;
+
+/** How many passages matching the learner's latest words ride along with a turn. */
+const PREFETCH_PASSAGES = 2;
+/** A reply with fewer content words than this ("yes", "I don't know") fetches nothing. */
+const PREFETCH_MIN_TERMS = 3;
+
+/**
+ * Passages that match what the learner just said, from anywhere in the course, found before the tutor
+ * speaks. With the passage already in front of it the tutor answers straight away instead of stopping to
+ * look it up, a round trip it also narrated aloud (2026-09-25, asked about Aeneas: "I want to check that
+ * against the material before I answer you straight"). The current concept's own passages are shown
+ * already and are skipped. Pure, so the speaking call and the reflect pass see the same passages.
+ */
+export function passagesForLatestReply(ctx: TutorContext): SourceChunk[] {
+  const latest = [...ctx.session.transcript].reverse().find((t) => t.role === "user")?.content ?? "";
+  if (tokenize(latest).length < PREFETCH_MIN_TERMS) return [];
+  const shown = new Set(ctx.concept.sourceChunkIds.slice(0, 4));
+  return ctx.index
+    .search(latest, PREFETCH_PASSAGES + shown.size)
+    .map((h) => h.chunk)
+    .filter((c) => !shown.has(c.id))
+    .slice(0, PREFETCH_PASSAGES);
+}
 
 export function buildTutorContext(ctx: TutorContext, mode: "speak" | "reflect" = "speak"): string[] {
   const { learner, course, lesson, concept, session } = ctx;
@@ -176,6 +199,14 @@ export function buildTutorContext(ctx: TutorContext, mode: "speak" | "reflect" =
   );
   const machineDirectives = session.pendingDirectives.filter((d) => !d.startsWith(THREAD_PREFIX));
   if (machineDirectives.length) blocks.push(`<orchestrator>\n${machineDirectives.join("\n")}\n</orchestrator>`);
+  const fetched = passagesForLatestReply(ctx);
+  if (fetched.length) {
+    blocks.push(
+      `<passages_for_this_turn>\nThese passages from elsewhere in the material match what the learner just said. Use them if they bear on it; otherwise leave them.\n` +
+        fetched.map((c) => `<passage id="${c.id}" heading="${c.headingPath.join(" > ")}">\n${c.text}\n</passage>`).join("\n") +
+        `\n</passages_for_this_turn>`,
+    );
+  }
   // Only the last block differs between the two calls, so the reflect-only retrieval note rides inside it.
   const retrieval = mode === "reflect" ? retrievalAnswered(session, course) : undefined;
   blocks.push(
@@ -183,7 +214,8 @@ export function buildTutorContext(ctx: TutorContext, mode: "speak" | "reflect" =
       ? "You are speaking to the learner now and they are waiting, so answer straight away: two to four sentences ending in your single question, and nothing after it. " +
         "Do not answer your own question, and do not narrate a pause, a hesitation, or a reaction the learner has not actually given: their last message is the only thing they have said. " +
         "Do not stop to weigh whether they are ready to move on and do not take notes; that happens after you speak, in a separate pass you do not run here. " +
-        "If you need a passage from the material to answer honestly, call lookup_source first, then speak. Never mention tools, phases, or the profile out loud."
+        "Passages that match the learner's latest words are above when there are any. If you need another passage to answer honestly, call lookup_source before your first word, " +
+        "and never announce or narrate a lookup (no \"let me check the material\"): say what the material says, not that you are checking it. Never mention tools, phases, or the profile out loud."
       : "The learner has just heard your reply (the last assistant message) and is listening; nothing you write here reaches them, so write nothing. " +
         "Take your notes now: call record_observation for what the learner showed in their LATEST reply only, quoting them; everything from earlier turns is already on file above, so do not record it again, " +
         "and call advance when the phase is genuinely finished. " +
@@ -315,6 +347,9 @@ export function prewarmTutor(ctx: TutorContext): Promise<void> {
 /** The SPEAK call: what the learner hears, as fast as the model can say it. */
 export function tutorTurn(ctx: TutorContext, signal?: AbortSignal): AsyncGenerator<string, TurnResult, void> {
   const system = buildSystem(tutorAgent, buildTutorContext(ctx, "speak"), STABLE_CONTEXT_BLOCKS);
+  // The tutor read these passages this turn, so the assessor's grounding audit counts them too.
+  const fetched = passagesForLatestReply(ctx);
+  if (fetched.length) ctx.onLookup?.(fetched.map((c) => c.id));
   let messages = transcriptToMessages(ctx.session.transcript);
   if (!messages.length) messages = [{ role: "user", content: "(The student has just joined the lesson. Open with a warm one-line greeting and your first eliciting question.)" }];
   // Thinking off regardless of the session setting: this call is the one the learner waits on.
