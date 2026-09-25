@@ -62,10 +62,12 @@ local `whisper` CLI with `STT_PROVIDER=whisper-cli`). YouTube captions need only
 ## Voice mode in the browser
 
 The student talks into the web app, AssemblyAI turns it into text, and the tutor's reply is spoken by
-**ElevenLabs** or **Hume Octave**. Pick the provider with the toggle at the top of **Settings, Voice**;
+**ElevenLabs**, **Inworld** or **Hume Octave**. Pick the provider with the toggle at the top of **Settings, Voice**;
 the voice, model and sound fields below it change with the provider, and **Test this voice** speaks one
 line with the unsaved settings (about 100 characters of credits). Needs `ASSEMBLYAI_API_KEY` plus the
-chosen provider's key. The microphone works in Chrome at `http://localhost:5173`.
+chosen provider's key. The microphone works in Chrome at `http://localhost:5173`. Inworld voices each reply as
+one continuous stream over a connection opened while the student is talking; the other two voice it in
+sentence batches.
 
 ## Voice mode (Hume EVI)
 
@@ -91,7 +93,7 @@ brain behind it, so voice and text sessions share the same tutor, state, and rep
 | `CLAUDE_REFUSAL_FALLBACKS` | Server-side fallback to another Claude model if a safety classifier declines a turn. Default on. |
 | `CLAUDE_TUTOR_THINKING`, `CLAUDE_PREWARM_CACHE` | Latency knobs; see [docs/LATENCY.md](docs/LATENCY.md). |
 | `ASSEMBLYAI_API_KEY` | Browser voice: the student's speech to text. |
-| `VOICE_TTS`, `ELEVENLABS_API_KEY`, `HUME_API_KEY` | Browser voice: who speaks the tutor's reply, ElevenLabs or Hume Octave. `VOICE_TTS` is only the default; the toggle at the top of Settings, Voice switches it from the next reply. An ElevenLabs key starts with `sk_`. |
+| `VOICE_TTS`, `ELEVENLABS_API_KEY`, `INWORLD_API_KEY`, `HUME_API_KEY` | Browser voice: who speaks the tutor's reply, ElevenLabs, Inworld or Hume Octave. `VOICE_TTS` is only the default; the toggle at the top of Settings, Voice switches it from the next reply. An ElevenLabs key starts with `sk_`; an Inworld key is the Portal's Base64 credential, pasted as-is. |
 | `HUME_API_KEY`, `HUME_SECRET_KEY`, `HUME_CONFIG_ID`, `PUBLIC_URL`, `CLM_SECRET` | Hume EVI voice mode (Hume runs the conversation loop). |
 | `YTDLP_BIN`, `STT_PROVIDER`, `DEEPGRAM_API_KEY`, `WHISPER_BIN` | Video and podcast ingestion. |
 

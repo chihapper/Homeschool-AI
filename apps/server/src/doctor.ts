@@ -8,6 +8,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { config, REPO_ROOT, ttsVoiceLabel } from "./config.js";
 import { elevenCredits, elevenKeyProblem } from "./voice/tts-elevenlabs.js";
+import { inworldKeyProblem, listInworldVoices } from "./voice/tts-inworld.js";
 
 const run = promisify(execFile);
 
@@ -89,13 +90,15 @@ export async function checkReadiness(opts: { ping?: boolean } = {}): Promise<Rea
       add(2, "warn", "Speech-to-text", "STT_PROVIDER=none: podcasts and caption-less videos will be refused.");
   }
 
-  // --- Stage 3: voice in the browser (AssemblyAI in; Hume Octave or ElevenLabs out, chosen in Settings) ---
+  // --- Stage 3: voice in the browser (AssemblyAI in; Hume Octave, ElevenLabs or Inworld out, chosen in Settings) ---
   const stt = config.voice.sttProvider === "assemblyai" && Boolean(config.voice.assemblyAiKey);
   add(3, stt ? "ok" : "warn", "Speech-to-text: AssemblyAI (ASSEMBLYAI_API_KEY)", stt ? `model ${config.voice.assemblyAiModel}, end of turn after ${config.sttMinSilenceMs}-${config.sttMaxSilenceMs} ms of silence` : "Needed for the student to talk instead of type. Free key at assemblyai.com.");
   const elevenProblem = elevenKeyProblem(config.elevenlabs.apiKey);
+  const inworldProblem = inworldKeyProblem(config.inworld.apiKey);
   const voices = [
     { id: "hume", item: "Text-to-speech: Hume Octave (HUME_API_KEY)", ready: Boolean(config.hume.apiKey), problem: "HUME_API_KEY is not set.", detail: `Octave ${config.ttsVersion}, voice "${config.ttsVoice}"${config.ttsInstant ? ", instant mode" : ""}. The key's presence is checked, not the balance.` },
     { id: "elevenlabs", item: "Text-to-speech: ElevenLabs (ELEVENLABS_API_KEY)", ready: !elevenProblem, problem: elevenProblem, detail: `${config.elevenModel}, voice "${config.ttsProvider === "elevenlabs" ? ttsVoiceLabel() : config.elevenVoiceName || config.elevenVoiceId}"` },
+    { id: "inworld", item: "Text-to-speech: Inworld (INWORLD_API_KEY)", ready: !inworldProblem, problem: inworldProblem, detail: `${config.inworldModel}, voice "${config.inworldVoiceName || config.inworldVoiceId}", one stream per reply` },
   ] as const;
   for (const v of voices) {
     const selected = v.id === config.ttsProvider;
@@ -115,6 +118,15 @@ export async function checkReadiness(opts: { ping?: boolean } = {}): Promise<Rea
       add(3, "ok", "ElevenLabs credits", `${c.tier ?? "plan"}: ${left.toLocaleString()} of ${c.limit.toLocaleString()} characters left${c.resetsAt ? `, resets ${c.resetsAt.slice(0, 10)}` : ""}`);
     } catch (err) {
       add(3, config.ttsProvider === "elevenlabs" ? "fail" : "warn", "ElevenLabs credits", err instanceof Error ? err.message : String(err));
+    }
+  }
+  if (opts.ping && !inworldProblem) {
+    // Listing voices is free and proves the key works; a synthesis would spend characters.
+    try {
+      const n = (await listInworldVoices()).length;
+      add(3, "ok", "Inworld key", `accepted; ${n} English voices available`);
+    } catch (err) {
+      add(3, config.ttsProvider === "inworld" ? "fail" : "warn", "Inworld key", err instanceof Error ? err.message : String(err));
     }
   }
 

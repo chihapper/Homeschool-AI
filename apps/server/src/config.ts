@@ -49,7 +49,7 @@ export const EffortSchema = z.enum(["low", "medium", "high", "xhigh", "max"]);
 export type Effort = z.infer<typeof EffortSchema>;
 
 /** Who voices the tutor in browser voice mode. Hume EVI mode is separate and always Hume. */
-export const TTS_PROVIDERS = ["hume", "elevenlabs"] as const;
+export const TTS_PROVIDERS = ["hume", "elevenlabs", "inworld"] as const;
 export type TtsProvider = (typeof TTS_PROVIDERS)[number];
 
 /** A number from the environment, or the fallback when it is missing or outside [min, max]. */
@@ -95,6 +95,16 @@ export const RuntimeSettingsSchema = z.object({
   elevenStability: z.number().min(0).max(1),
   /** 0.7 to 1.2. Speaking rate; 1 is the voice's natural pace. */
   elevenSpeed: z.number().min(0.7).max(1.2),
+  /** Inworld voice id, picked from the workspace's voice list in Settings (system voices such as "Ashley", or a clone). */
+  inworldVoiceId: z.string().min(1),
+  /** That voice's display name, kept with the id so status lines need no API call. */
+  inworldVoiceName: z.string(),
+  /** Inworld model id: inworld-tts-2 (best quality) or inworld-tts-2-flash (fastest, cheapest). */
+  inworldModel: z.string().min(1),
+  /** 0.7 to 1.3. Speaking rate; 1 is the voice's natural pace (the API allows 0.5 to 1.5). */
+  inworldSpeed: z.number().min(0.7).max(1.3),
+  /** 0 to 1000 ms. Pause added after a sentence ending in a full stop; other punctuation scales from it. */
+  inworldPauseMs: z.number().int().min(0).max(1000),
   /** Silence, in ms, before the transcriber decides the student has finished a thought (short pauses). */
   sttMinSilenceMs: z.number().int().min(100).max(5000),
   /** Silence, in ms, after which a turn ends regardless of how confident the transcriber is. */
@@ -112,7 +122,7 @@ export const envDefaults: RuntimeSettings = {
   tutorThinking: env("CLAUDE_TUTOR_THINKING", "adaptive") === "disabled" ? "disabled" : "adaptive",
   prewarmCache: env("CLAUDE_PREWARM_CACHE", "true") !== "false",
   refusalFallbacks: env("CLAUDE_REFUSAL_FALLBACKS", "true") !== "false",
-  ttsProvider: env("VOICE_TTS", "hume") === "elevenlabs" ? "elevenlabs" : "hume",
+  ttsProvider: (TTS_PROVIDERS as readonly string[]).includes(env("VOICE_TTS", "hume")!) ? (env("VOICE_TTS", "hume") as TtsProvider) : "hume",
   ttsVoice: env("HUME_TTS_VOICE", "Ava Song")!,
   ttsVersion: env("HUME_TTS_VERSION", "2") === "1" ? "1" : "2",
   ttsInstant: env("HUME_TTS_INSTANT", "true") !== "false",
@@ -123,6 +133,13 @@ export const envDefaults: RuntimeSettings = {
   elevenModel: env("ELEVENLABS_MODEL", "eleven_flash_v2_5")!,
   elevenStability: envNumber("ELEVENLABS_STABILITY", 0, 1, 0.5),
   elevenSpeed: envNumber("ELEVENLABS_SPEED", 0.7, 1.2, 1),
+  // Ashley is the system voice Inworld's own examples use. Any voice from the workspace's list works.
+  inworldVoiceId: env("INWORLD_VOICE_ID", "Ashley")!,
+  inworldVoiceName: env("INWORLD_VOICE_NAME", env("INWORLD_VOICE_ID") ? "" : "Ashley")!,
+  inworldModel: env("INWORLD_MODEL", "inworld-tts-2")!,
+  inworldSpeed: envNumber("INWORLD_SPEED", 0.7, 1.3, 1),
+  // The same breath the other voices get between sentences (SENTENCE_GAP_MS.default in voice/pcm.ts).
+  inworldPauseMs: Math.round(envNumber("INWORLD_PAUSE_MS", 0, 1000, 220)),
   sttMinSilenceMs: Number(env("ASSEMBLYAI_MIN_TURN_SILENCE", "400")),
   sttMaxSilenceMs: Number(env("ASSEMBLYAI_MAX_TURN_SILENCE", "1500")),
 };
@@ -238,6 +255,21 @@ export const config = {
   get elevenSpeed(): number {
     return effective().elevenSpeed;
   },
+  get inworldVoiceId(): string {
+    return effective().inworldVoiceId;
+  },
+  get inworldVoiceName(): string {
+    return effective().inworldVoiceName;
+  },
+  get inworldModel(): string {
+    return effective().inworldModel;
+  },
+  get inworldSpeed(): number {
+    return effective().inworldSpeed;
+  },
+  get inworldPauseMs(): number {
+    return effective().inworldPauseMs;
+  },
   get ttsVersion(): "1" | "2" {
     return effective().ttsVersion;
   },
@@ -286,6 +318,12 @@ export const config = {
     apiKey: env("ELEVENLABS_API_KEY"),
   },
 
+  /** Inworld text-to-speech, the third voice for browser voice mode. */
+  inworld: {
+    /** The Base64 credential copied from the Inworld Portal as-is (base64 of key_id:secret), without "Basic ". */
+    apiKey: env("INWORLD_API_KEY"),
+  },
+
   hume: {
     apiKey: env("HUME_API_KEY"),
     secretKey: env("HUME_SECRET_KEY"),
@@ -311,13 +349,26 @@ export function resolveUserPath(p: string): string {
 /** The provider browser voice will use right now: the one selected in Settings, if its key is present. */
 export function activeTtsProvider(): TtsProvider | "none" {
   const provider = config.ttsProvider;
-  const key = provider === "elevenlabs" ? config.elevenlabs.apiKey : config.hume.apiKey;
-  return key ? provider : "none";
+  return ttsKey(provider) ? provider : "none";
+}
+
+/** The key a provider needs, if it is set. */
+export function ttsKey(provider: TtsProvider): string | undefined {
+  return provider === "elevenlabs" ? config.elevenlabs.apiKey : provider === "inworld" ? config.inworld.apiKey : config.hume.apiKey;
 }
 
 /** The selected provider's voice, as a person would name it. */
 export function ttsVoiceLabel(): string {
-  return config.ttsProvider === "elevenlabs" ? config.elevenVoiceName || config.elevenVoiceId : config.ttsVoice;
+  if (config.ttsProvider === "elevenlabs") return config.elevenVoiceName || config.elevenVoiceId;
+  if (config.ttsProvider === "inworld") return config.inworldVoiceName || config.inworldVoiceId;
+  return config.ttsVoice;
+}
+
+/** The selected provider's model, as the status line shows it. */
+export function ttsModelLabel(): string {
+  if (config.ttsProvider === "elevenlabs") return config.elevenModel;
+  if (config.ttsProvider === "inworld") return config.inworldModel;
+  return `Octave ${config.ttsVersion}`;
 }
 
 export function requireAnthropicKey(): void {

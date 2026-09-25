@@ -89,3 +89,27 @@ transcription delay), first audio came 1.62 s and 1.79 s after the turn started,
 after the model's first word: the voice is no longer the slow part, the model is. Between 20 and 54 of
 each clip's roughly 180 network chunks arrived with an odd byte count, which is why ElevenLabs audio goes
 through `Pcm16Stream`; no odd-length frame reached the browser.
+
+## One stream per reply (2026-09-24/25)
+
+Sending a reply to the voice in separate requests restarts the voice at each one, and ElevenLabs refuses
+request stitching for v3 models. A streaming socket keeps one voice context for the whole reply. One
+reply (427 characters, five sentences) was voiced each way, with text arriving at the tutor's median
+writing speed (238 characters in 1,143 ms after its first word, from 112 saved turns). Times are from the
+tutor's first word:
+
+| Route | First sound | Live gaps | Notes |
+|---|---|---|---|
+| ElevenLabs v3 Conversational, sentence batches over HTTP (today's method) | ~375 ms, estimated | none | no stitching, so each batch starts cold |
+| ElevenLabs v3 Conversational, Text to Dialogue socket, text fed word by word | 502 / 533 ms | none | waits for about 8 words before speaking |
+| **Inworld TTS-2 (`tts-inworld.ts`), one context, a sentence at a time** | **282 ms** | none | 111 ms after the first sentence was sent |
+| **Inworld TTS-2 Flash, same** | **223 ms** | none | 51 ms after the first sentence was sent |
+| Whole reply in one request | ~2.3 s, estimated | none | the smoothest read, but waits for the whole reply |
+
+The Inworld socket connects in about 0.23 s, so the app opens it at `mic_start`, while the student is still
+talking. Speaking time was 21 to 23 s in every clip. The ElevenLabs socket paused longest (6.7 s of pauses in
+all, the longest 1.06 s), and Inworld less (5.8 s, the longest 0.66 s), with a different voice (Duncan
+against George). Every chunk from both sockets was whole samples. Through the app's own voice WebSocket
+(Inworld TTS-2, Sonnet 5 at low effort, typed input), first audio came 0.55 to 0.57 s after the model's first
+word, most of it spent finishing the first sentence. "Test this voice" over HTTP: first audio 100 to 250 ms.
+`speaking_rate` is accepted on both routes.

@@ -12,12 +12,21 @@ nothing outside that material, and the parent gets a mastery report per session 
 across sessions. Fastify server with four agents (curriculum, profiler, tutor, assessor) and a
 deterministic orchestrator; Vite/React front end; file-backed JSON in `data/` (gitignored).
 
-**State on 2026-09-24:** `main` is at the merge of pull request #15 ("Homeschool content and app
-scoping"), commit `c8ef7db`. 107 unit tests pass, typecheck is clean in both workspaces. The first real
+**State on 2026-09-25:** `main` is at the merge of pull request #15 ("Homeschool content and app
+scoping"), commit `c8ef7db`, with 107 unit tests. Branch `feature/elevenlabs-voice` (not pushed) adds three
+commits on top: the stage-direction fix (`4da593e`), the ElevenLabs switch (`82c8e5d`) and Inworld with its
+pause slider; 150 tests. Typecheck is clean in both workspaces. The first real
 unit, the Fords' *Ancient Rome* parent's guide from Saint Emmelia Ministries (49 scanned pages), is
 ingested as a course in `data/courses/ancient-rome-muemem4s.json` (31 lessons, 110 concepts) and has
-been taught in four sessions, three of them assessed. Text mode works with an Anthropic key alone; all
-voice output is blocked because the Hume balance is exhausted.
+been taught in four sessions, three of them assessed. Text mode works with an Anthropic key alone.
+Browser voice can now speak through **ElevenLabs, Inworld or Hume Octave** (a toggle at the top of Settings,
+Voice, added 2026-09-24/25 on `feature/elevenlabs-voice`; the user has tried both and finds them hard to tell
+apart). Inworld works
+(verified 2026-09-25): a Standard key is in `.env` (Realtime-only keys cannot call text-to-speech). Hume's balance is
+exhausted. ElevenLabs works: a real `sk_` key is in `.env` (Starter plan, 75,451 characters a month,
+resetting 2026-09-25), and a scripted two-turn voice session over the app's WebSocket spoke both replies
+with first audio at 1.6 to 1.8 s (numbers in `docs/LATENCY.md`). The user's own microphone session in
+Chrome has not happened yet.
 
 **Goal and gate:** get the tool in front of homeschool families as an add-on study partner. The next
 gate is a repeatable pedagogy evaluation (issue #6) so skill edits stop being judged by hand, then a
@@ -43,12 +52,28 @@ decision on hosting (issue #13) before any pilot. No deadline has been set.
   while the student listens), and the open thread rides with the phase guidance rather than outranking
   it. See CLAUDE.md; an earlier version that let the note outrank the phase was rejected by the user.
 - **Sessions start in text mode**; voice is a deliberate choice from the dropdown.
+- **The tutor's voice is switchable between Hume Octave and ElevenLabs** (user, 2026-09-24: they have
+  ElevenLabs credits to use before they lapse, and want to hear the voice). The provider is the runtime
+  setting `ttsProvider`, toggled at the top of Settings, Voice, with provider-specific fields below it.
+  Hume EVI mode stays Hume-only.
+- **The voice is streamed one reply at a time, over a socket opened while the student talks** (user,
+  2026-09-24, after hearing one reply voiced four ways: clip D, ElevenLabs v3 Conversational over its
+  Text to Dialogue socket, "definitely sounds more natural and conversational"). Which vendor is decided
+  by ear: Inworld is being trialled first (#17, cheaper and ranked higher by listeners); #16, the
+  ElevenLabs socket, is on hold until clip E (Inworld) has been compared with D. No family session goes
+  through Inworld until its data answers are in (#18).
+- **Our own voice loop stays** (user, 2026-09-24): ElevenLabs Agents, which would run the conversation on
+  ElevenLabs' side, is a roadmap item (#19), revisited only if echo or turn-taking fail in real sessions.
+- **Commit to ElevenLabs over Hume** for anything Hume Octave did (cheaper per character and rated far
+  higher, 2026-09-24). The Hume adapter stays in the code, unused; Hume EVI mode stays as it is.
 - **Reports and profiles use the learner's name** unless the transcript gives a pronoun. A report said
   "your son" from nothing; the user's records carry no gender.
 - **Research and report-writing subagents run on Sonnet, not Fable** (user, 2026-09-23); the main
   session does the analysis.
-- **Commits end with** `Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`; pull request
-  descriptions end with the Claude Code attribution line. The repo has no configured git identity: the
+- **Commits end with the `Co-Authored-By` line the harness gives for the model in use** (it changed from
+  Fable 5.1 to Opus 5.5 on 2026-09-24); pull request descriptions end with the Claude Code attribution
+  line. Commit or merge when the user asks; they have been merging branches themselves via "merge into
+  main". The repo has no configured git identity: the
   existing commits are by "Claude <noreply@anthropic.com>", so commit with
   `git -c user.name=Claude -c user.email=noreply@anthropic.com commit ...`.
 - **Explain at the user's level.** They are a technical consulting partner, not a career engineer:
@@ -63,7 +88,7 @@ Before any commit:
 npm test && npm run typecheck
 ```
 
-107 tests as of 2026-09-24, all pure (no network, no binaries). The end-to-end check for tutoring
+123 tests as of 2026-09-24, all pure (no network, no binaries). The end-to-end check for tutoring
 changes is a scripted session through the HTTP API: create a session, post persona lines to
 `/api/sessions/:id/message` reading the SSE stream until `reflected`, then `POST /end` and read the
 report and `GET /api/progress/:learnerId/:courseId`. The Python prototype is pasted into issue #6;
@@ -90,6 +115,11 @@ Gotchas that cost real time this week:
   few seconds after a reply shows zero observations and no `reflectMs`; that is not a bug (issue #3).
 - **PDFs on this machine.** The Read tool cannot rasterize PDFs (no `pdftoppm`); `pdftotext -layout`
   and Python `pymupdf` work, and `pdftotext` prints Windows-1252, not UTF-8.
+- **ElevenLabs keys start with `sk_`.** The dashboard also shows a key ID (64 hex characters); used as a
+  key it returns HTTP 400 "API key ID used as API key". It has been pasted by mistake twice: the character
+  engine's `.env` holds one ID, and the first value put in this project's `.env` was another. The secret
+  is shown once, in the dialog when a key is created or rotated. The readiness check flags a key that does not start with `sk_`, and its API ping reads the
+  account's remaining characters and reset date.
 - **`data/samples/` is tracked by git.** Never copy a family's or a publisher's PDF there; ingest by
   absolute path.
 - **The Good and the Beautiful sample** (43 MB) lived only in a session's temporary folder and may be
@@ -97,28 +127,57 @@ Gotchas that cost real time this week:
 
 ## Work queue
 
-The backlog is GitHub issues 1 to 14 on chihapper/Homeschool-AI; run `gh issue list`. Ordering and
-blockers only here.
+The backlog is GitHub issues 1 to 14 and 16 to 24 on chihapper/Homeschool-AI (15 was the merged pull
+request); run `gh issue list`. Ordering and blockers only here.
 
 **User-side**
 
 1. Test in the web app (both servers up, `http://localhost:5173`): Focus ticks on the Courses tab, a
    session with "Already read this", the Progress panel on the Reports tab.
-2. Decide the hosting and copyright line (issue #13) before anyone asks for a login page.
-3. Top up the Hume balance if voice matters this month; issue #8 and all voice checks are blocked on it.
+2. Decide the hosting, copyright and children's-data line (issue #13) before anyone asks for a login page.
+   Now: turn off AssemblyAI's model training in its dashboard, which needs a paid plan and also gives zero
+   retention for streaming (#23), and send the two neutral vendor emails (#18 Inworld, #23 AssemblyAI).
+3. Add a real ElevenLabs key to `.env` (`ELEVENLABS_API_KEY=sk_...`), restart the server, flip the
+   toggle in Settings, Voice to ElevenLabs, pick a voice and model, press **Test this voice**, then run a
+   voice session in Chrome at `http://localhost:5173` (the app's browser pane cannot use the microphone).
+   Hume stays unusable until its balance is topped up.
 4. Read the README "What this is (and is not)" section and `docs/ROADMAP.md` in your own voice; they
    are the product statements a customer or an engineer will read.
 
 **Claude-side, in order**
 
-1. Issue #6, the eval harness: port the persona script to `apps/server/scripts/`, add the three Stage 1
+0. Done 2026-09-24 (commit `4da593e` on `feature/elevenlabs-voice`): the stage-direction leak. The tutor
+   asked its question, called `lookup_source`, and the pass after the lookup narrated itself aloud,
+   because the spaced-retrieval directive told the speaking call to record an observation it has no tool
+   for. Fixed three ways: once a reply ends in its question any tool call ends the turn (`streamTurn`);
+   the directive only asks, and keeps the answer out of the question; the reflect pass files the answer
+   under `Session.retrievalConceptId` (it was never filed before). Live check, three sessions: clean
+   openings, answer filed under the earlier concept each time. Two things seen in passing, not fixed:
+   after a missed retrieval question the tutor moves on without saying the answer (retrieval works best
+   with feedback), and one opening came out all lowercase. Issue #8 (narration end-of-turn silence) is
+   now testable.
+1. Issue #17, Inworld: code-complete 2026-09-25 (`voice/tts-inworld.ts`, one context per reply fed batch by
+   batch, socket opened at `mic_start`, HTTP fallback mid-reply, Settings fields, readiness row, 17 tests).
+   Verified 2026-09-25: the key is accepted (170 English voices); clip E recorded (TTS-2 first sound 282 ms
+   from the tutor's first word, Flash 223 ms, no gaps; voice Duncan); a live two-turn session through the
+   app spoke both turns; `speaking_rate` accepted; numbers in `docs/LATENCY.md`. Next: the user compares E
+   with D by ear and picks the vendor, model and voice; the user sends the #18 email to Inworld (rewritten
+   2026-09-25 to say nothing about the product: the user is keeping the idea close). Settings still has Hume
+   selected. Added 2026-09-25 at the user's request: an Inworld pause slider (`inworldPauseMs`, default 220 ms
+   after a full stop) that inserts SSML `<break>` tags scaled by punctuation, between sentences and at a
+   sentence's own commas, dashes and colons; verified live (a 500 ms setting added about 0.5 s after a full
+   stop, more after a question, less at a comma). Model trials (#22) will get their own branch.
+   After the listen test, build #16 on the same path only if ElevenLabs wins. #20 (cost per session) and
+   #21 (retrieval results for the parent) are the other new items from this session; #13 now covers
+   children's data.
+2. Issue #6, the eval harness: port the persona script to `apps/server/scripts/`, add the three Stage 1
    personas with planted misconceptions, score transcripts, run across Sonnet 5, Opus 5, Haiku 4.5.
-2. Issue #3, reflect-pass latency: measure, then lower `reflectEffort` or stop blocking the next turn.
-3. Issue #2, narration evidence across concepts: let the walk skip a concept already evidenced.
-4. Issue #5, when the tutor may hand over an answer: write the rule, measure with #6.
-5. Issue #1, workbook pages as activities: blocked on a rasterization choice (no `pdftoppm` here).
-6. Issue #12, cost: medium-effort ingest experiment; cache the course block for the assessor.
-7. Issues #9, #10, #11: per-learner focus, the AmblesideOnline demo, next-week suggestions.
+3. Issue #3, reflect-pass latency: measure, then lower `reflectEffort` or stop blocking the next turn.
+4. Issue #2, narration evidence across concepts: let the walk skip a concept already evidenced.
+5. Issue #5, when the tutor may hand over an answer: write the rule, measure with #6.
+6. Issue #1, workbook pages as activities: blocked on a rasterization choice (no `pdftoppm` here).
+7. Issue #12, cost: medium-effort ingest experiment; cache the course block for the assessor.
+8. Issues #9, #10, #11: per-learner focus, the AmblesideOnline demo, next-week suggestions.
 
 ## Landmines
 
@@ -147,6 +206,13 @@ blockers only here.
   by glyph geometry; do not go back to the default (7,889 words instead of 24,632 on the Rome scan).
 - **Observations are validated before they are stored** (`ObservationSchema.safeParse` in the
   orchestrator). The reflect pass sometimes sends `{}`; storing it makes the session unsaveable.
+- **Speech from the network arrives in arbitrary byte chunks.** ElevenLabs PCM goes through
+  `Pcm16Stream` (`voice/pcm.ts`), which holds back an odd trailing byte; sending half a sample to the
+  browser, which reads every frame as 16-bit, turns the rest of the reply into noise.
+- **The provider is read once per turn** (`activeTtsProvider()` in `live.ts`), so a reply is never voiced
+  by two providers. Both must keep delivering 24 kHz, or a switch mid-session needs a reconnect.
+- **ElevenLabs stitching ids** are kept per voice and model, recorded only after a request's audio played
+  to the end, and never sent to `eleven_v3*` models; a refused stitched request is retried once without.
 - **`lookup_source` searches the learner's latest words as well as the tutor's query.** Dropping that
   brings back the case where the tutor tells the learner the material does not mention a word that
   appears in one chunk.

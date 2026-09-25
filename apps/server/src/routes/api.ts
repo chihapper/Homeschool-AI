@@ -13,11 +13,14 @@ import { CourseFocusSchema } from "../domain/types.js";
 import { sanitizeFocus } from "../domain/focus.js";
 import { buildProgress } from "../domain/progress.js";
 import { courses, learners, reports, sessions } from "../store/index.js";
-import { activeTtsProvider, config, getSettings, MODEL_OPTIONS, REPO_ROOT, resetSettings, RuntimeSettingsSchema, ttsVoiceLabel, updateSettings } from "../config.js";
+import { activeTtsProvider, config, getSettings, MODEL_OPTIONS, REPO_ROOT, resetSettings, RuntimeSettingsSchema, ttsModelLabel, ttsVoiceLabel, updateSettings } from "../config.js";
 import { checkReadiness } from "../doctor.js";
 import { humeConfigured, mintAccessToken } from "../voice/hume.js";
 import { pcm16ToWav } from "../voice/pcm.js";
 import { ELEVEN_FALLBACK_MODELS, elevenKeyProblem, listElevenModels, listElevenVoices, speakElevenLabs } from "../voice/tts-elevenlabs.js";
+import { INWORLD_MODELS, inworldKeyProblem, inworldVoicePreview, listInworldVoices, speakInworldHttp } from "../voice/tts-inworld.js";
+import { inworldText } from "../voice/live.js";
+import { SentenceChunker, type Segment } from "../voice/sentence-chunker.js";
 import { listHumeVoices, speakHume } from "../voice/tts-hume.js";
 
 const LearnerBody = z.object({ name: z.string().min(1), age: z.number().int().optional(), gradeLevel: z.string().optional() });
@@ -65,13 +68,14 @@ function health() {
       ttsProvider: s.ttsProvider,
       ttsVoice: ttsVoiceLabel(),
       ttsVersion: s.ttsVersion,
-      ttsModel: s.elevenModel,
+      ttsModel: ttsModelLabel(),
     },
   };
 }
 
 function settingsView() {
   const elevenProblem = elevenKeyProblem(config.elevenlabs.apiKey);
+  const inworldProblem = inworldKeyProblem(config.inworld.apiKey);
   return {
     ...getSettings(),
     options: {
@@ -81,6 +85,7 @@ function settingsView() {
       ttsProviders: [
         { id: "hume", label: "Hume Octave", ready: Boolean(config.hume.apiKey), problem: config.hume.apiKey ? undefined : "HUME_API_KEY is not set in .env." },
         { id: "elevenlabs", label: "ElevenLabs", ready: !elevenProblem, problem: elevenProblem },
+        { id: "inworld", label: "Inworld", ready: !inworldProblem, problem: inworldProblem },
       ],
     },
   };
@@ -112,21 +117,30 @@ export function registerApiRoutes(app: FastifyInstance): void {
     return settingsView();
   });
   app.get("/api/doctor", async (req: FastifyRequest<{ Querystring: { ping?: string } }>) => checkReadiness({ ping: req.query.ping === "true" || req.query.ping === "1" }));
-  /** The voices a provider offers, for the voice picker in Settings (?provider=hume|elevenlabs; default the selected one). */
+  /** The voices a provider offers, for the voice picker in Settings (?provider=hume|elevenlabs|inworld; default the selected one). */
   app.get("/api/voice/voices", async (req: FastifyRequest<{ Querystring: { provider?: string } }>, reply) => {
-    const provider = req.query.provider === "elevenlabs" || req.query.provider === "hume" ? req.query.provider : config.ttsProvider;
+    const provider = req.query.provider === "elevenlabs" || req.query.provider === "hume" || req.query.provider === "inworld" ? req.query.provider : config.ttsProvider;
     try {
       if (provider === "elevenlabs") {
         if (!config.elevenlabs.apiKey) return reply.code(400).send({ error: elevenKeyProblem(undefined) });
         return await listElevenVoices();
+      }
+      if (provider === "inworld") {
+        const problem = inworldKeyProblem(config.inworld.apiKey);
+        if (problem) return reply.code(400).send({ error: problem });
+        return await listInworldVoices();
       }
       return await listHumeVoices();
     } catch (err) {
       return reply.code(502).send({ error: err instanceof Error ? err.message : String(err) });
     }
   });
-  /** ElevenLabs models for the picker: the account's list, or the documented real-time ones when the account cannot be asked. */
-  app.get("/api/voice/models", async () => {
+  /**
+   * Models for the picker. ElevenLabs: the account's list, or the documented real-time ones when the account
+   * cannot be asked. Inworld: its two current models (?provider=inworld).
+   */
+  app.get("/api/voice/models", async (req: FastifyRequest<{ Querystring: { provider?: string } }>) => {
+    if (req.query.provider === "inworld") return { models: INWORLD_MODELS, source: "built-in" };
     if (!config.elevenlabs.apiKey) return { models: ELEVEN_FALLBACK_MODELS, source: "built-in", error: elevenKeyProblem(undefined) };
     try {
       return { models: await listElevenModels(), source: "account" };
@@ -151,10 +165,18 @@ export function registerApiRoutes(app: FastifyInstance): void {
     let firstMs: number | undefined;
     const parts: Buffer[] = [];
     try {
-      const chunks =
+      const chunks: AsyncIterable<{ pcm: Buffer }> =
         s.ttsProvider === "elevenlabs"
           ? speakElevenLabs(text, { voiceId: s.elevenVoiceId, model: s.elevenModel, stability: s.elevenStability, speed: s.elevenSpeed })
-          : speakHume(text, { voice: s.ttsVoice, version: s.ttsVersion, instant: s.ttsInstant, trailingSilence: 0.3 });
+          : s.ttsProvider === "inworld"
+            ? (async function* () {
+                // Sentence by sentence as the live tutor sends it, so the sample carries the pause setting.
+                const chunker = new SentenceChunker();
+                const segments = [...chunker.push(text), chunker.flush()].filter((x): x is Segment => Boolean(x));
+                const spoken = inworldText(segments, undefined, s.inworldPauseMs);
+                for await (const pcm of speakInworldHttp(spoken, { voiceId: s.inworldVoiceId, model: s.inworldModel, speed: s.inworldSpeed })) yield { pcm };
+              })()
+            : speakHume(text, { voice: s.ttsVoice, version: s.ttsVersion, instant: s.ttsInstant, trailingSilence: 0.3 });
       for await (const c of chunks) {
         firstMs ??= Math.round(performance.now() - t0);
         parts.push(c.pcm);
@@ -169,6 +191,28 @@ export function registerApiRoutes(app: FastifyInstance): void {
       .header("x-total-ms", String(Math.round(performance.now() - t0)))
       .header("x-characters", String(text.length))
       .send(pcm16ToWav(Buffer.concat(parts), config.voice.playbackSampleRate));
+  });
+
+  /**
+   * A provider's own sample of a voice, for the play button in the voice picker. Inworld serves these free but
+   * rate-limits them, so each voice and model is fetched once per server run.
+   */
+  const voicePreviews = new Map<string, Buffer>();
+  app.get("/api/voice/voice-preview", async (req: FastifyRequest<{ Querystring: { provider?: string; voiceId?: string; model?: string } }>, reply) => {
+    const { provider, voiceId } = req.query;
+    if (provider !== "inworld" || !voiceId) return reply.code(400).send({ error: "Give provider=inworld and a voiceId." });
+    const model = req.query.model || config.inworldModel;
+    const key = `${voiceId}|${model}`;
+    try {
+      let mp3 = voicePreviews.get(key);
+      if (!mp3) {
+        mp3 = await inworldVoicePreview(voiceId, model);
+        voicePreviews.set(key, mp3);
+      }
+      return reply.header("content-type", "audio/mpeg").header("cache-control", "private, max-age=86400").send(mp3);
+    } catch (err) {
+      return reply.code(502).send({ error: err instanceof Error ? err.message : String(err) });
+    }
   });
 
   // ---- Courses -------------------------------------------------------------

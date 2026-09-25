@@ -59,6 +59,14 @@ export function gapAfter(sentence: string, paraBreak = false): number {
 }
 
 /**
+ * The same pause, rescaled so that a plain full stop gets `basePauseMs`: a comma or colon about 0.6 of
+ * it, a question or exclamation 1.3, an ellipsis, a dash or a paragraph break about 2.
+ */
+export function scaledGapAfter(sentence: string, paraBreak: boolean, basePauseMs: number): number {
+  return Math.round((gapAfter(sentence, paraBreak) * basePauseMs) / SENTENCE_GAP_MS.default);
+}
+
+/**
  * Turns a byte stream into whole 16-bit samples. A network chunk can end halfway through a sample, and
  * the browser reads every frame as Int16, so an odd byte sent on its own would shift every later sample
  * into noise. The odd byte waits for the next chunk instead. The first `fadeMs` are faded in so a clip

@@ -12,15 +12,16 @@
  */
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { WebSocket } from "ws";
-import { activeTtsProvider, config, ttsVoiceLabel } from "../config.js";
+import { activeTtsProvider, config, ttsModelLabel, ttsVoiceLabel } from "../config.js";
 import type { Course } from "../domain/types.js";
 import { annotateLastTurn, respond } from "../orchestrator/session.js";
 import { courses, sessions } from "../store/index.js";
-import { gapAfter, silencePcm16 } from "./pcm.js";
+import { gapAfter, scaledGapAfter, silencePcm16 } from "./pcm.js";
 import { SentenceChunker, type Segment } from "./sentence-chunker.js";
 import { AssemblyAIStream } from "./stt-assemblyai.js";
 import { ELEVEN_SAMPLE_RATE, freshRequestIds, rememberRequest, speakElevenLabs, type StitchedRequest } from "./tts-elevenlabs.js";
 import { speakHume, trailingSilenceFor, type Utterance } from "./tts-hume.js";
+import { InworldConnection, inworldBreak, speakableForInworld, speakInworldHttp, withInnerPauses, type InworldReply } from "./tts-inworld.js";
 
 /** A tiny async queue: the text producer pushes sentences, the speech consumer awaits them. */
 export class AsyncQueue<T> {
@@ -105,12 +106,33 @@ interface Conn {
   lastGeneration: string | undefined;
   /** ElevenLabs requests that played to the end, for stitching; only valid for the voice and model they were made with. */
   eleven: { key: string; requests: StitchedRequest[] };
+  /** Inworld's socket for this session, opened when the student starts talking; each reply is one context on it. */
+  inworld: InworldConnection | null;
   closed: boolean;
 }
 
-/** One speech request for ElevenLabs: the batch's sentences as one text, so the voice reads them as a run. */
-export function elevenText(batch: Segment[]): string {
+/** A batch's sentences as one text, cleaned for speech, so the voice reads them as a run. */
+export function batchText(batch: Segment[]): string {
   return batch.map((s) => cleanForSpeech(s.text)).filter(Boolean).join(" ");
+}
+
+/**
+ * A batch for Inworld: each sentence cleaned for speech, with a pause in front of it sized by how the sentence
+ * before it ended (a question more than a full stop, a paragraph most) and pauses at its own commas, dashes
+ * and colons, all scaled by the pause set in Settings. `before` is the last sentence already sent in this
+ * reply, so a reply never opens on a pause.
+ */
+export function inworldText(batch: Segment[], before: Segment | undefined, basePauseMs: number): string {
+  const parts: string[] = [];
+  let prev = before;
+  for (const seg of batch) {
+    const text = withInnerPauses(speakableForInworld(cleanForSpeech(seg.text)), basePauseMs);
+    if (!text) continue;
+    const pause = prev ? inworldBreak(scaledGapAfter(prev.text, prev.paraBreak, basePauseMs)) : "";
+    parts.push(pause ? `${pause} ${text}` : text);
+    prev = seg;
+  }
+  return parts.join(" ");
 }
 
 export function registerLiveVoiceRoutes(app: FastifyInstance): void {
@@ -141,9 +163,11 @@ export function registerLiveVoiceRoutes(app: FastifyInstance): void {
       micWanted: false,
       lastGeneration: undefined,
       eleven: { key: "", requests: [] },
+      inworld: null,
       closed: false,
     };
     const log = req.log;
+    const inworldConn = (): InworldConnection => (conn.inworld ??= new InworldConnection());
 
     send({
       type: "ready",
@@ -151,10 +175,10 @@ export function registerLiveVoiceRoutes(app: FastifyInstance): void {
       phase: session.phase,
       conceptIndex: session.conceptIndex,
       stt: config.voice.sttProvider === "assemblyai" && config.voice.assemblyAiKey ? "assemblyai" : "none",
-      // Both providers deliver 24 kHz, so a provider switch in Settings applies from the next reply without reconnecting.
+      // Every provider delivers 24 kHz, so a provider switch in Settings applies from the next reply without reconnecting.
       tts: activeTtsProvider(),
       voice: ttsVoiceLabel(),
-      ttsModel: config.ttsProvider === "elevenlabs" ? config.elevenModel : `Octave ${config.ttsVersion}`,
+      ttsModel: ttsModelLabel(),
       micSampleRate: config.voice.micSampleRate,
       playbackSampleRate: config.voice.playbackSampleRate,
     });
@@ -210,21 +234,70 @@ export function registerLiveVoiceRoutes(app: FastifyInstance): void {
         const consumer = (async () => {
           const batching = config.ttsBatchSentences;
           let endSeen = false;
+          const startAudio = (): void => {
+            if (audioStarted) return;
+            audioStarted = true;
+            marks.first_audio = ms();
+            send({ type: "audio_start" });
+          };
+          // Inworld voices the whole reply as one context: each batch goes in the moment it is written while
+          // the audio streams back, so the voice never starts cold between batches.
+          const inworldVoice = { voiceId: config.inworldVoiceId, model: config.inworldModel, speed: config.inworldSpeed };
+          const inworldPause = config.inworldPauseMs;
+          /** The last sentence sent in this reply, which sizes the pause before the next one. */
+          let lastSent: Segment | undefined;
+          let stream: { reply: InworldReply; forwarding: Promise<void> } | undefined;
+          let streamFailure: Error | undefined;
+          let recovered = false;
+          const speakOverHttp = async (text: string): Promise<void> => {
+            for await (const pcm of speakInworldHttp(text, { ...inworldVoice, signal: abort.signal })) {
+              startAudio();
+              sendAudio(pcm);
+            }
+          };
+          // The context failed: the rest of the reply goes over HTTP, so the tutor never goes silent. If nothing
+          // was heard yet, the text already sent is voiced again; after that we cannot tell what was heard.
+          const recover = async (): Promise<void> => {
+            if (recovered || !stream) return;
+            recovered = true;
+            log.warn({ err: streamFailure }, "Inworld socket failed mid-reply; voicing the rest over HTTP");
+            if (!stream.reply.heard && stream.reply.said.length) await speakOverHttp(stream.reply.said.join(" "));
+          };
           while (!endSeen) {
             const first = await q.next();
             if (first === null) break;
             let batch: Segment[] = [first];
             if (batching) ({ batch, endSeen } = takeBatch(first, () => q.tryNext()));
             if (!speak || abort.signal.aborted) continue; // drain
-            const startAudio = (): void => {
-              if (audioStarted) return;
-              audioStarted = true;
-              marks.first_audio = ms();
-              send({ type: "audio_start" });
-            };
             try {
+              if (provider === "inworld") {
+                const text = inworldText(batch, lastSent, inworldPause);
+                if (!text) continue;
+                lastSent = batch[batch.length - 1];
+                marks.tts_requests = (marks.tts_requests ?? 0) + 1;
+                if (streamFailure) {
+                  await recover();
+                  await speakOverHttp(text);
+                  continue;
+                }
+                if (!stream) {
+                  const reply = inworldConn().reply(inworldVoice);
+                  abort.signal.addEventListener("abort", () => reply.cancel(), { once: true });
+                  const forwarding = (async () => {
+                    for await (const pcm of reply.audio()) {
+                      startAudio();
+                      sendAudio(pcm);
+                    }
+                  })().catch((err: unknown) => {
+                    streamFailure = err instanceof Error ? err : new Error(String(err));
+                  });
+                  stream = { reply, forwarding };
+                }
+                stream.reply.say(text);
+                continue;
+              }
               if (provider === "elevenlabs") {
-                const text = elevenText(batch);
+                const text = batchText(batch);
                 if (!text) continue;
                 // Stitching ids only mean something for the voice and model that produced them.
                 const key = `${config.elevenVoiceId}|${config.elevenModel}`;
@@ -265,6 +338,22 @@ export function registerLiveVoiceRoutes(app: FastifyInstance): void {
               if (!ttsErrorShown) {
                 ttsErrorShown = true;
                 send({ type: "error", message: `Text-to-speech failed: ${err instanceof Error ? err.message : String(err)}` });
+              }
+            }
+          }
+          if (stream) {
+            // No more text: close the context and let its last audio play out.
+            if (!abort.signal.aborted) stream.reply.end();
+            await stream.forwarding;
+            if (streamFailure && !abort.signal.aborted) {
+              try {
+                await recover();
+              } catch (err) {
+                log.warn({ err }, "Inworld fallback failed");
+                if (!ttsErrorShown) {
+                  ttsErrorShown = true;
+                  send({ type: "error", message: `Text-to-speech failed: ${err instanceof Error ? err.message : String(err)}` });
+                }
               }
             }
           }
@@ -424,6 +513,8 @@ export function registerLiveVoiceRoutes(app: FastifyInstance): void {
         case "mic_start":
           // Set before awaiting anything, so audio arriving during the barge-in is kept rather than dropped.
           conn.micWanted = true;
+          // The student is about to speak: connect the voice now, so the reply never waits on its handshake.
+          if (activeTtsProvider() === "inworld") inworldConn().open().catch((err: unknown) => log.warn({ err }, "Inworld pre-connect failed"));
           void (async () => {
             await interrupt(); // barge-in: the student started talking over the tutor
             if (conn.micWanted) await startListening();
@@ -457,6 +548,7 @@ export function registerLiveVoiceRoutes(app: FastifyInstance): void {
       conn.closed = true;
       stopListening();
       void interrupt();
+      conn.inworld?.close();
       log.info({ sessionId }, "voice socket closed");
     });
     socket.on("error", (err: Error) => log.warn({ err }, "voice socket error"));

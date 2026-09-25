@@ -32,12 +32,17 @@ export interface ProgressSummary {
   misconceptionsAtLatestSession: Array<{ conceptId: string; name: string; misconceptions: string[] }>;
   latestRecommendedNext: string[]; latestParentSummary: string; totals: ProgressCounts; latest: ProgressCounts;
 }
-export type TtsProvider = "hume" | "elevenlabs";
+export type TtsProvider = "hume" | "elevenlabs" | "inworld";
+/** How a person would name the provider in a sentence. */
+export const PROVIDER_NAME: Record<TtsProvider, string> = { hume: "Hume", elevenlabs: "ElevenLabs", inworld: "Inworld" };
+/** The .env key each provider needs. */
+export const PROVIDER_KEY: Record<TtsProvider, string> = { hume: "HUME_API_KEY", elevenlabs: "ELEVENLABS_API_KEY", inworld: "INWORLD_API_KEY" };
 export interface RuntimeSettings {
   model: string; tutorModel: string; tutorEffort: string; analysisEffort: string; reflectEffort: string; tutorThinking: "adaptive" | "disabled"; prewarmCache: boolean; refusalFallbacks: boolean;
   ttsProvider: TtsProvider;
   ttsVoice: string; ttsVersion: "1" | "2"; ttsInstant: boolean; ttsBatchSentences: boolean; sttMinSilenceMs: number; sttMaxSilenceMs: number;
   elevenVoiceId: string; elevenVoiceName: string; elevenModel: string; elevenStability: number; elevenSpeed: number;
+  inworldVoiceId: string; inworldVoiceName: string; inworldModel: string; inworldSpeed: number; inworldPauseMs: number;
 }
 /** A text-to-speech provider as Settings offers it: whether its key is in .env, and what is wrong if not. */
 export interface TtsProviderOption { id: TtsProvider; label: string; ready: boolean; problem?: string }
@@ -63,8 +68,8 @@ export const api = {
   resetSettings: () => fetch("/api/settings", { method: "DELETE" }).then(j<SettingsView>),
   doctor: (ping: boolean) => fetch(`/api/doctor?ping=${ping}`).then(j<Readiness>),
   voices: (provider: TtsProvider) => fetch(`/api/voice/voices?provider=${provider}`).then(j<VoiceOption[]>),
-  /** ElevenLabs models: the account's list, or the documented real-time ones ("built-in") when the account cannot be asked. */
-  voiceModels: () => fetch("/api/voice/models").then(j<{ models: VoiceModelOption[]; source: "account" | "built-in"; error?: string }>),
+  /** A provider's models. ElevenLabs: the account's list, or the documented real-time ones ("built-in") when the account cannot be asked. */
+  voiceModels: (provider: TtsProvider = "elevenlabs") => fetch(`/api/voice/models?provider=${provider}`).then(j<{ models: VoiceModelOption[]; source: "account" | "built-in"; error?: string }>),
   /** Speak a sample line with unsaved settings. Spends that line's characters of the provider's credits. */
   previewVoice: async (settings: Partial<RuntimeSettings>, text?: string): Promise<VoicePreview> => {
     const res = await fetch("/api/voice/preview", json("POST", { settings, text }));

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { api, type Readiness, type RuntimeSettings, type SettingsView, type TtsProvider, type VoiceModelOption, type VoiceOption, type VoicePreview } from "../api";
+import { api, PROVIDER_NAME, type Readiness, type RuntimeSettings, type SettingsView, type TtsProvider, type VoiceModelOption, type VoiceOption, type VoicePreview } from "../api";
 
 /** Plain-language notes shown next to each setting. */
 const HELP: Record<keyof RuntimeSettings, string> = {
@@ -11,7 +11,7 @@ const HELP: Record<keyof RuntimeSettings, string> = {
   reflectEffort: "The tutor takes its notes and decides whether to move on in a second pass that runs while the student is listening to the reply, so this costs the student no waiting. Raise it if the tutor's observations or phase changes look careless.",
   prewarmCache: "Write the tutor's prompt cache when a session starts, so the first turn is a cache hit instead of a cold write.",
   refusalFallbacks: "If the safety classifier refuses a turn, retry it on a fallback model automatically instead of showing the canned fallback line.",
-  ttsProvider: "Who voices the tutor in browser voice mode. A switch applies from the next reply, even in a session already running: both providers deliver the same audio format.",
+  ttsProvider: "Who voices the tutor in browser voice mode. A switch applies from the next reply, even in a session already running: every provider delivers the same audio format.",
   ttsVoice: "The tutor's voice, from Hume's Voice Library. Pick a warm, clear adult voice; the list is fetched live from your Hume account.",
   ttsVersion: "Octave 2 gets the first audio out in about 0.6 s; Octave 1 is slower but honours per-sentence acting notes (not used here yet).",
   ttsInstant: "Instant mode trades a little expressiveness for lower first-audio latency. Leave it on for the live tutor.",
@@ -21,6 +21,11 @@ const HELP: Record<keyof RuntimeSettings, string> = {
   elevenModel: "Flash v2.5 is the fastest (about 75 ms before audio starts) but reads numbers digit by digit. v3 Conversational is more expressive at about 280 ms and costs the same credits. Multilingual v2 is richer, slower, and costs double.",
   elevenStability: "Lower gives a livelier, more varied read; higher a steadier, flatter one. 0.5 is ElevenLabs' default.",
   elevenSpeed: "Speaking rate. 1 is the voice's natural pace; the range ElevenLabs allows is 0.7 to 1.2.",
+  inworldVoiceId: "Inworld's English voices plus any your workspace has cloned or designed. The play button plays Inworld's own sample of the voice, which is free.",
+  inworldVoiceName: "",
+  inworldModel: "TTS-2 is the most natural and ranks highest with listeners; TTS-2 Flash starts faster and costs less. Either way a reply is voiced as one stream, so the voice does not reset between sentences.",
+  inworldSpeed: "Speaking rate. 1 is the voice's natural pace.",
+  inworldPauseMs: "A pause added at punctuation, on top of the voice's own, set here for a full stop. Punctuation scales it: about 0.6 of this after a comma, colon or semicolon, the same after a dash or a trailing ellipsis mid-sentence, 1.3 after a question or exclamation, and about twice this at a paragraph break. 0 leaves the voice's own pacing alone. Test this voice plays it.",
   sttMinSilenceMs: "How long the student can pause mid-thought before the transcriber decides they are done, when it is confident the sentence is complete. Raise it if the tutor keeps cutting the student off.",
   sttMaxSilenceMs: "The longest pause before a turn ends no matter what. Lower it if the tutor feels slow to respond.",
 };
@@ -36,7 +41,7 @@ export function SettingsPage({ onChange }: { onChange: () => Promise<void> }) {
   const [checking, setChecking] = useState(false);
   // The voice list follows the provider shown in the toggle, saved or not.
   const [voices, setVoices] = useState<{ provider: TtsProvider; list: VoiceOption[]; error?: string } | null>(null);
-  const [models, setModels] = useState<{ list: VoiceModelOption[]; source: string; error?: string } | null>(null);
+  const [models, setModels] = useState<Partial<Record<TtsProvider, { list: VoiceModelOption[]; source: string; error?: string }>>>({});
   const [preview, setPreview] = useState<VoicePreview | null>(null);
   const [previewBusy, setPreviewBusy] = useState(false);
   const [previewErr, setPreviewErr] = useState<string | null>(null);
@@ -61,11 +66,11 @@ export function SettingsPage({ onChange }: { onChange: () => Promise<void> }) {
       .voices(provider)
       .then((list) => live && setVoices({ provider, list }))
       .catch((e) => live && setVoices({ provider, list: [], error: (e as Error).message }));
-    if (provider === "elevenlabs" && !models) {
+    if (provider !== "hume" && !models[provider]) {
       api
-        .voiceModels()
-        .then((m) => live && setModels({ list: m.models, source: m.source, error: m.error }))
-        .catch((e) => live && setModels({ list: [], source: "none", error: (e as Error).message }));
+        .voiceModels(provider)
+        .then((m) => live && setModels((all) => ({ ...all, [provider]: { list: m.models, source: m.source, error: m.error } })))
+        .catch((e) => live && setModels((all) => ({ ...all, [provider]: { list: [], source: "none", error: (e as Error).message } })));
     }
     return () => {
       live = false;
@@ -204,7 +209,8 @@ export function SettingsPage({ onChange }: { onChange: () => Promise<void> }) {
 
   // ---- ElevenLabs fields -------------------------------------------------------
   const currentVoice = voiceList?.list.find((v) => v.id === draft.elevenVoiceId);
-  const modelList = models?.list ?? [];
+  const elevenModels = models.elevenlabs;
+  const modelList = elevenModels?.list ?? [];
   const currentModel = modelList.find((m) => m.id === draft.elevenModel);
   const playSample = (url?: string) => {
     if (url) void new Audio(url).play().catch(() => {});
@@ -242,7 +248,7 @@ export function SettingsPage({ onChange }: { onChange: () => Promise<void> }) {
           {modelList.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
         </select>
         {currentModel?.note && <span className="hint"><strong>{currentModel.id}</strong>: {currentModel.note}</span>}
-        <span className="hint">.env: {view.defaults.elevenModel}{models?.source === "built-in" ? " · showing the documented real-time models until your account can be asked" : ""}</span>
+        <span className="hint">.env: {view.defaults.elevenModel}{elevenModels?.source === "built-in" ? " · showing the documented real-time models until your account can be asked" : ""}</span>
         <span className="hint">{HELP.elevenModel}</span>
       </label>
       <label>
@@ -256,6 +262,63 @@ export function SettingsPage({ onChange }: { onChange: () => Promise<void> }) {
         <input type="range" min={0.7} max={1.2} step={0.05} value={draft.elevenSpeed} onChange={(e) => set("elevenSpeed", Number(e.target.value))} />
         <span className="hint">.env: {view.defaults.elevenSpeed}</span>
         <span className="hint">{HELP.elevenSpeed}</span>
+      </label>
+    </div>
+  );
+
+  // ---- Inworld fields ----------------------------------------------------------
+  const currentInworldVoice = voiceList?.list.find((v) => v.id === draft.inworldVoiceId);
+  const inworldModels = models.inworld?.list ?? [];
+  const currentInworldModel = inworldModels.find((m) => m.id === draft.inworldModel);
+  const inworldFields = (
+    <div className="grid3">
+      <label>
+        Tutor voice {(changed("inworldVoiceId") || changed("inworldVoiceName")) && <span className="pill">changed</span>}
+        <span className="row" style={{ gap: 6, flexWrap: "nowrap" }}>
+          <select
+            style={{ flex: 1, minWidth: 0 }}
+            value={draft.inworldVoiceId}
+            disabled={!voiceList?.list.length}
+            onChange={(e) => {
+              const v = voiceList?.list.find((x) => x.id === e.target.value);
+              setDraft({ ...draft, inworldVoiceId: e.target.value, inworldVoiceName: v?.name ?? "" });
+            }}
+          >
+            {!currentInworldVoice && <option value={draft.inworldVoiceId}>{draft.inworldVoiceName || draft.inworldVoiceId}{voiceList?.list.length ? " (not in your workspace's list)" : ""}</option>}
+            {voiceList?.list.map((v) => <option key={v.id} value={v.id}>{v.name}{v.description ? ` · ${v.description}` : ""}</option>)}
+          </select>
+          <button type="button" className="ghost small" disabled={!currentInworldVoice?.previewUrl} onClick={() => playSample(currentInworldVoice?.previewUrl ? `${currentInworldVoice.previewUrl}&model=${encodeURIComponent(draft.inworldModel)}` : undefined)} title="Play Inworld's sample of this voice (free)">▶ sample</button>
+        </span>
+        <input value={draft.inworldVoiceId} onChange={(e) => setDraft({ ...draft, inworldVoiceId: e.target.value.trim(), inworldVoiceName: voiceList?.list.find((x) => x.id === e.target.value.trim())?.name ?? "" })} placeholder="or paste a voice id" />
+        <span className="hint">
+          .env: {view.defaults.inworldVoiceName || view.defaults.inworldVoiceId}
+          {!voiceList ? " · loading voices..." : voiceList.error ? ` · could not list voices: ${voiceList.error}` : ` · ${voiceList.list.length} English voices`}
+        </span>
+        <span className="hint">{HELP.inworldVoiceId}</span>
+      </label>
+      <label>
+        Model {changed("inworldModel") && <span className="pill">changed</span>}
+        <select value={draft.inworldModel} onChange={(e) => set("inworldModel", e.target.value)}>
+          {!currentInworldModel && <option value={draft.inworldModel}>{draft.inworldModel}</option>}
+          {inworldModels.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+        </select>
+        {currentInworldModel?.note && <span className="hint"><strong>{currentInworldModel.id}</strong>: {currentInworldModel.note}</span>}
+        <span className="hint">.env: {view.defaults.inworldModel}</span>
+        <span className="hint">{HELP.inworldModel}</span>
+      </label>
+      <label>
+        Speed: {draft.inworldSpeed.toFixed(2)}× {changed("inworldSpeed") && <span className="pill">changed</span>}
+        <input type="range" min={0.7} max={1.3} step={0.05} value={draft.inworldSpeed} onChange={(e) => set("inworldSpeed", Number(e.target.value))} />
+        <span className="hint">.env: {view.defaults.inworldSpeed}</span>
+        <span className="hint">{HELP.inworldSpeed}</span>
+      </label>
+      <label>
+        Pause after a sentence: {(draft.inworldPauseMs / 1000).toFixed(2)} s {changed("inworldPauseMs") && <span className="pill">changed</span>}
+        <input type="range" min={0} max={1000} step={20} value={draft.inworldPauseMs} onChange={(e) => set("inworldPauseMs", Number(e.target.value))} />
+        <span className="hint">
+          .env: {(view.defaults.inworldPauseMs / 1000).toFixed(2)} s · a question gets {((draft.inworldPauseMs * 280) / 220 / 1000).toFixed(2)} s, a comma {((draft.inworldPauseMs * 140) / 220 / 1000).toFixed(2)} s, a paragraph {((draft.inworldPauseMs * 450) / 220 / 1000).toFixed(2)} s
+        </span>
+        <span className="hint">{HELP.inworldPauseMs}</span>
       </label>
     </div>
   );
@@ -284,18 +347,18 @@ export function SettingsPage({ onChange }: { onChange: () => Promise<void> }) {
           )}
         </p>
         <h3>{selected.label}</h3>
-        {draft.ttsProvider === "elevenlabs" ? elevenFields : humeFields}
+        {draft.ttsProvider === "elevenlabs" ? elevenFields : draft.ttsProvider === "inworld" ? inworldFields : humeFields}
         <div className="row" style={{ marginTop: 12, alignItems: "center" }}>
           <button type="button" className="ghost" disabled={previewBusy || !selected.ready} onClick={testVoice} title="Speaks one short tutor line with the settings above, saved or not">{previewBusy ? "Speaking..." : "▶ Test this voice"}</button>
           {preview && <audio ref={player} controls src={preview.url} style={{ height: 32 }} />}
           <span className="muted small">
             {preview
-              ? `${preview.provider === "elevenlabs" ? "ElevenLabs" : "Hume"}: first audio after ${preview.firstAudioMs} ms, done in ${preview.totalMs} ms · ${preview.characters} characters of credits`
+              ? `${PROVIDER_NAME[preview.provider as TtsProvider] ?? preview.provider}: first audio after ${preview.firstAudioMs} ms, done in ${preview.totalMs} ms · ${preview.characters} characters of credits`
               : "Speaks one tutor line with the settings above, saved or not. Uses about 100 characters of credits."}
           </span>
           {previewErr && <span className="error small">{previewErr}</span>}
         </div>
-        <h3>Turn-taking (both providers)</h3>
+        <h3>Turn-taking (every provider)</h3>
         <div className="grid3">
           <label className="check">
             <span><input type="checkbox" checked={draft.ttsBatchSentences} onChange={(e) => set("ttsBatchSentences", e.target.checked)} /> Batch sentences per voice request {changed("ttsBatchSentences") && <span className="pill">changed</span>}</span>

@@ -13,7 +13,7 @@ import {
   supportsStitching,
 } from "../src/voice/tts-elevenlabs.js";
 import { Pcm16Stream, pcm16ToWav } from "../src/voice/pcm.js";
-import { elevenText } from "../src/voice/live.js";
+import { batchText } from "../src/voice/live.js";
 import type { Segment } from "../src/voice/sentence-chunker.js";
 
 const opts = { voiceId: "JBFqnCBsd6RMkjVDRZzb", model: "eleven_flash_v2_5", stability: 0.4, speed: 1.1 };
@@ -213,7 +213,7 @@ describe("ElevenLabs account lookups", () => {
 describe("live voice with ElevenLabs", () => {
   it("sends a batch as one clean text so the voice reads the sentences as a run", () => {
     const seg = (text: string): Segment => ({ text, paraBreak: false });
-    expect(elevenText([seg("**Nice** thinking."), seg("So where does the food come from?")])).toBe("Nice thinking. So where does the food come from?");
-    expect(elevenText([seg("   "), seg("`ok`")])).toBe("ok");
+    expect(batchText([seg("**Nice** thinking."), seg("So where does the food come from?")])).toBe("Nice thinking. So where does the food come from?");
+    expect(batchText([seg("   "), seg("`ok`")])).toBe("ok");
   });
 });

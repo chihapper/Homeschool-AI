@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { config, envDefaults, getSettings, resetSettings, ttsVoiceLabel, updateSettings, useSettingsFile } from "../src/config.js";
+import { config, envDefaults, getSettings, resetSettings, ttsModelLabel, ttsVoiceLabel, updateSettings, useSettingsFile } from "../src/config.js";
 import { tutorAgent } from "../src/agents/tutor-agent.js";
 import { assessorAgent } from "../src/agents/assessor-agent.js";
 
@@ -48,6 +48,18 @@ describe("runtime settings", () => {
     }
     updateSettings({ ttsProvider: "hume" });
     expect(ttsVoiceLabel()).toBe(config.ttsVoice);
+    resetSettings();
+  });
+
+  it("switches to Inworld and validates its settings", () => {
+    updateSettings({ ttsProvider: "inworld", inworldVoiceId: "Dennis", inworldVoiceName: "Dennis", inworldModel: "inworld-tts-2-flash", inworldSpeed: 1.1, inworldPauseMs: 400 });
+    expect(config.inworldPauseMs).toBe(400);
+    expect(config.ttsProvider).toBe("inworld");
+    expect(ttsVoiceLabel()).toBe("Dennis");
+    expect(ttsModelLabel()).toBe("inworld-tts-2-flash");
+    for (const bad of [{ inworldSpeed: 1.5 }, { inworldSpeed: 0.5 }, { inworldVoiceId: "" }, { inworldModel: "" }, { inworldPauseMs: 1500 }, { inworldPauseMs: -1 }, { inworldPauseMs: 12.5 }]) {
+      expect(() => updateSettings(bad)).toThrow();
+    }
     resetSettings();
   });
 
