@@ -227,6 +227,11 @@ export const SessionSchema = z.object({
   /** The student read the material beforehand, so the session opened by asking them to tell it back. */
   narrationFirst: z.boolean().optional(),
   /**
+   * The earlier concept the session opened with a spaced-retrieval question on. The learner's first reply
+   * answers it, and the reflect pass files that answer under this concept rather than the current one.
+   */
+  retrievalConceptId: z.string().optional(),
+  /**
    * Passages the tutor looked up with lookup_source during the session, from anywhere in the course. The
    * assessor audits the tutor against the lesson's passages plus these, so a fact fetched from another
    * lesson is not called ungrounded.

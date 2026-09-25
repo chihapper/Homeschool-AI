@@ -11,7 +11,8 @@
  *     reported an error (one silent pass to fix the bookkeeping). If no question has been asked yet, the
  *     model may speak once more after the tools return, e.g. to open the next concept after advance.
  *   - "always" (finish_intake): once anything has been said, the turn is over.
- * Read-only tools (lookup_source) never end speech, so the model can look a passage up before it speaks.
+ * Read-only tools (lookup_source) do not end speech, so the model can look a passage up before it speaks;
+ * but once the reply ends in its question, any tool call ends the turn, because the learner has heard it all.
  */
 import Anthropic from "@anthropic-ai/sdk";
 import { anthropic, fallbackParams, reasoningParams, type Effort, type TurnLatency } from "../llm/client.js";
@@ -81,6 +82,11 @@ export interface StreamTurnOptions {
   onLatency?: (l: TurnLatency) => void;
   /** Tests only: replace the SDK call. */
   streamer?: Streamer;
+}
+
+/** The reply so far ends with its question (allowing a closing quote or bracket), so the turn is complete. */
+export function endsInQuestion(text: string): boolean {
+  return /\?["'”’)\]]*\s*$/.test(text);
 }
 
 export interface TurnResult {
@@ -188,6 +194,10 @@ export async function* streamTurn(opts: StreamTurnOptions): AsyncGenerator<strin
       // Bookkeeping after a complete reply ends the turn's speech. Bookkeeping before the question has been asked does not: the model still owes the learner that question.
       if (tool?.endsSpeech === "always" && fullText) silenced = true;
       if (tool?.endsSpeech === "after-question" && /\?/.test(fullText)) silenced = true;
+      // So does a lookup once the reply already ends in its question: whatever the model says after it is the
+      // model talking to itself (2026-09-24, spoken aloud after a lookup: "Waiting on their answer to that
+      // retrieval question, let me just ask it plainly and wait.").
+      if (!tool?.endsSpeech && endsInQuestion(fullText)) silenced = true;
       results.push({ type: "tool_result", tool_use_id: use.id, content, is_error: isError || undefined });
     }
     const resultTurn: Anthropic.Beta.BetaMessageParam = { role: "user", content: results };

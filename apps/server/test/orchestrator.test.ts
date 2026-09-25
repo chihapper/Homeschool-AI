@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyAdvance, sameEvidence } from "../src/orchestrator/session.js";
+import { applyAdvance, retrievalDirective, sameEvidence } from "../src/orchestrator/session.js";
 import type { Course, Lesson, Session } from "../src/domain/types.js";
 
 const lesson: Lesson = { id: "l1", title: "L1", objectives: [], conceptIds: ["a", "b"], guidingQuestions: [], practiceItems: [], order: 0 };
@@ -82,5 +82,14 @@ describe("applyAdvance", () => {
     ] });
     expect(applyAdvance(s, course, lesson, "next-concept", "r")).toMatch(/wrap-up/);
     expect(s.phase).toBe("wrap-up");
+  });
+});
+
+describe("spaced retrieval", () => {
+  it("tells the speaking call to ask one question and names no tool it does not have", () => {
+    const d = retrievalDirective("Cell walls", "2026-09-20");
+    expect(d).toMatch(/ONE quick retrieval question about "Cell walls"/);
+    expect(d).toMatch(/move on to today's concept/);
+    expect(d).not.toMatch(/record_observation|record the result/i);
   });
 });

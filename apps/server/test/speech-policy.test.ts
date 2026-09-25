@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { streamTurn, type AgentTool, type MessageStream, type Streamer } from "../src/agents/base.js";
+import { endsInQuestion, streamTurn, type AgentTool, type MessageStream, type Streamer } from "../src/agents/base.js";
 
 /** One scripted model round-trip: text deltas, then tool calls. */
 interface Scripted {
@@ -159,5 +159,31 @@ describe("speech policy: one block of speech per turn", () => {
     ]);
     expect(spoken).toBe("Good question. Your material also names algae. Which of the two did you expect?");
     expect(calls).toBe(2);
+  });
+
+  it("ends the turn when the model looks something up after asking its question", async () => {
+    // Seen 2026-09-24: the question was out, a lookup followed, and the next pass narrated itself aloud.
+    const { result, spoken, log, calls } = await run([
+      { text: "Quick memory check: who were the two brothers in Rome's founding legend?", tools: [{ name: "lookup_source", input: { query: "Romulus" } }] },
+      { text: "Waiting on their answer to that retrieval question, let me just ask it plainly and wait." },
+    ]);
+    expect(spoken).toBe("Quick memory check: who were the two brothers in Rome's founding legend?");
+    expect(result.text).toBe(spoken);
+    expect(log).toEqual(["lookup:Romulus"]);
+    expect(calls).toBe(1);
+  });
+
+  it("still lets a lookup follow a question in the middle of the reply", async () => {
+    const { spoken, calls } = await run([
+      { text: "Remember the leaves? Let me find that page.", tools: [{ name: "lookup_source", input: { query: "leaves" } }] },
+      { text: "Your material says glucose is made there. So where does the sugar come from?" },
+    ]);
+    expect(spoken).toBe("Remember the leaves? Let me find that page. Your material says glucose is made there. So where does the sugar come from?");
+    expect(calls).toBe(2);
+  });
+
+  it("counts a question inside closing quotes as the end of the reply", () => {
+    expect(endsInQuestion('So what did the senator mean by "citizen?" ')).toBe(true);
+    expect(endsInQuestion("Remember the leaves? Let me find that page.")).toBe(false);
   });
 });

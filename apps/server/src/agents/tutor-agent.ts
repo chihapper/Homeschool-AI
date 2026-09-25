@@ -176,6 +176,8 @@ export function buildTutorContext(ctx: TutorContext, mode: "speak" | "reflect" =
   );
   const machineDirectives = session.pendingDirectives.filter((d) => !d.startsWith(THREAD_PREFIX));
   if (machineDirectives.length) blocks.push(`<orchestrator>\n${machineDirectives.join("\n")}\n</orchestrator>`);
+  // Only the last block differs between the two calls, so the reflect-only retrieval note rides inside it.
+  const retrieval = mode === "reflect" ? retrievalAnswered(session, course) : undefined;
   blocks.push(
     mode === "speak"
       ? "You are speaking to the learner now and they are waiting, so answer straight away: two to four sentences ending in your single question, and nothing after it. " +
@@ -188,9 +190,25 @@ export function buildTutorContext(ctx: TutorContext, mode: "speak" | "reflect" =
         "This is also the only place you get to think before teaching: the next spoken turn happens fast and cannot weigh anything. " +
         "So decide what this dialogue is still working on and call open_thread with it in one sentence — a question they answered around, a claim that contradicts something they said earlier, " +
         "an answer that was right but sounded like a guess. If the thread is finished, do not call it, and the next turn moves on. " +
-        "Make every call in one batch. If there is nothing to record, no reason to advance and nothing unfinished, do nothing at all.",
+        "Make every call in one batch. If there is nothing to record, no reason to advance and nothing unfinished, do nothing at all." +
+        (retrieval
+          ? ` The session opened with a spaced-retrieval question about "${retrieval.name}", from an earlier lesson, and the learner's latest reply is their answer to it: ` +
+            `record how they did with record_observation under conceptId "${retrieval.id}", not the current concept. If they said they do not remember, that is a gap; if they did not take the question up, record nothing for it.`
+          : ""),
   );
   return blocks;
+}
+
+/**
+ * The concept whose spaced-retrieval question the learner's latest reply answers, if it does: the session
+ * opened with that question, and this is the first thing the learner has said since the tutor first spoke.
+ */
+function retrievalAnswered(session: Session, course: Course): Concept | undefined {
+  if (!session.retrievalConceptId) return undefined;
+  const opened = session.transcript.findIndex((t) => t.role === "assistant");
+  if (opened < 0) return undefined;
+  const replies = session.transcript.slice(opened + 1).filter((t) => t.role === "user").length;
+  return replies === 1 ? course.concepts.find((c) => c.id === session.retrievalConceptId) : undefined;
 }
 
 /** Tools for one call: the SPEAK call may only read; the REFLECT call does the bookkeeping. */

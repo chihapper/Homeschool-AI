@@ -81,6 +81,32 @@ describe("the tutor's turn is split into speaking and reflecting", () => {
     expect(phaseBlock).toMatch(/do not fill it with a hint/);
   });
 
+  it("has the reflect pass file the answer to the opening retrieval question under the earlier concept", () => {
+    const earlier: Concept = { ...concept, id: "cell-walls", name: "Cell walls" };
+    const c: Course = { ...course, concepts: [concept, earlier] };
+    const opened: Session = {
+      ...session,
+      retrievalConceptId: "cell-walls",
+      transcript: [
+        { role: "assistant", content: "Quick memory check: what does a cell wall do?", at: "" },
+        { role: "user", content: "It keeps the cell stiff.", at: "" },
+      ],
+    };
+    const reflect = buildTutorContext({ ...ctx, course: c, session: opened }, "reflect");
+    expect(reflect.at(-1)).toMatch(/spaced-retrieval question about "Cell walls"/);
+    expect(reflect.at(-1)).toContain('conceptId "cell-walls"');
+    // The speaking call hears nothing about notes, and the shared prefix is untouched.
+    const speak = buildTutorContext({ ...ctx, course: c, session: opened }, "speak");
+    expect(speak.join("\n")).not.toMatch(/record_observation|spaced-retrieval/);
+    expect(speak.slice(0, -1)).toEqual(reflect.slice(0, -1));
+    // Only the first reply answers it.
+    const later: Session = {
+      ...opened,
+      transcript: [...opened.transcript, { role: "assistant", content: "Good. Now, what is photosynthesis?", at: "" }, { role: "user", content: "Plants make food.", at: "" }],
+    };
+    expect(buildTutorContext({ ...ctx, course: c, session: later }, "reflect").at(-1)).not.toMatch(/spaced-retrieval/);
+  });
+
   it("keeps the cached prefix identical across both calls, so only the last block differs", () => {
     const speak = buildTutorContext(ctx, "speak");
     const reflect = buildTutorContext(ctx, "reflect");

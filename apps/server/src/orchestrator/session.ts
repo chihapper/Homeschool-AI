@@ -68,7 +68,8 @@ export function createSession(args: CreateSessionArgs): Session {
   if (course && lesson && !conceptIds?.length) throw new Error(`Lesson "${lesson.title}" has no concepts left to teach: change the course's focus or pick another lesson.`);
   const opening: string[] = [];
   // A narration is itself retrieval, so a narration-first session does not also open with a spaced-retrieval question.
-  if (course && !needsIntake && !args.narrationFirst) opening.push(...retrievalDirectives(learner, course));
+  const retrieval = course && !needsIntake && !args.narrationFirst ? spacedRetrieval(learner, course) : undefined;
+  if (retrieval) opening.push(retrieval.directive);
   if (course && args.narrationFirst) opening.push(NARRATION_DIRECTIVE);
   const session: Session = {
     id: sessions.newId(),
@@ -78,6 +79,7 @@ export function createSession(args: CreateSessionArgs): Session {
     conceptIndex: 0,
     conceptIds,
     narrationFirst: course && args.narrationFirst ? true : undefined,
+    retrievalConceptId: retrieval?.conceptId,
     phase: needsIntake ? "intake" : "teach",
     transcript: [],
     observations: [],
@@ -93,23 +95,31 @@ export function createSession(args: CreateSessionArgs): Session {
 }
 
 /**
- * Spaced retrieval: if this learner has mastered concepts in earlier sessions, ask the tutor to open with
- * one retrieval question on the least-recently-reported one before starting today's concept.
+ * Spaced retrieval: if this learner has mastered concepts in earlier sessions, the tutor opens with one
+ * retrieval question on the least-recently-reported one before starting today's concept. The session keeps
+ * the concept's id, because the answer is filed by the reflect pass one turn later (tutor-agent.ts).
  */
-export function retrievalDirectives(learner: Learner, course: Course): string[] {
+export function spacedRetrieval(learner: Learner, course: Course): { conceptId: string; directive: string } | undefined {
   const prior = reports
     .list()
     .filter((r) => r.learnerId === learner.id && r.courseId === course.id)
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   // Only material the parent still teaches: a skipped concept is not quizzed, even if it was mastered before the skip.
   const mastered = prior.flatMap((r) => r.concepts.filter((c) => c.level >= 2 && isConceptKept(course, c.conceptId)).map((c) => ({ conceptId: c.conceptId, at: r.createdAt })));
-  if (!mastered.length) return [];
+  if (!mastered.length) return undefined;
   const oldest = mastered[0];
   const concept = course.concepts.find((c) => c.id === oldest.conceptId);
-  if (!concept) return [];
-  return [
-    `Spaced retrieval: before today's concept, ask ONE quick retrieval question about "${concept.name}" (learned on ${oldest.at.slice(0, 10)}). No hints. Record the result with record_observation for concept ${concept.id}, then move on to today's concept.`,
-  ];
+  if (!concept) return undefined;
+  return { conceptId: concept.id, directive: retrievalDirective(concept.name, oldest.at.slice(0, 10)) };
+}
+
+/**
+ * What the speaking call is told. It asks and nothing more: it has no tool for notes, and telling it to take
+ * one made it narrate instead (2026-09-24: "Waiting on their answer to that retrieval question, let me just
+ * ask it plainly and wait." was spoken aloud).
+ */
+export function retrievalDirective(conceptName: string, learnedOn: string): string {
+  return `Spaced retrieval: before today's concept, open with ONE quick retrieval question about "${conceptName}" (learned on ${learnedOn}). No hints, and keep the answer out of the question: that name may contain it. Once they have answered, move on to today's concept.`;
 }
 
 function tutorContextFor(session: Session, learner: Learner, course: Course, lesson: Lesson): TutorContext | undefined {
