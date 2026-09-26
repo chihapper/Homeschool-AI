@@ -1,7 +1,22 @@
 import { useEffect, useState } from "react";
-import { api, fmtDate, type ConceptProgress, type Course, type Learner, type ProgressSummary, type Report } from "../api";
+import { api, fmtDate, type ConceptProgress, type Course, type Learner, type OutsideClaim, type ProgressSummary, type Report } from "../api";
 
 const LEVELS = ["No evidence", "Recalls", "Explains", "Applies", "Extends"];
+
+/** A check's outcome in a parent's words, with the colour of the chip. */
+function checkLabel(c: OutsideClaim): { label: string; tone: string } {
+  if (c.status === "checked") {
+    if (c.verdict === "supported") return { label: "Checked: right", tone: "good" };
+    if (c.verdict === "contradicted") return { label: "Checked: not right", tone: "bad" };
+    if (c.verdict === "complicated") return { label: "Checked: it's complicated", tone: "" };
+    return { label: "Checked: couldn't confirm", tone: "" };
+  }
+  if (c.status === "pending") return { label: "Check still running when the session ended", tone: "" };
+  if (c.status === "failed") return { label: "Check failed", tone: "" };
+  return { label: "Not checked", tone: "" };
+}
+
+const STANCE: Record<OutsideClaim["tutorStance"], string> = { confirmed: "agreed", corrected: "corrected it", unsure: "said it wasn't sure", deferred: "pointed back to the reading" };
 
 /** What changed since the previous time this concept was assessed, in words a parent reads at a glance. */
 function trend(c: ConceptProgress): string {
@@ -171,6 +186,29 @@ export function ReportPage({ report, courses, learners }: { report: Report | nul
               </div>
             ))}
           </div>
+          {(current.outsideClaims?.length ?? 0) > 0 && (
+            <div className="card">
+              <h3>Outside the reading</h3>
+              <p className="muted small">Facts that came up in the session that are not in your material, or that your material tells differently. The tutor teaches from your material; these are here so you can see what was said and, where a check ran, what Wikipedia says.</p>
+              {current.outsideClaims!.map((c) => {
+                const s = checkLabel(c);
+                return (
+                  <div key={c.id} className="concept-row">
+                    <div><span className={`stat ${s.tone}`}>{s.label}</span> &nbsp; <strong>“{c.claim}”</strong></div>
+                    <div className="muted small">Raised by {c.raisedBy === "learner" ? learnerName(current.learnerId) : "the tutor"}; the tutor {STANCE[c.tutorStance]}.</div>
+                    {c.materialSays && <div className="small">Your material says: {c.materialSays}</div>}
+                    {c.explanation && <p style={{ margin: "6px 0" }}>{c.explanation}</p>}
+                    {c.evidence && <blockquote className="small" style={{ margin: "4px 0 4px 12px" }}>“{c.evidence}”</blockquote>}
+                    {c.source && (
+                      <div className="small"><a href={c.source.url} target="_blank" rel="noreferrer">Wikipedia: {c.source.title}</a> <span className="muted">(the version that was read; text under CC BY-SA 4.0)</span></div>
+                    )}
+                    {c.statusNote && c.status !== "checked" && <div className="muted small">{c.statusNote}</div>}
+                    {c.followUp && <div className="muted small">The tutor came back to it with the student on the next turn.</div>}
+                  </div>
+                );
+              })}
+            </div>
+          )}
           <div className="card">
             <h3>Grounding audit</h3>
             {current.ungroundedClaims.length ? (

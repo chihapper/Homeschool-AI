@@ -72,6 +72,31 @@ export async function checkReadiness(opts: { ping?: boolean } = {}): Promise<Rea
     }
   }
 
+  // Facts from outside the material: the parent's setting, and the Wikipedia check behind "answer and check".
+  const contact = config.wikipedia.contact;
+  if (config.outsideKnowledge !== "check") {
+    add(1, "ok", "Outside the reading", `Setting: ${config.outsideKnowledge === "answer" ? "answer without checking" : "material only"}. Nothing is checked against Wikipedia.`);
+  } else {
+    add(
+      1,
+      contact ? "ok" : "warn",
+      "Outside the reading: Wikipedia checks (WIKIPEDIA_CONTACT)",
+      contact
+        ? "Setting: answer and check. Each request names this program and your contact, as Wikimedia requires."
+        : "Setting: answer and check, but nothing is checked until WIKIPEDIA_CONTACT is set: an email address or website Wikimedia can reach. Add it to .env and restart.",
+    );
+    if (opts.ping && contact) {
+      try {
+        const { createWikipediaClient } = await import("./reference/wikipedia.js");
+        const t0 = Date.now();
+        const titles = await createWikipediaClient({ contact }).search("Aeneas");
+        add(1, titles.length ? "ok" : "warn", "Wikipedia ping", `search answered in ${Date.now() - t0} ms${titles[0] ? ` (first result: ${titles[0]})` : ", with no results"}`);
+      } catch (err) {
+        add(1, "warn", "Wikipedia ping", err instanceof Error ? err.message : String(err));
+      }
+    }
+  }
+
   // --- Stage 2: media ingestion ----------------------------------------------
   const ytdlp = await bin(config.ytDlpBin);
   add(2, ytdlp ? "ok" : "warn", `yt-dlp (${config.ytDlpBin})`, ytdlp ?? "Optional: needed for YouTube/TED/video URLs. Install: pip install yt-dlp  (or brew install yt-dlp)");

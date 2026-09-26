@@ -18,6 +18,8 @@ import { finalizeProfile, profilerTurn } from "../agents/profiler-agent.js";
 import { prewarmTutor, reflectTurn, tutorTurn, type AdvanceTarget, type TutorContext } from "../agents/tutor-agent.js";
 import { config } from "../config.js";
 import { assessSession } from "../agents/assessor-agent.js";
+import { checkOutsideClaim } from "../agents/reference-agent.js";
+import { mergeFinishedChecks, recordOutsideClaim, SAY_FIRST, settleChecks, spokenFollowUps, startCheck } from "./outside.js";
 
 const indexCache = new Map<string, ChunkIndex>();
 function indexFor(course: Course): ChunkIndex {
@@ -80,6 +82,8 @@ export function createSession(args: CreateSessionArgs): Session {
     conceptIds,
     narrationFirst: course && args.narrationFirst ? true : undefined,
     retrievalConceptId: retrieval?.conceptId,
+    // Read once, like the focus: the tutor's cached prompt states it, so a Settings change applies from the next session.
+    outsideKnowledge: course ? config.outsideKnowledge : undefined,
     phase: needsIntake ? "intake" : "teach",
     transcript: [],
     observations: [],
@@ -235,6 +239,9 @@ async function* respondTurn(
     yield bye;
     return { text: bye, session };
   }
+  // Reference checks that finished since the last turn: their verdicts land now, and any follow-up they ask
+  // for joins this turn's directives, so the tutor comes back to it in this reply.
+  mergeFinishedChecks(session);
   const { learner, course, lesson } = resolve(session);
   const now = new Date().toISOString();
   if (userText.trim()) session.transcript.push({ role: "user", content: userText.trim(), at: now, expressions });
@@ -274,13 +281,17 @@ async function* respondTurn(
     const concept = course.concepts.find((c) => c.id === walkedConceptIds(session, course, lesson)[session.conceptIndex]);
     if (!concept) throw new Error("Current concept not found.");
     const directives = session.pendingDirectives;
+    // A sentence a reference check wrote for the tutor ("I looked that up: you were right...") is spoken first, by
+    // the orchestrator: asked to open with it, the speaking model mostly did not (orchestrator/outside.ts, SAY_FIRST).
+    const saidFirst = spokenFollowUps(directives).join(" ");
     // The thread is not a one-shot directive: it lives until the dialogue resolves it. Remember how many
     // turns it has been open so the reflect pass can keep counting, and drop it if that pass does not
     // renew it (which is how a resolved thread disappears).
     const priorThreadTurns = openThread(session)?.turns ?? 0;
     session.pendingDirectives = [];
     const ctx: TutorContext = {
-      session: { ...session, pendingDirectives: directives },
+      session: { ...session, pendingDirectives: directives.filter((d) => !d.startsWith(SAY_FIRST)) },
+      saidFirst: saidFirst || undefined,
       learner,
       course,
       lesson,
@@ -306,8 +317,18 @@ async function* respondTurn(
       onLookup: (ids) => {
         session.retrievedChunkIds = [...new Set([...(session.retrievedChunkIds ?? []), ...ids])];
       },
+      // A fact from outside the material: recorded for the parent, and checked in the background when the
+      // parent's setting says so. The check never holds up a turn (orchestrator/outside.ts).
+      onOutsideClaim: (input) => {
+        const r = recordOutsideClaim(session, input, { mode: session.outsideKnowledge ?? "answer", checksAvailable: Boolean(config.wikipedia.contact) });
+        const claim = r.claim;
+        if (r.check && claim) void startCheck(session.id, claim.id, () => checkOutsideClaim(claim, learner.gradeLevel ?? course.level));
+        return r.message;
+      },
     };
+    if (saidFirst) yield `${saidFirst} `;
     result = yield* drain(tutorTurn(ctx, signal));
+    if (saidFirst) result = { ...result, text: `${saidFirst} ${result.text}`.trim() };
 
     // The reflect pass reads the exchange INCLUDING the reply just spoken, and writes into this same
     // session object, which is persisted again when it settles.
@@ -416,6 +437,8 @@ export function sameEvidence(a: string, b: string): boolean {
  */
 export async function endSession(sessionId: string): Promise<{ session: Session; report?: MasteryReport }> {
   await settleReflection(sessionId);
+  // Give reference checks still running a moment, so the report can show their verdicts.
+  await settleChecks(sessionId);
   const session = sessions.require(sessionId);
   const { learner, course, lesson } = resolve(session);
   if (session.phase === "complete") {
@@ -424,6 +447,8 @@ export async function endSession(sessionId: string): Promise<{ session: Session;
   }
   session.phase = "complete";
   session.endedAt = new Date().toISOString();
+  // After the phase is complete, so a late verdict is recorded without queueing a follow-up nobody will hear.
+  mergeFinishedChecks(session);
   sessions.put(session);
   if (!course || !lesson || session.transcript.length < 2) return { session };
   const report = await assessSession({ session, learner, course, lesson });

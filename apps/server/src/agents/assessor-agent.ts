@@ -69,6 +69,29 @@ export function assessmentMaterial(session: Session, course: Course, lesson: Les
 /** About 50k tokens: a unit-sized course fits; a whole textbook does not, and then only what the tutor read is added. */
 export const REST_OF_COURSE_BUDGET_CHARS = 200_000;
 
+const STANCE_WORDS: Record<string, string> = { confirmed: "agreed", corrected: "corrected it", unsure: "said it was not sure", deferred: "pointed back to the reading" };
+
+/**
+ * The facts from outside the material that came up, with what the tutor said and what the reference check
+ * found. Without it the assessor filed a correct one as a misconception (2026-09-25: "Aeneas the Trojan, son of
+ * Aphrodite" was listed as blending outside knowledge into the material).
+ */
+export function outsideClaimsBlock(session: Session, learnerName: string): string {
+  const claims = session.outsideClaims ?? [];
+  if (!claims.length) return "";
+  const lines = claims.map((c) => {
+    const who = c.raisedBy === "learner" ? learnerName : "the tutor";
+    const check =
+      c.status === "checked"
+        ? `check: ${c.verdict}${c.explanation ? ` (${c.explanation})` : ""}`
+        : c.status === "pending"
+          ? "check: still running when the session ended"
+          : `not checked${c.statusNote ? ` (${c.statusNote})` : ""}`;
+    return `- "${c.claim}" raised by ${who}; the tutor ${STANCE_WORDS[c.tutorStance] ?? c.tutorStance}${c.materialSays ? `; the material says: "${c.materialSays}"` : ""}; ${check}`;
+  });
+  return `\n\n<outside_the_material>\nFacts from outside the family's material that came up in this session, with the reference check's verdict where there was one. The parent sees this list in the report. Follow the mastery-assessment skill's "Outside the material" section.\n${lines.join("\n")}\n</outside_the_material>`;
+}
+
 export async function assessSession(args: { session: Session; learner: Learner; course: Course; lesson: Lesson }): Promise<MasteryReport> {
   const { session, learner, course, lesson } = args;
   const { concepts, material, wholeCourse } = assessmentMaterial(session, course, lesson);
@@ -101,7 +124,9 @@ export async function assessSession(args: { session: Session; learner: Learner; 
           (session.narrationFirst
             ? `This session opened with ${learner.name} telling back the material unprompted, before the tutor had asked anything. That first exchange is independent evidence: weigh it like any unhinted answer.\n\n`
             : "") +
-          `<material>\n${material}\n</material>\n\n<tutor_observations>\n${observations}\n</tutor_observations>\n\n<transcript>\n${transcript}\n</transcript>`,
+          `<material>\n${material}\n</material>\n\n<tutor_observations>\n${observations}\n</tutor_observations>` +
+          outsideClaimsBlock(session, learner.name) +
+          `\n\n<transcript>\n${transcript}\n</transcript>`,
       },
     ],
   });
@@ -120,6 +145,7 @@ export async function assessSession(args: { session: Session; learner: Learner; 
     learnerId: learner.id,
     courseId: course.id,
     lessonId: lesson.id,
+    ...(session.outsideClaims?.length ? { outsideClaims: session.outsideClaims } : {}),
     createdAt: new Date().toISOString(),
   };
 }

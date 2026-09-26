@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { api, PROVIDER_NAME, type Readiness, type RuntimeSettings, type SettingsView, type TtsProvider, type VoiceModelOption, type VoiceOption, type VoicePreview } from "../api";
+import { api, PROVIDER_NAME, type OutsideKnowledgeMode, type Readiness, type RuntimeSettings, type SettingsView, type TtsProvider, type VoiceModelOption, type VoiceOption, type VoicePreview } from "../api";
 
 /** Plain-language notes shown next to each setting. */
 const HELP: Record<keyof RuntimeSettings, string> = {
@@ -11,6 +11,7 @@ const HELP: Record<keyof RuntimeSettings, string> = {
   reflectEffort: "The tutor takes its notes and decides whether to move on in a second pass that runs while the student is listening to the reply, so this costs the student no waiting. Raise it if the tutor's observations or phase changes look careless.",
   prewarmCache: "Write the tutor's prompt cache when a session starts, so the first turn is a cache hit instead of a cold write.",
   refusalFallbacks: "If the safety classifier refuses a turn, retry it on a fallback model automatically instead of showing the canned fallback line.",
+  outsideKnowledge: "What the tutor does with facts the student brings up that are not in your material. Applies from the next session.",
   ttsProvider: "Who voices the tutor in browser voice mode. A switch applies from the next reply, even in a session already running: every provider delivers the same audio format.",
   ttsVoice: "The tutor's voice, from Hume's Voice Library. Pick a warm, clear adult voice; the list is fetched live from your Hume account.",
   ttsVersion: "Octave 2 gets the first audio out in about 0.6 s; Octave 1 is slower but honours per-sentence acting notes (not used here yet).",
@@ -29,6 +30,17 @@ const HELP: Record<keyof RuntimeSettings, string> = {
   sttMinSilenceMs: "How long the student can pause mid-thought before the transcriber decides they are done, when it is confident the sentence is complete. Raise it if the tutor keeps cutting the student off.",
   sttMaxSilenceMs: "The longest pause before a turn ends no matter what. Lower it if the tutor feels slow to respond.",
 };
+
+/** The three answers to "what happens when the student brings in something from outside the reading?", in a parent's words. */
+const OUTSIDE_OPTIONS: Array<{ id: OutsideKnowledgeMode; label: string; note: string }> = [
+  {
+    id: "check",
+    label: "Answer and check (recommended)",
+    note: "The tutor confirms or corrects what the student brings up, saying it doesn't see it in the reading, or admits it is not sure. Each fact is then checked against Wikipedia in the background, and if the tutor was unsure or wrong it comes back to it on the next turn. Every check is in the report, with a link to what was read.",
+  },
+  { id: "answer", label: "Answer without checking", note: "The same answers, from the tutor's own knowledge, with nothing checked. The report still lists what came up." },
+  { id: "material-only", label: "Material only", note: "The tutor neither confirms nor corrects anything outside the reading and suggests the student ask you. The report still lists what came up." },
+];
 
 const STAGE_LABEL = ["Build", "Stage 1 · text tutor", "Stage 2 · media", "Stage 3 · voice"];
 
@@ -325,6 +337,21 @@ export function SettingsPage({ onChange }: { onChange: () => Promise<void> }) {
 
   return (
     <>
+      <div className="card">
+        <h2>Outside the reading</h2>
+        <p className="muted">What the tutor does when the student brings up a fact that is not in your material, such as something from a book, a film or a friend. Whatever you choose, it teaches only from your material, it never rules on faith or values (those stay with your material and with you), and where your material and another source differ, it follows your material.</p>
+        <div role="radiogroup" aria-label="Outside the reading" style={{ display: "grid", gap: 10, marginTop: 8 }}>
+          {OUTSIDE_OPTIONS.map((o) => (
+            <label key={o.id} className="check">
+              <span><input type="radio" name="outsideKnowledge" checked={draft.outsideKnowledge === o.id} onChange={() => set("outsideKnowledge", o.id)} /> {o.label}</span>
+              <span className="hint">{o.note}</span>
+            </label>
+          ))}
+        </div>
+        <p className="muted small" style={{ marginTop: 8 }}>A session keeps the setting it started with. .env: {view.defaults.outsideKnowledge} {changed("outsideKnowledge") && <span className="pill">changed</span>}</p>
+        {saveBar}
+      </div>
+
       <div className="card">
         <h2>Voice</h2>
         <p className="muted">Browser voice mode: the student talks, AssemblyAI turns it into text, and the provider chosen here speaks the tutor's reply. Hume EVI mode (on the Session tab) is separate and always uses Hume.</p>

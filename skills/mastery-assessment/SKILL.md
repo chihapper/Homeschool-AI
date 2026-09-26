@@ -34,6 +34,32 @@ supports goes in `ungroundedClaims` with the exact wording. Be strict: this is h
 whether the tutor stayed on the material, and a wrong flag sends the parent to "correct" their child
 on something the book does say.
 
+## Outside the material
+
+The session may list facts from outside the family's material that came up, each with what the tutor
+said and, when there was one, the reference check's verdict (`<outside_the_material>`). The parent sees
+that list in the report as it is, so do not repeat it; use it to judge fairly.
+
+- A correct outside fact the learner brought in (verdict `supported`, or plainly right) is **not a
+  misconception**. It is a connection they made from their own reading; mention it in `parentSummary`
+  when it shows real interest. Never list it under misconceptions.
+- A wrong outside fact is a misconception only if it bears on a concept in this lesson. Otherwise the
+  outside list covers it.
+- `misconceptions` feeds the parent's "still confuses" list, so it holds only things the learner has
+  wrong about the material, in the learner's words. An outside fact that the check found `supported` or
+  `complicated`, or that differs from the material only in a date or a name, is not one: do not list it
+  or comment on it there. Gaps and notes go in `nextStep` or `parentSummary`, never in `misconceptions`.
+- When the learner raised an outside fact and the tutor answered it labelled as outside the material
+  ("I don't see that in your reading, but..."), that is **not** an ungrounded claim. Flag the tutor when it
+  stated an outside fact as if it came from the material, brought in outside facts nobody asked about, or
+  said something the check contradicted.
+- Never rule on faith, values or interpretation. Where the learner challenged such a point, report how
+  the tutor handled it, not who was right. A claim about whether scripture is accurate is such a point
+  even when it is worded as what historians say; never call it right, largely right or wrong, and never
+  count it among the learner's correct outside facts.
+- Where the learner's outside fact differs from the material (another date or name), describe both
+  without calling the material wrong; the parent decides.
+
 ## Answer-seeking and tutor compliance
 
 Count learner turns that ask for the answer outright ("just tell me", "what is it") as `answerSeekingTurns`.

@@ -1,6 +1,6 @@
 # Handoff
 
-Last updated: 2026-09-24
+Last updated: 2026-09-25
 
 Read this before anything else. It is written for a session that has seen nothing.
 
@@ -12,11 +12,12 @@ nothing outside that material, and the parent gets a mastery report per session 
 across sessions. Fastify server with four agents (curriculum, profiler, tutor, assessor) and a
 deterministic orchestrator; Vite/React front end; file-backed JSON in `data/` (gitignored).
 
-**State on 2026-09-25:** `main` is at the merge of pull request #15 ("Homeschool content and app
-scoping"), commit `c8ef7db`, with 107 unit tests. Branch `feature/elevenlabs-voice` (not pushed) adds three
-commits on top: the stage-direction fix (`4da593e`), the ElevenLabs switch (`82c8e5d`) and Inworld with its
-pause slider, then the lookup fix (the tutor gets passages matching the learner's words first); 151 tests.
-Typecheck is clean in both workspaces. The first real
+**State on 2026-09-25:** `main` is at `18af54b`: the voice work from `feature/elevenlabs-voice` was
+fast-forwarded onto it and pushed at the user's request (the stage-direction fix `4da593e`, the ElevenLabs
+switch `82c8e5d`, Inworld with its pause slider `ecca428`, the lookup fix `18af54b`; 151 tests). The voice
+branch stays for further voice work. Branch `feature/outside-knowledge` (uncommitted, off `main`) builds what
+the tutor does with facts a student brings in from outside the material: answer and check against Wikipedia
+in the background, a report section, and a parent setting; 184 tests. Typecheck is clean in both workspaces. The first real
 unit, the Fords' *Ancient Rome* parent's guide from Saint Emmelia Ministries (49 scanned pages), is
 ingested as a course in `data/courses/ancient-rome-muemem4s.json` (31 lessons, 110 concepts) and has
 been taught in four sessions, three of them assessed. Text mode works with an Anthropic key alone.
@@ -47,6 +48,22 @@ decision on hosting (issue #13) before any pilot. No deadline has been set.
 - **Grounding is a product requirement.** The tutor asserts nothing outside the course; the assessor
   audits it against the whole course. Reason: this community vets curricula for worldview assumptions;
   "the tutor stayed inside your material, and here is the proof" is the product's strongest claim.
+- **Facts a student brings in from outside the material get an answer and a check** (user, 2026-09-25,
+  after "Aphrodite saved Aeneas" got only "not in the material"). Three kinds of reply: confirm, correct, or
+  "I'm not sure; I'll look into it", always labelled as outside the reading and brought back to it. The
+  check is Wikipedia first (user's choice), through its free API, never a parent-curated source list
+  ("parents may not know which sources matter"). Plain facts only: the tutor never rules on faith, values
+  or interpretation, and the family's material wins where it differs. The parent setting (Settings,
+  Outside the reading) is answer and check, answer only, or material only. Before launch: Wikimedia
+  Enterprise (#26). Later: other sources where the checks show gaps (#27), and depth pitched to the
+  student from a profile kept current across sessions (#28).
+- **An outside fact is labelled "I don't see that in your reading", never "that's not in your reading"**
+  (user, 2026-09-25): the tutor sees the passages that match the topic, not the whole book, and a parent reads
+  "not in your reading" as a fact about their book (the same rule as the coinage incident). It names the source
+  when it knows it ("That's from Homer's Iliad"). The tutor never raises outside facts itself.
+- **Scholarly questions about scripture** ("historians doubt Matthew wrote Matthew") are handed to the parent
+  for now and never checked against Wikipedia; whether the tutor may say more (the family's tradition, or the
+  views described without a verdict) is the user's open question, #29.
 - **Workbook and activity pages are a roadmap item, not an accepted limitation** (user, 2026-09-23:
   "many homeschool materials likely include that"). Issue #1, sized on a real sample.
 - **The tutor turn is two calls** (speak fast with no bookkeeping and no thinking; reflect afterwards
@@ -91,7 +108,7 @@ Before any commit:
 npm test && npm run typecheck
 ```
 
-123 tests as of 2026-09-24, all pure (no network, no binaries). The end-to-end check for tutoring
+184 tests as of 2026-09-25, all pure (no network, no binaries). The end-to-end check for tutoring
 changes is a scripted session through the HTTP API: create a session, post persona lines to
 `/api/sessions/:id/message` reading the SSE stream until `reflected`, then `POST /end` and read the
 report and `GET /api/progress/:learnerId/:courseId`. The Python prototype is pasted into issue #6;
@@ -130,8 +147,9 @@ Gotchas that cost real time this week:
 
 ## Work queue
 
-The backlog is GitHub issues 1 to 14 and 16 to 25 on chihapper/Homeschool-AI (15 was the merged pull
-request); run `gh issue list`. Ordering and blockers only here.
+The backlog is GitHub issues 1 to 14 and 16 to 29 on chihapper/Homeschool-AI (15 was the merged pull
+request); run `gh issue list`. The `pre-launch` label marks what must be settled before any family uses
+the product (#13, #18, #23, #26). Ordering and blockers only here.
 
 **User-side**
 
@@ -148,6 +166,31 @@ request); run `gh issue list`. Ordering and blockers only here.
    are the product statements a customer or an engineer will read.
 
 **Claude-side, in order**
+
+00. In progress 2026-09-25 on `feature/outside-knowledge` (uncommitted): facts from outside the material.
+   The reflect pass flags them (`flag_outside_claim`), `orchestrator/outside.ts` runs the Reference Checker
+   (`agents/reference-agent.ts`, `reference/wikipedia.ts`) as a background job and merges the verdict at the
+   next turn, which follows up if the tutor was unsure or wrong; the report gets "Outside the reading", and
+   the assessor stops calling a correct one a misconception. `WIKIPEDIA_CONTACT` is in `.env` (the user's own
+   address for now, #26). Live-tested 2026-09-25 on the Aeneas lesson and on "The Role of the Empire in God's
+   Plan" (the user asked for that lesson: faith claims must be left alone, and its dates differ from
+   Wikipedia's: Judea 64 B.C. in the reading vs 63 B.C., Constantine from 312 vs 306). What the live runs
+   found and fixed: (1) a student's "historians don't think the census in Luke happened" was reworded as a
+   plain fact, checked, and came back "Luke is in error" in the report; now `aboutFaith` keeps scripture and
+   faith away from Wikipedia whatever the wording, the tool and skills say so, and the tutor no longer lays out
+   the debate ("not mine to settle... talk it over with your parent"); (2) every fact was flagged twice on
+   consecutive turns; now the reflect pass sees what is flagged and `sameClaim` matches rewordings; (3) "the
+   material doesn't mention it" was stored as a different version, silencing follow-ups; now dropped by
+   `materialDiffers`; (4) search found Constantine XI for "Constantine the Great reign start date"; now the
+   subject's own article is read first; (5) the follow-up reached the tutor but was skipped in most live tries,
+   whatever the wording or placement; now the checker writes the sentence and the orchestrator speaks it first
+   ("I looked that up and couldn't find a clear answer about exactly how long Aeneas stayed with Dido", then the
+   tutor carries on): 3 of 3 live. Checks take 3 to 7 s after the flag and never touched the speaking call's
+   first-word time (1 to 2 s, as before). Kept for the user to read in the Reports tab: `eeafaa71` (Aeneas
+   lesson), `729d8f33` (God's Plan lesson), `2f2bafdf` (the Aeneid follow-up); the superseded test runs were
+   deleted. Seen, not fixed: the tutor once explained a date difference away ("your reading just rounds it"),
+   caught by the grounding audit and now named in the skill; when the thread runs long the tutor's
+   simplest-form question can hand over the answer ("Just yes or no: did Romulus kill Remus?"), which is #5.
 
 0a. Done 2026-09-25 (the fourth commit on the branch): the tutor narrated a lookup aloud ("I want to check that against the
    material before I answer you straight", asked about Aeneas). It now gets the passages matching the learner's
@@ -221,6 +264,16 @@ request); run `gh issue list`. Ordering and blockers only here.
   by two providers. Both must keep delivering 24 kHz, or a switch mid-session needs a reconnect.
 - **ElevenLabs stitching ids** are kept per voice and model, recorded only after a request's audio played
   to the end, and never sent to `eleven_v3*` models; a refused stitched request is retried once without.
+- **The reference check never runs inside the reflect pass, and its verdict is merged only at the start
+  of a turn** (`mergeFinishedChecks` in `respondTurn`, and in `endSession` after the phase is set to
+  complete). The next turn waits on the reflect pass, and the store reads a fresh copy of the session on
+  every call, so a background job that saved the session itself would overwrite a turn's changes or be
+  overwritten by them.
+- **A follow-up from a check never goes against the material** (`followUpFor` returns nothing when
+  `materialSays` is set). The difference goes to the parent's report instead.
+- **Faith and scripture never go to Wikipedia** (`aboutFaith` in `orchestrator/outside.ts`, applied before any
+  check, whatever the model decided). Narrowing that list reopens the report that told a parent, from Wikipedia,
+  that "the Gospel of Luke is erroneous".
 - **`lookup_source` searches the learner's latest words as well as the tutor's query.** Dropping that
   brings back the case where the tutor tells the learner the material does not mention a word that
   appears in one chunk.

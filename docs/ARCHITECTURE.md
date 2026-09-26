@@ -30,6 +30,7 @@ and giveaway counts. What is deliberately not built is in [ROADMAP.md](ROADMAP.m
 | **Profiler Agent** | First session with a new learner | `initial-assessment`, `voice-conversation`, `grounding` | Intake conversation, then `LearnerProfile` |
 | **Socratic Tutor** | Every teaching turn (voice or text) | `socratic-method`, `learner-adaptation`, `grounding`, `voice-conversation` | Spoken turn + tool calls (`lookup_source`, `record_observation`, `advance`) |
 | **Assessor Agent** | When a session ends | `mastery-assessment`, `grounding` | `MasteryReport` (0-4 per concept, misconceptions, grounding audit, parent/student summaries) |
+| **Reference Checker** | In the background, when the reflect pass flags a fact from outside the material | `reference-check` | A verdict on one fact from Wikipedia passages (supported, contradicted, complicated, not found), with a word-for-word quotation and a link to the version read |
 | **Orchestrator** | Always (plain code, no LLM) | — | Session state machine, persistence, routing |
 
 Skills live in `skills/<name>/SKILL.md` and are concatenated into the agent's system prompt. They are
@@ -99,6 +100,14 @@ tutor as `[expressions: ...]` so it can adapt (the `voice-conversation` skill sa
 2. The tutor's system prompt carries the current concept's verbatim passages, and a `lookup_source`
    BM25 tool for anything else. The `grounding` skill instructs it to say when the material doesn't cover something.
 3. The Assessor audits every tutor claim against the material and lists `ungroundedClaims` in the report the parent sees.
+4. Facts the student brings in from outside the material follow the parent's setting (Settings, Outside the reading):
+   answer and check, answer without checking, or material only. The tutor labels an outside fact as such, never
+   introduces one itself, never rules on faith or values, and follows the material where it differs. The reflect pass
+   flags each fact (`flag_outside_claim`); `orchestrator/outside.ts` runs the Reference Checker on it as a background
+   job (Wikipedia search, then the articles' summaries, contents and best-matching passages, with one section on
+   request), and merges the verdict at the start of the next turn. If the tutor was unsure or wrong, that turn comes
+   back to it. The report lists every outside fact under "Outside the reading", with the check's verdict and a link
+   to the exact Wikipedia version read, and the assessor no longer counts a correct one as a misconception.
 
 ## Data
 

@@ -15,14 +15,23 @@ export type Phase = "intake" | "teach" | "inquire" | "assess" | "wrap-up" | "com
 export interface Latency { ttftMs: number; totalMs: number; iterations: number; cacheReadTokens: number; cacheWriteTokens: number; inputTokens: number; outputTokens: number; suppressedChars?: number; thinkingChars?: number; toolsBeforeSpeech?: boolean; reflectMs?: number; reflectThinkingChars?: number; firstAudioMs?: number; transcriptMs?: number; interrupted?: boolean }
 export interface Turn { role: "user" | "assistant"; content: string; at: string; expressions?: string[]; latency?: Latency }
 export interface Observation { at: string; conceptId: string; kind: "understanding" | "partial" | "misconception" | "gap" | "engagement"; evidence: string; note: string }
-export interface Session { id: string; learnerId: string; courseId?: string; lessonId?: string; conceptIndex: number; conceptIds?: string[]; narrationFirst?: boolean; phase: Phase; transcript: Turn[]; observations: Observation[]; pendingDirectives: string[]; startedAt: string; endedAt?: string }
+/** What the tutor does with facts from outside the family's material (mirrors OutsideKnowledgeModeSchema). */
+export type OutsideKnowledgeMode = "check" | "answer" | "material-only";
+/** A fact from outside the material that came up in a session, with the reference check's verdict (mirrors OutsideClaimSchema). */
+export interface OutsideClaim {
+  id: string; at: string; claim: string; raisedBy: "learner" | "tutor"; tutorStance: "confirmed" | "corrected" | "unsure" | "deferred";
+  materialSays?: string; query: string; status: "pending" | "checked" | "not-checked" | "failed"; statusNote?: string;
+  verdict?: "supported" | "contradicted" | "complicated" | "not-found"; explanation?: string; evidence?: string;
+  source?: { title: string; url: string; revisionId?: number; quality?: string }; followUp?: string; checkedAt?: string;
+}
+export interface Session { id: string; learnerId: string; courseId?: string; lessonId?: string; conceptIndex: number; conceptIds?: string[]; narrationFirst?: boolean; outsideKnowledge?: OutsideKnowledgeMode; outsideClaims?: OutsideClaim[]; phase: Phase; transcript: Turn[]; observations: Observation[]; pendingDirectives: string[]; startedAt: string; endedAt?: string }
 export interface SessionSummary { id: string; learnerId: string; courseId?: string; lessonId?: string; phase: Phase; conceptIndex: number; turns: number; observations: number; startedAt: string; endedAt?: string; hasReport: boolean }
 export interface LatencySummary { turns: number; ttftP50Ms: number; ttftMaxMs: number; totalP50Ms: number; cacheHitRate: number; firstAudioP50Ms?: number }
 export interface Report {
   sessionId: string; learnerId: string; courseId?: string; lessonId?: string; createdAt: string;
   concepts: Array<{ conceptId: string; level: number; evidence: string[]; misconceptions: string[]; nextStep: string }>;
   parentSummary: string; studentSummary: string; recommendedNext: string[]; ungroundedClaims: string[]; effectiveFormats: string[];
-  answerSeekingTurns: number; tutorAnswerGiveaways: number;
+  answerSeekingTurns: number; tutorAnswerGiveaways: number; outsideClaims?: OutsideClaim[];
 }
 export interface ConceptProgress { conceptId: string; name: string; level: number; previousLevel?: number; asOf: string; misconceptions: string[] }
 export interface ProgressCounts { ungroundedClaims: number; tutorAnswerGiveaways: number; answerSeekingTurns: number }
@@ -39,6 +48,7 @@ export const PROVIDER_NAME: Record<TtsProvider, string> = { hume: "Hume", eleven
 export const PROVIDER_KEY: Record<TtsProvider, string> = { hume: "HUME_API_KEY", elevenlabs: "ELEVENLABS_API_KEY", inworld: "INWORLD_API_KEY" };
 export interface RuntimeSettings {
   model: string; tutorModel: string; tutorEffort: string; analysisEffort: string; reflectEffort: string; tutorThinking: "adaptive" | "disabled"; prewarmCache: boolean; refusalFallbacks: boolean;
+  outsideKnowledge: OutsideKnowledgeMode;
   ttsProvider: TtsProvider;
   ttsVoice: string; ttsVersion: "1" | "2"; ttsInstant: boolean; ttsBatchSentences: boolean; sttMinSilenceMs: number; sttMaxSilenceMs: number;
   elevenVoiceId: string; elevenVoiceName: string; elevenModel: string; elevenStability: number; elevenSpeed: number;

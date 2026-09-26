@@ -10,7 +10,7 @@ Built as a small multi-agent system on the Claude API (Opus 5) with Hume EVI for
 
 1. **Ingest** whatever you teach from: lesson plans and textbook chapters (PDF, DOCX, Markdown, text), **PowerPoint lectures** (slide text plus speaker notes), **YouTube and TED videos** (captions, or transcribed when there are none), **podcasts** (RSS feed or episode link), and web pages. Everything becomes lessons and concepts traceable to the source passage or timestamp.
 2. **Profile** a new student with a short intake conversation: how they take in ideas, how they best show understanding, pace, and challenge tolerance. Not to make it easier; to make it stick.
-3. **Tutor** with the Socratic method: elicit, probe, expose contradictions, ask for demonstrations, and only then move on. The tutor stays inside your material and says so when something isn't covered.
+3. **Tutor** with the Socratic method: elicit, probe, expose contradictions, ask for demonstrations, and only then move on. The tutor teaches only from your material. When your student brings up something from outside it, the tutor confirms it, corrects it or says it isn't sure, says it doesn't see it in the reading, and (your choice in Settings) checks it against Wikipedia in the background, coming back to it if it was unsure or wrong. It never rules on faith or values, and where your material and another source differ, it follows your material.
 4. **Assess** through the conversation itself. A separate agent reads the transcript, scores mastery per concept (0-4), lists misconceptions, audits the tutor's claims against the source, and writes summaries for parent and student.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the agent design, [docs/LATENCY.md](docs/LATENCY.md) for how the voice path stays conversational, [docs/RESEARCH.md](docs/RESEARCH.md) for the product and learning-science research, and [skills/](skills/) for the competencies each agent is built from.
@@ -92,6 +92,7 @@ brain behind it, so voice and text sessions share the same tutor, state, and rep
 | `CLAUDE_TUTOR_MODEL`, `CLAUDE_TUTOR_EFFORT` | Live tutor model and effort. Default `claude-opus-5` at `low` effort for voice latency. |
 | `CLAUDE_REFUSAL_FALLBACKS` | Server-side fallback to another Claude model if a safety classifier declines a turn. Default on. |
 | `CLAUDE_TUTOR_THINKING`, `CLAUDE_PREWARM_CACHE` | Latency knobs; see [docs/LATENCY.md](docs/LATENCY.md). |
+| `OUTSIDE_KNOWLEDGE`, `WIKIPEDIA_CONTACT` | Facts your student brings in from outside the material: `check` (answer, then check against Wikipedia in the background), `answer`, or `material-only`; Settings, Outside the reading overrides it. The checks need a contact (an email address or website) that Wikimedia's policy requires in every request. |
 | `ASSEMBLYAI_API_KEY` | Browser voice: the student's speech to text. |
 | `VOICE_TTS`, `ELEVENLABS_API_KEY`, `INWORLD_API_KEY`, `HUME_API_KEY` | Browser voice: who speaks the tutor's reply, ElevenLabs, Inworld or Hume Octave. `VOICE_TTS` is only the default; the toggle at the top of Settings, Voice switches it from the next reply. An ElevenLabs key starts with `sk_`; an Inworld key is the Portal's Base64 credential, pasted as-is. |
 | `HUME_API_KEY`, `HUME_SECRET_KEY`, `HUME_CONFIG_ID`, `PUBLIC_URL`, `CLM_SECRET` | Hume EVI voice mode (Hume runs the conversation loop). |

@@ -12,7 +12,7 @@ describe("skills", () => {
 
   it("loads every skill the agents reference", () => {
     const names = listSkills(skillsDir).map((s) => s.name).sort();
-    expect(names).toEqual(["curriculum-parsing", "grounding", "initial-assessment", "learner-adaptation", "mastery-assessment", "socratic-method", "voice-conversation"]);
+    expect(names).toEqual(["curriculum-parsing", "grounding", "initial-assessment", "learner-adaptation", "mastery-assessment", "reference-check", "socratic-method", "voice-conversation"]);
     const rendered = renderSkills(["socratic-method", "voice-conversation"], skillsDir);
     expect(rendered).toContain('<skill name="socratic-method">');
     expect(rendered.indexOf("socratic-method")).toBeLessThan(rendered.indexOf("voice-conversation"));

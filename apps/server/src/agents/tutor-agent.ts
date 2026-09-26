@@ -21,6 +21,7 @@
  *  - record_observation   log evidence of understanding / misconception for the Assessor — REFLECT call
  *  - advance              request a phase change or move to the next concept (validated by the orchestrator) — REFLECT call
  *  - open_thread          name what this dialogue is still working on, for the next turn — REFLECT call
+ *  - flag_outside_claim   note a fact from outside the material for the parent, and have it checked — REFLECT call
  *
  * `open_thread` is what makes the turns one dialogue rather than a series of separate questions. The
  * speaking call cannot deliberate, so the reflect pass names the unfinished business in one sentence and
@@ -28,10 +29,11 @@
  * thread is what the work is on.
  */
 import { config } from "../config.js";
-import type { Concept, Course, Learner, Lesson, Observation, Session, SessionPhase, SourceChunk } from "../domain/types.js";
+import type { Concept, Course, Learner, Lesson, Observation, OutsideKnowledgeMode, Session, SessionPhase, SourceChunk } from "../domain/types.js";
 import { ChunkIndex, searchWithLearner, tokenize } from "../ingest/retrieval.js";
 import { buildSystem, prewarm, streamTurn, transcriptToMessages, type AgentTool, type AgentSpec, type TurnResult } from "./base.js";
 import { openThread, THREAD_PATIENCE, THREAD_PREFIX } from "../orchestrator/notes.js";
+import { isFollowUp, SAY_FIRST, type FlagInput } from "../orchestrator/outside.js";
 import { walkedConceptIds } from "../domain/focus.js";
 
 export const tutorAgent: AgentSpec = {
@@ -84,7 +86,24 @@ export interface TutorContext {
   onThread?: (thread: string) => string;
   /** Passages lookup_source returned, so the session can remember what the tutor read (speak call). */
   onLookup?: (chunkIds: string[]) => void;
+  /** A fact from outside the material, for the parent's report and the reference check (reflect pass only). */
+  onOutsideClaim?: (input: FlagInput) => string;
+  /** Words the orchestrator has already spoken at the start of this reply (a check's follow-up); the model carries on from them. */
+  saidFirst?: string;
 }
+
+/**
+ * The parent's setting for facts from outside the material, stated once per session in the cached course block.
+ * The grounding skill says what each one means in practice.
+ */
+const OUTSIDE_MODE: Record<OutsideKnowledgeMode, string> = {
+  check:
+    "Answer and check. When the learner brings up a fact the material does not cover, confirm it, correct it, or say you are not sure and will look into it (not \"ask your parent\": you will be told what the check finds), as the grounding skill describes. A reference check runs after you speak.",
+  answer:
+    "Answer without checking. Confirm or correct well-known facts the material does not cover, labelled as outside it, as the grounding skill describes. Nothing is checked afterwards, so when you are not sure, say so.",
+  "material-only":
+    "Material only. Do not confirm or correct facts you do not see in the material: say you don't see them in the reading and suggest the learner ask their parent, as the grounding skill describes.",
+};
 
 const PHASE_GUIDANCE: Record<SessionPhase, string> = {
   intake: "",
@@ -137,7 +156,8 @@ export function buildTutorContext(ctx: TutorContext, mode: "speak" | "reflect" =
       `Concepts in this lesson (teach in order):\n${lessonConcepts.map((c, i) => `${i + 1}. ${c.name} (${c.id}): ${c.summary}`).join("\n")}\n\n` +
       (lesson.guidingQuestions.length ? `Guiding questions:\n${lesson.guidingQuestions.map((q) => `- ${q}`).join("\n")}\n\n` : "") +
       (lesson.practiceItems.length ? `Practice items from the material:\n${lesson.practiceItems.map((q) => `- ${q}`).join("\n")}\n` : "") +
-      `</lesson>`,
+      `</lesson>\n\n` +
+      `<outside_the_material setting="${session.outsideKnowledge ?? "answer"}">${OUTSIDE_MODE[session.outsideKnowledge ?? "answer"]}</outside_the_material>`,
   );
 
   if (profile) {
@@ -197,8 +217,10 @@ export function buildTutorContext(ctx: TutorContext, mode: "speak" | "reflect" =
               "Stop varying the approach. Say plainly that you want to come back to this, ask the question in its simplest form, and wait — silence here is doing work, so do not fill it with a hint.")
         : ""),
   );
-  const machineDirectives = session.pendingDirectives.filter((d) => !d.startsWith(THREAD_PREFIX));
+  const machineDirectives = session.pendingDirectives.filter((d) => !d.startsWith(THREAD_PREFIX) && !isFollowUp(d) && !d.startsWith(SAY_FIRST));
   if (machineDirectives.length) blocks.push(`<orchestrator>\n${machineDirectives.join("\n")}\n</orchestrator>`);
+  // A follow-up the tutor owes the learner leads the speaking call's final instruction (see isFollowUp).
+  const followUps = mode === "speak" ? session.pendingDirectives.filter(isFollowUp) : [];
   const fetched = passagesForLatestReply(ctx);
   if (fetched.length) {
     blocks.push(
@@ -207,11 +229,16 @@ export function buildTutorContext(ctx: TutorContext, mode: "speak" | "reflect" =
         `\n</passages_for_this_turn>`,
     );
   }
-  // Only the last block differs between the two calls, so the reflect-only retrieval note rides inside it.
+  // Only the last block differs between the two calls, so the reflect-only notes ride inside it.
   const retrieval = mode === "reflect" ? retrievalAnswered(session, course) : undefined;
+  const flagged = mode === "reflect" ? (session.outsideClaims ?? []).map((c) => `"${c.claim}"`) : [];
   blocks.push(
     mode === "speak"
-      ? "You are speaking to the learner now and they are waiting, so answer straight away: two to four sentences ending in your single question, and nothing after it. " +
+      ? (ctx.saidFirst
+          ? `You have already said this to the learner, as the start of this reply: "${ctx.saidFirst}" Carry on from there with the rest of the reply, without repeating it or saying it again in other words.\n\n`
+          : "") +
+        (followUps.length ? `Your reply starts with something you owe the learner, before anything else. ${followUps.join(" ")}\n\n` : "") +
+        "You are speaking to the learner now and they are waiting, so answer straight away: two to four sentences ending in your single question, and nothing after it. " +
         "Do not answer your own question, and do not narrate a pause, a hesitation, or a reaction the learner has not actually given: their last message is the only thing they have said. " +
         "Do not stop to weigh whether they are ready to move on and do not take notes; that happens after you speak, in a separate pass you do not run here. " +
         "Passages that match the learner's latest words are above when there are any. If you need another passage to answer honestly, call lookup_source before your first word, " +
@@ -222,6 +249,8 @@ export function buildTutorContext(ctx: TutorContext, mode: "speak" | "reflect" =
         "This is also the only place you get to think before teaching: the next spoken turn happens fast and cannot weigh anything. " +
         "So decide what this dialogue is still working on and call open_thread with it in one sentence — a question they answered around, a claim that contradicts something they said earlier, " +
         "an answer that was right but sounded like a guess. If the thread is finished, do not call it, and the next turn moves on. " +
+        "If the latest exchange brought up a checkable fact the material does not settle, from the learner or from you, call flag_outside_claim for it; never for faith, values or opinion. " +
+        (flagged.length ? `Already flagged this session, so never flag these again, however you would word them now: ${flagged.join("; ")}. ` : "") +
         "Make every call in one batch. If there is nothing to record, no reason to advance and nothing unfinished, do nothing at all." +
         (retrieval
           ? ` The session opened with a spaced-retrieval question about "${retrieval.name}", from an earlier lesson, and the learner's latest reply is their answer to it: ` +
@@ -335,7 +364,47 @@ export function tutorTools(ctx: TutorContext, mode: "speak" | "reflect" = "speak
     run: ({ thread: text }) => ctx.onThread?.(text) ?? "No thread channel on this turn.",
   };
 
-  return mode === "speak" ? [lookup as AgentTool<never>] : [record as AgentTool<never>, advance as AgentTool<never>, thread as AgentTool<never>];
+  const flag: AgentTool<FlagInput> = {
+    definition: {
+      name: "flag_outside_claim",
+      description:
+        "Note a checkable fact from the latest exchange that the course material does not settle, so the parent sees it in the report and, when the parent's setting allows, it is checked against an encyclopedia in the background. " +
+        "Use it when the learner stated or asked about a plain fact (who, what, when, where, how many) that the material does not cover or tells differently, or when you stated such a fact yourself. " +
+        "Do not use it for what the material states and the learner agrees with; for faith or belief, scripture and what it means, whether events in scripture happened as told (including what historians or scholars say about that), morality, politics or opinion; " +
+        "or for the learner's own feelings and experiences. One fact per call, and never a fact already flagged, however you would word it now.",
+      input_schema: {
+        type: "object",
+        properties: {
+          claim: { type: "string", description: "The fact as one plain, checkable sentence, e.g. \"Aphrodite rescued Aeneas during the Trojan War.\"" },
+          raisedBy: { type: "string", enum: ["learner", "tutor"] },
+          tutorStance: {
+            type: "string",
+            enum: ["confirmed", "corrected", "unsure", "deferred"],
+            description:
+              "What you told the learner: confirmed (you said it is right, even in passing, e.g. \"that's a real detail\"), corrected (you said it is wrong), unsure (you said you did not know), or deferred (you pointed back to the reading and took no position).",
+          },
+          query: {
+            type: "string",
+            description: "The encyclopedia article to look in: the subject's name as an article title, with no other words, e.g. \"Aeneas\", \"Constantine the Great\", \"Siege of Jerusalem (63 BC)\".",
+          },
+          materialSays: {
+            type: "string",
+            description:
+              "Only when the course material states something different on this exact point (another date, name or number), what it states, e.g. \"Palestine came under Roman rule in 64 B.C.\". If the material simply does not mention it, an empty string.",
+          },
+        },
+        required: ["claim", "raisedBy", "tutorStance", "query", "materialSays"],
+        additionalProperties: false,
+      },
+      strict: true,
+    },
+    run: (input) => ctx.onOutsideClaim?.(input) ?? "Not recorded: there is no channel for outside facts on this turn.",
+    endsSpeech: "after-question",
+  };
+
+  return mode === "speak"
+    ? [lookup as AgentTool<never>]
+    : [record as AgentTool<never>, advance as AgentTool<never>, thread as AgentTool<never>, flag as AgentTool<never>];
 }
 
 /** Warm the cache for the stable part of this session's tutor prompt (role + skills + course + learner). */
@@ -370,7 +439,7 @@ export async function reflectTurn(ctx: TutorContext, spokenText: string, signal?
   messages.push({
     role: "user",
     content:
-      "(Reflect on the exchange above. Record any evidence with record_observation, quoting the learner, and call advance if the phase is finished. " +
+      "(Reflect on the exchange above. Record any evidence with record_observation, quoting the learner, call advance if the phase is finished, and flag any fact from outside the material with flag_outside_claim. " +
       "Make the calls in one batch and write no words: the learner cannot hear this pass.)",
   });
   const gen = streamTurn({ spec: reflectAgent, system, messages, tools: tutorTools(ctx, "reflect"), maxTokens: 700, signal });

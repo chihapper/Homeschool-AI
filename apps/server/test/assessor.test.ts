@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assessmentMaterial, REST_OF_COURSE_BUDGET_CHARS } from "../src/agents/assessor-agent.js";
+import { assessmentMaterial, outsideClaimsBlock, REST_OF_COURSE_BUDGET_CHARS } from "../src/agents/assessor-agent.js";
 import type { Course, Lesson, Session } from "../src/domain/types.js";
 
 const chunk = (id: string, heading: string, text: string) => ({ id, source: "rome.pdf", headingPath: [heading], text, order: Number(id.slice(-1)) });
@@ -47,5 +47,25 @@ describe("what the assessor audits the tutor against", () => {
     expect(concepts.map((c) => c.id)).toEqual(["founding"]);
     expect(material).not.toContain("<retrieved_passages>");
     expect(material).toContain("<rest_of_course>");
+  });
+});
+
+describe("what the assessor is told about facts from outside the material", () => {
+  it("lists each one with what the tutor said and what the check found, so a correct one is not called a misconception", () => {
+    expect(outsideClaimsBlock(session(), "Maya")).toBe("");
+    const block = outsideClaimsBlock(
+      session({
+        outsideClaims: [
+          { id: "a", at: "", claim: "Aphrodite rescued Aeneas.", raisedBy: "learner", tutorStance: "confirmed", query: "Aeneas", status: "checked", verdict: "supported", explanation: "The Iliad tells it." },
+          { id: "b", at: "", claim: "Rome took Judea in 63 B.C.", raisedBy: "learner", tutorStance: "deferred", materialSays: "64 B.C.", query: "Judea", status: "pending" },
+          { id: "c", at: "", claim: "McDonald's rescued Aeneas.", raisedBy: "learner", tutorStance: "corrected", query: "Aeneas", status: "not-checked", statusNote: "Checks are off in Settings." },
+        ],
+      }),
+      "Maya",
+    );
+    expect(block).toContain('- "Aphrodite rescued Aeneas." raised by Maya; the tutor agreed; check: supported (The Iliad tells it.)');
+    expect(block).toContain('the tutor pointed back to the reading; the material says: "64 B.C."; check: still running when the session ended');
+    expect(block).toContain("not checked (Checks are off in Settings.)");
+    expect(block).toMatch(/"Outside the material" section/);
   });
 });

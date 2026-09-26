@@ -33,6 +33,7 @@ describe("runtime settings", () => {
   it("rejects invalid values without changing anything", () => {
     expect(() => updateSettings({ tutorEffort: "turbo" })).toThrow();
     expect(() => updateSettings({ tutorModel: "" })).toThrow();
+    expect(() => updateSettings({ outsideKnowledge: "google-it" })).toThrow();
     expect(config.tutorEffort).toBe("medium");
   });
 

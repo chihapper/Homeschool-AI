@@ -13,7 +13,7 @@ const ctx = { session, learner, course, lesson, concept, index: { search: () => 
 describe("the tutor's turn is split into speaking and reflecting", () => {
   it("gives the speak call only the read-only lookup, and the reflect call the bookkeeping", () => {
     expect(tutorTools(ctx, "speak").map((t) => t.definition.name)).toEqual(["lookup_source"]);
-    expect(tutorTools(ctx, "reflect").map((t) => t.definition.name)).toEqual(["record_observation", "advance", "open_thread"]);
+    expect(tutorTools(ctx, "reflect").map((t) => t.definition.name)).toEqual(["record_observation", "advance", "open_thread", "flag_outside_claim"]);
   });
 
   it("tells the speak call to answer now and the reflect call to stay silent", () => {
@@ -127,6 +127,54 @@ describe("the tutor's turn is split into speaking and reflecting", () => {
     const yes = { ...c, session: { ...asked, transcript: [asked.transcript[0], { role: "user" as const, content: "Yes.", at: "" }] } } as TutorContext;
     expect(buildTutorContext(yes, "speak").some((b) => b.startsWith("<passages_for_this_turn>"))).toBe(false);
     expect(passagesForLatestReply({ ...c, concept: { ...concept, sourceChunkIds: ["c-aeneas"] } } as TutorContext)).toEqual([]);
+  });
+
+  it("states the parent's outside-the-material setting in the cached block, and only the reflect pass flags outside facts", () => {
+    const checking: Session = { ...session, outsideKnowledge: "check" };
+    const speak = buildTutorContext({ ...ctx, session: checking }, "speak");
+    expect(speak[0]).toContain('<outside_the_material setting="check">Answer and check.');
+    expect(speak.at(-1)).not.toMatch(/flag_outside_claim|reference check/);
+    const reflect = buildTutorContext({ ...ctx, session: checking }, "reflect");
+    expect(reflect.at(-1)).toMatch(/call flag_outside_claim for it; never for faith, values or opinion/);
+    expect(reflect.slice(0, -1)).toEqual(speak.slice(0, -1));
+    // The reflect pass sees what is already flagged, so it does not flag a fact again in new words.
+    const flagged: Session = { ...checking, outsideClaims: [{ id: "a", at: "", claim: "Aphrodite rescued Aeneas.", raisedBy: "learner", tutorStance: "confirmed", query: "Aeneas", status: "pending" }] };
+    expect(buildTutorContext({ ...ctx, session: flagged }, "reflect").at(-1)).toContain('Already flagged this session, so never flag these again, however you would word them now: "Aphrodite rescued Aeneas."');
+    expect(buildTutorContext({ ...ctx, session: flagged }, "speak").join(" ")).not.toContain("Already flagged");
+    // Sessions from before the setting existed answer without checking; material only is stated plainly.
+    expect(buildTutorContext(ctx, "speak")[0]).toContain('setting="answer">Answer without checking.');
+    expect(buildTutorContext({ ...ctx, session: { ...session, outsideKnowledge: "material-only" } }, "speak")[0]).toMatch(/Material only\. Do not confirm or correct/);
+  });
+
+  it("puts a follow-up the tutor owes at the head of the speaking call's final instruction, not with the other directives", () => {
+    const owed = "Keep your word first: earlier you told the learner you were not sure whether the Aeneid has 9,896 lines. You have since looked it up, and it is right.";
+    const s: Session = { ...session, pendingDirectives: [owed, "Now in ASSESS: ask for demonstrations."] };
+    const speak = buildTutorContext({ ...ctx, session: s }, "speak");
+    expect(speak.at(-1)).toMatch(/^Your reply starts with something you owe the learner, before anything else\. Keep your word first:/);
+    const orch = speak.find((b) => b.includes("<orchestrator>")) ?? "";
+    expect(orch).toContain("Now in ASSESS");
+    expect(orch).not.toContain("Keep your word first");
+    const reflect = buildTutorContext({ ...ctx, session: s }, "reflect");
+    expect(reflect.join(" ")).not.toContain("Keep your word first");
+    expect(reflect.slice(0, -1)).toEqual(speak.slice(0, -1));
+  });
+
+  it("tells the speaking call what the orchestrator already said for it, and keeps the marker out of its directives", () => {
+    const line = "I looked that up: your brother was right, the Aeneid really does have 9,896 lines.";
+    const s: Session = { ...session, pendingDirectives: [`Say first: ${line}`, "Now in ASSESS: ask for demonstrations."] };
+    const speak = buildTutorContext({ ...ctx, session: s, saidFirst: line }, "speak");
+    expect(speak.at(-1)).toMatch(/^You have already said this to the learner, as the start of this reply: "I looked that up: your brother was right/);
+    expect(speak.at(-1)).toMatch(/without repeating it/);
+    expect(speak.join(" ")).not.toContain("Say first:");
+    expect(buildTutorContext({ ...ctx, session: s }, "reflect").join(" ")).not.toContain("Say first:");
+  });
+
+  it("passes a flagged outside fact to the orchestrator", async () => {
+    const seen: unknown[] = [];
+    const flag = tutorTools({ ...ctx, onOutsideClaim: (input) => (seen.push(input), "Flagged.") }, "reflect").find((t) => t.definition.name === "flag_outside_claim")!;
+    const input = { claim: "Aphrodite rescued Aeneas.", raisedBy: "learner", tutorStance: "confirmed", query: "Aeneas", materialSays: "" };
+    expect(await flag.run(input as never)).toBe("Flagged.");
+    expect(seen).toEqual([input]);
   });
 
   it("keeps the cached prefix identical across both calls, so only the last block differs", () => {

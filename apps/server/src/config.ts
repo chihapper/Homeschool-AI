@@ -12,6 +12,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
+import { OutsideKnowledgeModeSchema, type OutsideKnowledgeMode } from "./domain/types.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -75,6 +76,8 @@ export const RuntimeSettingsSchema = z.object({
   prewarmCache: z.boolean(),
   /** Route safety-classifier refusals to a fallback model automatically. */
   refusalFallbacks: z.boolean(),
+  /** Facts from outside the family's material: answer and check against Wikipedia, answer only, or material only. Read when a session starts. */
+  outsideKnowledge: OutsideKnowledgeModeSchema,
   /** Who voices the tutor in browser voice mode. Read at the start of every turn, so a switch applies to the next reply. */
   ttsProvider: z.enum(TTS_PROVIDERS),
   /** Hume voice for the tutor: a Voice Library name ("Ava Song"), or "CUSTOM_VOICE:<id>" for a saved voice. */
@@ -122,6 +125,7 @@ export const envDefaults: RuntimeSettings = {
   tutorThinking: env("CLAUDE_TUTOR_THINKING", "adaptive") === "disabled" ? "disabled" : "adaptive",
   prewarmCache: env("CLAUDE_PREWARM_CACHE", "true") !== "false",
   refusalFallbacks: env("CLAUDE_REFUSAL_FALLBACKS", "true") !== "false",
+  outsideKnowledge: OutsideKnowledgeModeSchema.catch("check").parse(env("OUTSIDE_KNOWLEDGE", "check")),
   ttsProvider: (TTS_PROVIDERS as readonly string[]).includes(env("VOICE_TTS", "hume")!) ? (env("VOICE_TTS", "hume") as TtsProvider) : "hume",
   ttsVoice: env("HUME_TTS_VOICE", "Ava Song")!,
   ttsVersion: env("HUME_TTS_VERSION", "2") === "1" ? "1" : "2",
@@ -234,6 +238,9 @@ export const config = {
   get prewarmCache(): boolean {
     return effective().prewarmCache;
   },
+  get outsideKnowledge(): OutsideKnowledgeMode {
+    return effective().outsideKnowledge;
+  },
   get ttsProvider(): TtsProvider {
     return effective().ttsProvider;
   },
@@ -322,6 +329,15 @@ export const config = {
   inworld: {
     /** The Base64 credential copied from the Inworld Portal as-is (base64 of key_id:secret), without "Basic ". */
     apiKey: env("INWORLD_API_KEY"),
+  },
+
+  /** The reference check for facts from outside the material (reference/wikipedia.ts). */
+  wikipedia: {
+    /**
+     * An email address or website Wikimedia can reach, sent in every request's User-Agent as its policy
+     * requires. Without one the checks are off: an anonymous program is limited to 10 requests a minute.
+     */
+    contact: env("WIKIPEDIA_CONTACT"),
   },
 
   hume: {

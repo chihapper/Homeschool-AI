@@ -201,6 +201,60 @@ export const TranscriptTurnSchema = z.object({
 });
 export type TranscriptTurn = z.infer<typeof TranscriptTurnSchema>;
 
+/**
+ * What the tutor does with facts from outside the family's material, the parent's choice (Settings), frozen on
+ * each session at creation:
+ *  - check:         answer (confirm, correct, or say it is not sure) and check the fact against Wikipedia in the
+ *                   background, following up next turn when the check says to;
+ *  - answer:        answer from general knowledge, labelled as outside the material, with no check;
+ *  - material-only: neither confirm nor correct; say it is outside the reading.
+ */
+export const OutsideKnowledgeModeSchema = z.enum(["check", "answer", "material-only"]);
+export type OutsideKnowledgeMode = z.infer<typeof OutsideKnowledgeModeSchema>;
+
+/**
+ * A checkable fact from a session that the material does not settle, flagged by the reflect pass: something the
+ * learner brought in from outside ("Aphrodite saved Aeneas"), or a version that differs from the material's. The
+ * reference check fills in the verdict; the parent sees every one in the report, under "Outside the reading".
+ */
+export const OutsideClaimSchema = z.object({
+  id: z.string(),
+  /** When the reflect pass flagged it. */
+  at: z.string(),
+  /** The claim as one plain, checkable sentence. */
+  claim: z.string(),
+  raisedBy: z.enum(["learner", "tutor"]),
+  /** What the tutor told the learner about it: agreed, corrected it, said it was not sure, or pointed back to the reading. */
+  tutorStance: z.enum(["confirmed", "corrected", "unsure", "deferred"]),
+  /** What the family's material says on the point, when it says something different. The material wins in the session. */
+  materialSays: z.string().optional(),
+  /** What to look up: the subject, e.g. "Aeneas". */
+  query: z.string(),
+  status: z.enum(["pending", "checked", "not-checked", "failed"]),
+  /** Why it was not checked, or why the check failed, in words a parent can read. */
+  statusNote: z.string().optional(),
+  /** complicated: true in one version or sense and not another, e.g. ancient accounts differ. */
+  verdict: z.enum(["supported", "contradicted", "complicated", "not-found"]).optional(),
+  /** One or two plain sentences for the parent. */
+  explanation: z.string().optional(),
+  /** A short quotation from the source that settles it. */
+  evidence: z.string().optional(),
+  source: z
+    .object({
+      title: z.string(),
+      /** Permanent link to the exact version that was read. */
+      url: z.string(),
+      revisionId: z.number().int().optional(),
+      /** Wikipedia's own grade for the article (FA, GA, B, C, Start, Stub), stored but not shown yet (#26). */
+      quality: z.string().optional(),
+    })
+    .optional(),
+  /** What the tutor was asked to tell the learner once the check came back, if anything. */
+  followUp: z.string().optional(),
+  checkedAt: z.string().optional(),
+});
+export type OutsideClaim = z.infer<typeof OutsideClaimSchema>;
+
 /** Evidence the Tutor records while talking to the learner. */
 export const ObservationSchema = z.object({
   at: z.string(),
@@ -237,6 +291,10 @@ export const SessionSchema = z.object({
    * lesson is not called ungrounded.
    */
   retrievedChunkIds: z.array(z.string()).optional(),
+  /** The parent's outside-the-material setting when the session was created. Absent on older sessions: "answer". */
+  outsideKnowledge: OutsideKnowledgeModeSchema.optional(),
+  /** Facts from outside the material that came up, with the reference check's verdicts. */
+  outsideClaims: z.array(OutsideClaimSchema).optional(),
   phase: SessionPhaseSchema,
   transcript: z.array(TranscriptTurnSchema),
   observations: z.array(ObservationSchema),
@@ -281,16 +339,19 @@ export const MasteryReportSchema = z.object({
   answerSeekingTurns: z.number().int(),
   /** Tutor turns that handed over a final answer before the learner attempted it. Should be zero. */
   tutorAnswerGiveaways: z.number().int(),
+  /** Copied from the session when the report is written, so the parent sees each outside fact and its check. */
+  outsideClaims: z.array(OutsideClaimSchema).optional(),
   createdAt: z.string(),
 });
 export type MasteryReport = z.infer<typeof MasteryReportSchema>;
 
-/** Assessor output (before ids/timestamps are attached). */
+/** Assessor output (before ids/timestamps and the session's outside claims are attached). */
 export const MasteryExtractionSchema = MasteryReportSchema.omit({
   sessionId: true,
   learnerId: true,
   courseId: true,
   lessonId: true,
+  outsideClaims: true,
   createdAt: true,
 });
 export type MasteryExtraction = z.infer<typeof MasteryExtractionSchema>;
