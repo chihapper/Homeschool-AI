@@ -45,7 +45,7 @@ export function App() {
         <h1>Homeschool AI</h1>
         <nav>
           {TABS.map(([t, label]) => (
-            <button key={t} className={tab === t ? "active" : ""} onClick={() => setTab(t)}>
+            <button key={t} className={tab === t ? "active" : ""} onClick={() => { setTab(t); if (t === "students") void refresh(); }} title={t === "students" ? "Profiles are revised in the background after each report" : undefined}>
               {label}
               {t === "session" && session && session.phase !== "complete" ? <span className="dot" title="A session is open" /> : null}
             </button>

@@ -22,7 +22,11 @@ Purpose: find out how to teach *this* learner well. Not to make things easier; t
 ## Producing the profile
 
 - Every field must be justified by something the learner actually said or did. Quote it in `priorKnowledge`, `observedGaps`.
-- `tutoringGuidance` is a list of concrete instructions to the tutor, e.g. "Open with an example before naming the term", "Give 5+ seconds of silence before scaffolding", "Analogies to soccer land well".
+- `tutoringGuidance` is a list of at most six concrete instructions to the tutor, e.g. "Open with an example before naming the term", "Give 5+ seconds of silence before scaffolding", "Analogies to soccer land well". The tutor follows each one literally, so six it can follow beat eleven it cannot.
+- `depth` is how much of an answer they are ready for, from what they showed, not their grade: `simple`
+  (the plain version, one idea at a time) unless the challenge probe showed them reasoning aloud with a
+  "why" or an "it depends" (`some-nuance`); `full` needs evidence an intake rarely gives. The profile
+  pass revises it from later sessions.
 - `parentSummary` is 3-5 plain sentences a parent can act on.
 - Do not label the learner ("visual learner"). Describe observed preferences and evidence.
 - Do not assign a gender. Use the learner's name, or a pronoun only if they or the parent used one in

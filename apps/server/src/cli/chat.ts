@@ -61,12 +61,18 @@ async function main(): Promise<void> {
   rl.close();
   console.log("\nLatency:", JSON.stringify(latencySummary(session.id ? (await import("../store/index.js")).sessions.require(session.id) : session)));
   console.log("\nAssessing session...");
-  const { report } = await endSession(session.id);
+  const { report, profileUpdate } = await endSession(session.id);
   if (report) {
     console.log(`\nParent summary:\n${report.parentSummary}\n`);
     for (const c of report.concepts) console.log(`  ${c.conceptId}: level ${c.level} — ${c.nextStep}`);
     if (report.ungroundedClaims.length) console.log(`\nUngrounded tutor claims:\n${report.ungroundedClaims.map((u) => `  - ${u}`).join("\n")}`);
     console.log(`\nFull report saved for session ${session.id}.`);
+  }
+  if (profileUpdate) {
+    // The pass runs in the background on the server; this process must wait for it or exit before it lands.
+    console.log("\nRevising the profile...");
+    const update = await profileUpdate;
+    console.log(update ? `Profile revised: ${update.summary}` : "Profile reviewed: nothing changed.");
   }
 }
 

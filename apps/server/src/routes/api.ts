@@ -14,6 +14,7 @@ import { sanitizeFocus } from "../domain/focus.js";
 import { buildProgress } from "../domain/progress.js";
 import { courses, learners, reports, sessions } from "../store/index.js";
 import { activeTtsProvider, config, getSettings, MODEL_OPTIONS, REPO_ROOT, resetSettings, RuntimeSettingsSchema, ttsModelLabel, ttsVoiceLabel, updateSettings } from "../config.js";
+import { undoProfileUpdate } from "../domain/profile.js";
 import { checkReadiness } from "../doctor.js";
 import { humeConfigured, mintAccessToken } from "../voice/hume.js";
 import { pcm16ToWav } from "../voice/pcm.js";
@@ -301,10 +302,18 @@ export function registerApiRoutes(app: FastifyInstance): void {
     const body = LearnerBody.parse(req.body);
     return learners.put({ id: learners.newId(), ...body, createdAt: new Date().toISOString() });
   });
-  /** Forget the profile so the next session runs the intake again (re-test a persona). */
+  /** Forget the profile, and its revisions, so the next session runs the intake again (re-test a persona). */
   app.delete("/api/learners/:id/profile", async (req: FastifyRequest<{ Params: { id: string } }>) => {
-    const { profile, ...rest } = learners.require(req.params.id);
+    const { profile, profileHistory, profileReviewedAt, ...rest } = learners.require(req.params.id);
     return learners.put(rest);
+  });
+  /** Undo the latest revision of the profile: back to what it was before that session. */
+  app.post("/api/learners/:id/profile/undo", async (req: FastifyRequest<{ Params: { id: string } }>, reply) => {
+    try {
+      return learners.put(undoProfileUpdate(learners.require(req.params.id)));
+    } catch (err) {
+      return reply.code(409).send({ error: err instanceof Error ? err.message : String(err) });
+    }
   });
   app.delete("/api/learners/:id", async (req: FastifyRequest<{ Params: { id: string } }>) => {
     learners.require(req.params.id);
@@ -372,7 +381,11 @@ export function registerApiRoutes(app: FastifyInstance): void {
     return reply;
   });
 
-  app.post("/api/sessions/:id/end", async (req: FastifyRequest<{ Params: { id: string } }>) => endSession(req.params.id));
+  app.post("/api/sessions/:id/end", async (req: FastifyRequest<{ Params: { id: string } }>) => {
+    // The profile pass keeps running after the report is returned; the Students tab shows it when it lands.
+    const { profileUpdate: _background, ...result } = await endSession(req.params.id);
+    return result;
+  });
   app.post("/api/sessions/:id/turn-latency", async (req: FastifyRequest<{ Params: { id: string } }>) => {
     annotateLastTurn(req.params.id, TurnLatencyBody.parse(req.body ?? {}));
     return { ok: true };

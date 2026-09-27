@@ -27,10 +27,11 @@ and giveaway counts. What is deliberately not built is in [ROADMAP.md](ROADMAP.m
 | Agent | When it runs | Skills | Output |
 |---|---|---|---|
 | **Curriculum Agent** | On upload | `curriculum-parsing`, `grounding` | `Course` (lessons, concepts, objectives, guiding questions, cited source chunks) |
-| **Profiler Agent** | First session with a new learner | `initial-assessment`, `voice-conversation`, `grounding` | Intake conversation, then `LearnerProfile` |
+| **Profiler Agent** | First session with a new learner | `initial-assessment`, `voice-conversation`, `grounding` | Intake conversation, then the first `LearnerProfile` (kept current afterwards by the Profile Reviser) |
 | **Socratic Tutor** | Every teaching turn (voice or text) | `socratic-method`, `learner-adaptation`, `grounding`, `voice-conversation` | Spoken turn + tool calls (`lookup_source`, `record_observation`, `advance`) |
 | **Assessor Agent** | When a session ends | `mastery-assessment`, `grounding` | `MasteryReport` (0-4 per concept, misconceptions, grounding audit, parent/student summaries) |
 | **Reference Checker** | In the background, when the reflect pass flags a fact from outside the material | `reference-check` | A verdict on one fact from Wikipedia passages (supported, contradicted, complicated, not found), with a word-for-word quotation and a link to the version read |
+| **Profile Reviser** | In the background, after every mastery report | `profile-update` | A revised `LearnerProfile` with a reason per changed field; `domain/profile.ts` lands the fast fields, holds the slow ones until two sessions agree, and records every change with undo |
 | **Orchestrator** | Always (plain code, no LLM) | — | Session state machine, persistence, routing |
 
 Skills live in `skills/<name>/SKILL.md` and are concatenated into the agent's system prompt. They are
@@ -112,7 +113,9 @@ tutor as `[expressions: ...]` so it can adapt (the `voice-conversation` skill sa
 ## Data
 
 File-backed JSON in `data/` (`courses/`, `learners/`, `sessions/`, `reports/`). `JsonStore` is the only
-persistence abstraction; swap it for a database when needed.
+persistence abstraction; swap it for a database when needed. A learner record carries its profile and the
+profile's revisions (`profileHistory`: each with the changes, their reasons, what was held, and the profile as it
+was before, so the latest can be undone; the last 40 are kept).
 
 ## Prompt caching and latency
 

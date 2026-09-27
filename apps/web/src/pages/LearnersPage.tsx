@@ -1,5 +1,35 @@
 import { useState } from "react";
-import { api, type Learner } from "../api";
+import { api, fmtDate, type Depth, type Learner, type ProfileChange } from "../api";
+
+const FIELD_LABEL: Record<string, string> = {
+  intakePreferences: "How they take ideas in",
+  demonstrationPreferences: "How they show understanding",
+  challengeTolerance: "Challenge tolerance",
+  pace: "Pace",
+  verbalLevel: "Verbal level",
+  depth: "Depth",
+  interests: "Interests",
+  priorKnowledge: "Prior knowledge",
+  observedGaps: "Observed gaps",
+  tutoringGuidance: "Tutoring guidance",
+};
+const DEPTH_LABEL: Record<Depth, string> = { simple: "the plain version", "some-nuance": "some nuance", full: "the full picture" };
+
+/** A value short enough to read in a line; a rewritten paragraph (verbal level) is shown on its own instead. */
+const SHORT = 60;
+
+/** One change as the parent reads it, without the field name. */
+function describe(c: ProfileChange): string {
+  if (c.from && c.to) return c.from.length + c.to.length <= SHORT * 2 ? `${c.from} → ${c.to}` : `revised: “${c.to}”`;
+  return c.to ? `added “${c.to}”` : `removed “${c.from}”`;
+}
+
+/** The same field's changes together, with their one reason, so eleven guidance lines do not carry eleven copies of it. */
+function byField(changes: ProfileChange[]): Array<{ field: string; label: string; why: string; items: ProfileChange[] }> {
+  const groups = new Map<string, ProfileChange[]>();
+  for (const c of changes) groups.set(c.field, [...(groups.get(c.field) ?? []), c]);
+  return [...groups].map(([field, items]) => ({ field, label: FIELD_LABEL[field] ?? field, why: items.find((c) => c.why)?.why ?? "", items }));
+}
 
 export function LearnersPage({ learners, onChange }: { learners: Learner[]; onChange: () => Promise<void> }) {
   const [name, setName] = useState("");
@@ -27,6 +57,17 @@ export function LearnersPage({ learners, onChange }: { learners: Learner[]; onCh
     if (!confirm(`Delete ${l.name}? Their sessions and reports stay on disk but will show an id instead of a name.`)) return;
     await api.deleteLearner(l.id);
     await onChange();
+  };
+  const undo = async (l: Learner) => {
+    const history = l.profileHistory ?? [];
+    const last = history[history.length - 1];
+    if (!last || !confirm(`Undo the profile changes from ${fmtDate(last.at)}? ${l.name}'s profile goes back to what it was before that session.`)) return;
+    try {
+      await api.undoProfileUpdate(l.id);
+      await onChange();
+    } catch (e) {
+      setErr((e as Error).message);
+    }
   };
 
   return (
@@ -63,7 +104,7 @@ export function LearnersPage({ learners, onChange }: { learners: Learner[]; onCh
                   <h4>How they show understanding</h4>
                   <div>{l.profile.demonstrationPreferences.map((p) => <span key={p} className="pill">{p}</span>)}</div>
                   <h4>Pace and challenge</h4>
-                  <p className="small">Challenge tolerance <strong>{l.profile.challengeTolerance}</strong> · pace <strong>{l.profile.pace}</strong></p>
+                  <p className="small">Challenge tolerance <strong>{l.profile.challengeTolerance}</strong> · pace <strong>{l.profile.pace}</strong> · depth <strong>{l.profile.depth ?? "simple"}</strong> ({DEPTH_LABEL[l.profile.depth ?? "simple"]})</p>
                   <p className="small">{l.profile.verbalLevel}</p>
                   <h4>Interests</h4>
                   <p className="small">{l.profile.interests.join(", ")}</p>
@@ -79,6 +120,34 @@ export function LearnersPage({ learners, onChange }: { learners: Learner[]; onCh
                   <ul className="small">{l.profile.tutoringGuidance.map((g, i) => <li key={i}>{g}</li>)}</ul>
                 </div>
               </div>
+              <h4>Changes to the profile</h4>
+              <p className="muted small">
+                The profile is reviewed after every session's report. Prior knowledge, gaps, interests and guidance change when the evidence does; pace, challenge tolerance, verbal level, depth and how they take ideas in change only when two sessions in a row agree. Undo puts the profile back the way it was before that session.
+                {l.profileReviewedAt ? ` Last reviewed ${fmtDate(l.profileReviewedAt)}.` : ""}
+              </p>
+              {!l.profileHistory?.length && <p className="muted small">No changes since the intake.</p>}
+              {[...(l.profileHistory ?? [])].reverse().slice(0, 3).map((u, i) => (
+                <div key={u.at} className="concept-row">
+                  <div className="row" style={{ justifyContent: "space-between" }}>
+                    <strong>{fmtDate(u.at)}{u.courseTitle ? ` · after a session on ${u.courseTitle}` : ""}</strong>
+                    {i === 0 && <button className="ghost small" onClick={() => undo(l)}>Undo this update</button>}
+                  </div>
+                  <p className="small" style={{ margin: "4px 0" }}>{u.summary}</p>
+                  {byField(u.changes).map((g) => (
+                    <div key={g.field} className="small" style={{ margin: "4px 0" }}>
+                      <strong>{g.label}</strong>{g.why && <span className="muted"> — {g.why}</span>}
+                      <ul style={{ margin: "2px 0" }}>{g.items.map((c, j) => <li key={j}>{describe(c)}</li>)}</ul>
+                    </div>
+                  ))}
+                  {u.held.length > 0 && (
+                    <div className="muted small" style={{ margin: "4px 0" }}>
+                      Held until another session agrees:
+                      <ul style={{ margin: "2px 0" }}>{byField(u.held).map((g) => g.items.map((c, j) => <li key={`${g.field}-${j}`}>{g.label}: {describe(c)}</li>))}</ul>
+                    </div>
+                  )}
+                </div>
+              ))}
+              {(l.profileHistory?.length ?? 0) > 3 && <p className="muted small">and {(l.profileHistory?.length ?? 0) - 3} earlier</p>}
             </div>
           ) : (
             <p className="muted">The first session runs a short intake conversation to learn how {l.name} learns best. Tick “Skip intake” on the Session tab to go straight to a lesson.</p>

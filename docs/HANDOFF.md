@@ -15,10 +15,12 @@ deterministic orchestrator; Vite/React front end; file-backed JSON in `data/` (g
 **State on 2026-09-25:** `main` is at `18af54b`: the voice work from `feature/elevenlabs-voice` was
 fast-forwarded onto it and pushed at the user's request (the stage-direction fix `4da593e`, the ElevenLabs
 switch `82c8e5d`, Inworld with its pause slider `ecca428`, the lookup fix `18af54b`; 151 tests). The voice
-branch stays for further voice work. Branch `feature/outside-knowledge` (one commit off `main`, `a91f2e4`, not
-pushed; the user has not yet said whether to merge it) builds what
-the tutor does with facts a student brings in from outside the material: answer and check against Wikipedia
-in the background, a report section, and a parent setting; 184 tests. Typecheck is clean in both workspaces. The first real
+branch stays for further voice work. `feature/outside-knowledge` (what the tutor does with facts a student
+brings in from outside the material: answer and check against Wikipedia in the background, a report section,
+and a parent setting) was fast-forwarded onto `main` and pushed on 2026-09-27 (`main` = `18e0bc2`, 184 tests).
+Branch `feature/dynamic-profile` (uncommitted, off `main`) keeps the learner profile current: after every
+report a profile pass revises it, slow fields need two sessions to agree, the parent sees every change on the
+Students tab and can undo the latest; 194 tests. Typecheck is clean in both workspaces. The first real
 unit, the Fords' *Ancient Rome* parent's guide from Saint Emmelia Ministries (49 scanned pages), is
 ingested as a course in `data/courses/ancient-rome-muemem4s.json` (31 lessons, 110 concepts) and has
 been taught in four sessions, three of them assessed. Text mode works with an Anthropic key alone.
@@ -65,6 +67,12 @@ decision on hosting (issue #13) before any pilot. No deadline has been set.
 - **Scholarly questions about scripture** ("historians doubt Matthew wrote Matthew") are handed to the parent
   for now and never checked against Wikipedia; whether the tutor may say more (the family's tradition, or the
   views described without a verdict) is the user's open question, #29.
+- **The learner profile is dynamic, applied with undo** (user, 2026-09-27: "a dynamic profile on the student vs
+  a stagnant snapshot when the student started"). After every report the profile pass revises the profile;
+  changes land automatically, every one is shown to the parent with its reason, and the latest can be undone.
+  The user may later switch to propose-and-approve (changes wait for the parent's yes), so landing and
+  recording stay separate in `domain/profile.ts`. One profile per student, with the subject-specific entries
+  tagged by course ("Rome: ..."), rather than a profile per course.
 - **Workbook and activity pages are a roadmap item, not an accepted limitation** (user, 2026-09-23:
   "many homeschool materials likely include that"). Issue #1, sized on a real sample.
 - **The tutor turn is two calls** (speak fast with no bookkeeping and no thinking; reflect afterwards
@@ -168,7 +176,28 @@ the product (#13, #18, #23, #26). Ordering and blockers only here.
 
 **Claude-side, in order**
 
-00. Committed 2026-09-26 on `feature/outside-knowledge` (`a91f2e4`, not merged): facts from outside the material.
+000. In progress 2026-09-27 on `feature/dynamic-profile` (uncommitted): the dynamic profile (#28). Built:
+   `agents/profile-agent.ts` (skill `profile-update`) proposes the whole revised profile with a reason per field;
+   `domain/profile.ts` lands fast fields, holds slow ones (pace, challenge tolerance, verbal level, depth, intake
+   preferences) until the next session proposes the same, records each update with `previous`, undoes the latest;
+   `endSession` runs the pass in the background after the report, one at a time per learner; the Students tab
+   shows "Changes to the profile" with Undo; `depth` (simple / some-nuance / full) is new on the profile, filled by
+   the intake, read by the tutor's cached block and by the reference checker's level. First live run hit the
+   8,000-token output ceiling (thinking counts), now 32,000. Live 2026-09-27 (three sessions through the API):
+   the pass landed 112 to 130 s after the report, in the background; changes came with quoted reasons; the
+   11-item intake guidance was trimmed to 6; undo restored the profile twice. Two things it showed and were
+   fixed the same day: a rewritten verbal level was held through two consecutive sessions because the hold
+   needed the identical paragraph (now a free-text slow field lands on the second consecutive revision, in
+   whatever words), and the change list repeated one reason eleven times (now grouped by field in the UI).
+   Replay of the nine earlier Rome reports in memory (old intake profile from the plants course): 74 to 133 s a
+   pass; 35, 28, 18, 11 changes on the first four passes as the profile caught up with Rome, then settling
+   (3, 13, 13, 15, 21 on the last five; 860 s for nine passes; verbal level held on six passes by the exact-match rule since fixed; depth proposed once and never confirmed, so it stayed simple. The lists grew without merging (prior knowledge 40, gaps 27, interests 16 after nine sessions), so the lists now have ceilings in code (15, 12, 10) and the skill says merge, don't pile; the replay ran on the skill as it was before that). Re-checked on the first four
+   passes with the rules in place: 25, 28, 16, 20 changes; lists 15 / 9 / 6 / 6 (one merged Rome interest instead of a
+   question each); the verbal-level rewrite held once and landed on the next pass; depth held once, not confirmed;
+   417 s. Test Student's record now carries one live revision (session `d587b53d`) for the Students tab.
+   Not built: the parent editing profile fields by hand, and a profile written from a session for a learner
+   who skipped the intake.
+00. Merged 2026-09-27 (`a91f2e4` on `main`): facts from outside the material.
    The reflect pass flags them (`flag_outside_claim`), `orchestrator/outside.ts` runs the Reference Checker
    (`agents/reference-agent.ts`, `reference/wikipedia.ts`) as a background job and merges the verdict at the
    next turn, which follows up if the tutor was unsure or wrong; the report gets "Outside the reading", and
@@ -275,6 +304,12 @@ the product (#13, #18, #23, #26). Ordering and blockers only here.
 - **Faith and scripture never go to Wikipedia** (`aboutFaith` in `orchestrator/outside.ts`, applied before any
   check, whatever the model decided). Narrowing that list reopens the report that told a parent, from Wikipedia,
   that "the Gospel of Luke is erroneous".
+- **The profile pass lands nothing on a slow field that the previous update did not hold** (`applyRevision`).
+  Relaxing it lets one odd session change how a child is taught. The pass is queued per learner and re-reads the
+  record before saving; a session that is running while the pass lands sees the new profile on its next turn (the
+  cached block changes once), which is accepted for now.
+- **Structured outputs at high effort need a large `max_tokens`**: the model's thinking counts against it. The
+  profile pass was cut off at 8,000 on its first live run; every offline pass now uses 32,000, streamed.
 - **`lookup_source` searches the learner's latest words as well as the tutor's query.** Dropping that
   brings back the case where the tutor tells the learner the material does not mention a word that
   appears in one chunk.

@@ -177,6 +177,14 @@ describe("the tutor's turn is split into speaking and reflecting", () => {
     expect(seen).toEqual([input]);
   });
 
+  it("tells the tutor how much of an answer the learner is ready for, from the profile's depth", () => {
+    const profile = { intakePreferences: [], demonstrationPreferences: [], challengeTolerance: "medium" as const, pace: "moderate" as const, verbalLevel: "casual", interests: [], priorKnowledge: [], observedGaps: [], parentSummary: "", tutoringGuidance: [] };
+    const plain = buildTutorContext({ ...ctx, learner: { ...learner, profile } }, "speak")[1];
+    expect(plain).toContain("Depth: simple (the plain version)");
+    const full = buildTutorContext({ ...ctx, learner: { ...learner, profile: { ...profile, depth: "full" as const } } }, "speak")[1];
+    expect(full).toContain("Depth: full (the full picture)");
+  });
+
   it("keeps the cached prefix identical across both calls, so only the last block differs", () => {
     const speak = buildTutorContext(ctx, "speak");
     const reflect = buildTutorContext(ctx, "reflect");

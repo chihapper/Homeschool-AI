@@ -104,6 +104,14 @@ export type CurriculumExtraction = z.infer<typeof CurriculumExtractionSchema>;
 // Learner (produced by the Profiler Agent during the initial assessment)
 // ---------------------------------------------------------------------------
 
+/**
+ * How much of an answer the learner is ready for, shown by what they demonstrate rather than by their grade:
+ * the plain version, the main exception or a second view when they ask, or the real complexity. It is about
+ * how much nuance to give, never about the mastery bar.
+ */
+export const DepthSchema = z.enum(["simple", "some-nuance", "full"]);
+export type Depth = z.infer<typeof DepthSchema>;
+
 export const LearnerProfileSchema = z.object({
   /** How the learner best takes in new ideas. Not "learning styles" pseudoscience: concrete, observed preferences. */
   intakePreferences: z.array(
@@ -137,8 +145,46 @@ export const LearnerProfileSchema = z.object({
   parentSummary: z.string(),
   /** Concrete instructions the Tutor should follow for this learner. */
   tutoringGuidance: z.array(z.string()),
+  /** Absent on profiles written before depth existed: read as "simple" (domain/profile.ts). */
+  depth: DepthSchema.optional(),
 });
 export type LearnerProfile = z.infer<typeof LearnerProfileSchema>;
+
+/** What the intake and the profile pass produce: every field filled, depth included. Persisted records may lack depth. */
+export const LearnerProfileExtractionSchema = LearnerProfileSchema.extend({ depth: DepthSchema });
+
+/** One difference between two versions of a profile. A list field gets one entry per item added (from "") or removed (to ""). */
+export const ProfileChangeSchema = z.object({
+  field: z.string(),
+  from: z.string(),
+  to: z.string(),
+  /** One sentence quoting the evidence, from the profile pass. */
+  why: z.string(),
+});
+export type ProfileChange = z.infer<typeof ProfileChangeSchema>;
+
+/**
+ * One revision of the profile after a session's report. The parent sees every one and can undo the latest, which
+ * restores `previous`. The profile is the tutor's running notes on how to teach this student, never a verdict on
+ * them, so the pass changes what the evidence changed and nothing else (skills/profile-update).
+ */
+export const ProfileUpdateSchema = z.object({
+  at: z.string(),
+  sessionId: z.string(),
+  courseId: z.string().optional(),
+  courseTitle: z.string().optional(),
+  /** One or two plain sentences for the parent on what this session showed. */
+  summary: z.string(),
+  changes: z.array(ProfileChangeSchema),
+  /**
+   * Changes to the slow fields (pace, challenge tolerance, verbal level, depth, intake preferences) that this
+   * session proposed but one session cannot make: held until the next session's pass proposes the same.
+   */
+  held: z.array(ProfileChangeSchema),
+  /** The profile before this update, so it can be undone. */
+  previous: LearnerProfileSchema,
+});
+export type ProfileUpdate = z.infer<typeof ProfileUpdateSchema>;
 
 export const LearnerSchema = z.object({
   id: z.string(),
@@ -146,6 +192,10 @@ export const LearnerSchema = z.object({
   age: z.number().int().optional(),
   gradeLevel: z.string().optional(),
   profile: LearnerProfileSchema.optional(),
+  /** Revisions of the profile after sessions, oldest first (domain/profile.ts keeps the tail). */
+  profileHistory: z.array(ProfileUpdateSchema).optional(),
+  /** When the profile pass last ran, whether or not it changed anything. */
+  profileReviewedAt: z.string().optional(),
   createdAt: z.string(),
 });
 export type Learner = z.infer<typeof LearnerSchema>;

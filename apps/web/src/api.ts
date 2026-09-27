@@ -6,11 +6,17 @@ export interface Chunk { id: string; source: string; headingPath: string[]; text
 /** The parent's decision about how much of a course the tutor teaches. Absent means everything. */
 export interface CourseFocus { skippedLessonIds: string[]; skippedConceptIds: string[]; lessonOrder?: string[] }
 export interface Course { id: string; title: string; subject: string; level: string; description: string; lessons: Lesson[]; concepts: Concept[]; chunkCount: number; sources?: Array<{ name: string; kind: string; url?: string }>; focus?: CourseFocus; createdAt: string }
+/** How much of an answer the student is ready for (mirrors DepthSchema); absent on older profiles means "simple". */
+export type Depth = "simple" | "some-nuance" | "full";
 export interface Profile {
   intakePreferences: string[]; demonstrationPreferences: string[]; challengeTolerance: string; pace: string; verbalLevel: string;
-  interests: string[]; priorKnowledge: string[]; observedGaps: string[]; parentSummary: string; tutoringGuidance: string[];
+  interests: string[]; priorKnowledge: string[]; observedGaps: string[]; parentSummary: string; tutoringGuidance: string[]; depth?: Depth;
 }
-export interface Learner { id: string; name: string; age?: number; gradeLevel?: string; profile?: Profile; createdAt: string }
+/** One difference the profile pass made (or held): a list field gets one entry per item added (from "") or removed (to ""). */
+export interface ProfileChange { field: string; from: string; to: string; why: string }
+/** One revision of the profile after a session (mirrors ProfileUpdateSchema). */
+export interface ProfileUpdate { at: string; sessionId: string; courseId?: string; courseTitle?: string; summary: string; changes: ProfileChange[]; held: ProfileChange[]; previous: Profile }
+export interface Learner { id: string; name: string; age?: number; gradeLevel?: string; profile?: Profile; profileHistory?: ProfileUpdate[]; profileReviewedAt?: string; createdAt: string }
 export type Phase = "intake" | "teach" | "inquire" | "assess" | "wrap-up" | "complete";
 export interface Latency { ttftMs: number; totalMs: number; iterations: number; cacheReadTokens: number; cacheWriteTokens: number; inputTokens: number; outputTokens: number; suppressedChars?: number; thinkingChars?: number; toolsBeforeSpeech?: boolean; reflectMs?: number; reflectThinkingChars?: number; firstAudioMs?: number; transcriptMs?: number; interrupted?: boolean }
 export interface Turn { role: "user" | "assistant"; content: string; at: string; expressions?: string[]; latency?: Latency }
@@ -106,6 +112,7 @@ export const api = {
   learners: () => fetch("/api/learners").then(j<Learner[]>),
   createLearner: (body: { name: string; age?: number; gradeLevel?: string }) => fetch("/api/learners", json("POST", body)).then(j<Learner>),
   resetProfile: (id: string) => fetch(`/api/learners/${id}/profile`, { method: "DELETE" }).then(j<Learner>),
+  undoProfileUpdate: (id: string) => fetch(`/api/learners/${id}/profile/undo`, { method: "POST" }).then(j<Learner>),
   deleteLearner: (id: string) => fetch(`/api/learners/${id}`, { method: "DELETE" }).then(j<{ ok: true }>),
 
   sessions: () => fetch("/api/sessions").then(j<SessionSummary[]>),

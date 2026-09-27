@@ -7,7 +7,9 @@
  * The LLM agents *request* transitions via the `advance` tool; the orchestrator validates them
  * (e.g. no next-concept without recorded evidence) and owns all persistence.
  */
-import { ObservationSchema, type Course, type Learner, type Lesson, type MasteryReport, type Observation, type Session, type TranscriptTurn } from "../domain/types.js";
+import { ObservationSchema, type Course, type Learner, type Lesson, type MasteryReport, type Observation, type ProfileUpdate, type Session, type TranscriptTurn } from "../domain/types.js";
+import { applyRevision, normalizeProfile, studentLevel } from "../domain/profile.js";
+import { proposeRevision } from "../agents/profile-agent.js";
 import type { TurnLatency } from "../llm/client.js";
 import type { TurnResult } from "../agents/base.js";
 import { ChunkIndex } from "../ingest/retrieval.js";
@@ -322,7 +324,7 @@ async function* respondTurn(
       onOutsideClaim: (input) => {
         const r = recordOutsideClaim(session, input, { mode: session.outsideKnowledge ?? "answer", checksAvailable: Boolean(config.wikipedia.contact) });
         const claim = r.claim;
-        if (r.check && claim) void startCheck(session.id, claim.id, () => checkOutsideClaim(claim, learner.gradeLevel ?? course.level));
+        if (r.check && claim) void startCheck(session.id, claim.id, () => checkOutsideClaim(claim, studentLevel(learner, course)));
         return r.message;
       },
     };
@@ -358,7 +360,8 @@ async function* respondTurn(
   }
 
   if (intakeFinished) {
-    const profile = await finalizeProfile({ session, learner, course });
+    // Normalised like every later revision: no repeats, and at most six guidance items (an intake once wrote eleven).
+    const profile = normalizeProfile(await finalizeProfile({ session, learner, course }));
     learners.put({ ...learner, profile });
     if (course && lesson) {
       session.phase = "teach";
@@ -435,7 +438,7 @@ export function sameEvidence(a: string, b: string): boolean {
  * without the wait it saved an older copy over the closed one (2026-09-24: a session with a report was
  * left in phase "assess" and offered for resumption).
  */
-export async function endSession(sessionId: string): Promise<{ session: Session; report?: MasteryReport }> {
+export async function endSession(sessionId: string): Promise<{ session: Session; report?: MasteryReport; profileUpdate?: Promise<ProfileUpdate | undefined> }> {
   await settleReflection(sessionId);
   // Give reference checks still running a moment, so the report can show their verdicts.
   await settleChecks(sessionId);
@@ -453,5 +456,44 @@ export async function endSession(sessionId: string): Promise<{ session: Session;
   if (!course || !lesson || session.transcript.length < 2) return { session };
   const report = await assessSession({ session, learner, course, lesson });
   reports.put({ ...report, id: session.id });
-  return { session, report };
+  // The profile pass runs after the report is saved, in the background: the parent is waiting on the report,
+  // and the revision lands on the record when it is done. Never rejects; a failure is logged.
+  const profileUpdate = learner.profile ? reviseProfile(learner.id, course, session, report) : undefined;
+  return { session, report, profileUpdate };
+}
+
+/** One profile pass at a time per learner, each reading what the previous one wrote: two sessions ending together cannot overwrite each other. */
+const profilePasses = new Map<string, Promise<unknown>>();
+
+/**
+ * Keep the learner's profile current from this session (domain/profile.ts decides what lands; here it is
+ * persisted). The learner is read inside the queue, so the pass sees the latest profile, and again right before
+ * saving, so a change made meanwhile (an undo) is not overwritten.
+ */
+function reviseProfile(learnerId: string, course: Course, session: Session, report: MasteryReport): Promise<ProfileUpdate | undefined> {
+  const run = (profilePasses.get(learnerId) ?? Promise.resolve()).then(() => revise(learnerId, course, session, report));
+  profilePasses.set(learnerId, run);
+  return run;
+}
+
+async function revise(learnerId: string, course: Course, session: Session, report: MasteryReport): Promise<ProfileUpdate | undefined> {
+  try {
+    const learner = learners.require(learnerId);
+    if (!learner.profile) return undefined;
+    const priorReports = reports
+      .list()
+      .filter((r) => r.learnerId === learnerId && r.sessionId !== session.id && r.createdAt < report.createdAt)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+      .slice(-3)
+      .map((r) => ({ report: r, course: r.courseId ? courses.get(r.courseId) : undefined }));
+    const revision = await proposeRevision({ learner, course, session, report, priorReports });
+    const fresh = learners.require(learnerId);
+    if (!fresh.profile) return undefined;
+    const { learner: revised, update } = applyRevision(fresh, revision, { sessionId: session.id, courseId: course.id, courseTitle: course.title, at: new Date().toISOString() });
+    learners.put(revised);
+    return update;
+  } catch (err) {
+    console.warn("[profile] revision failed:", err instanceof Error ? err.message : err);
+    return undefined;
+  }
 }

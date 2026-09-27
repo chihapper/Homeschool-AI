@@ -7,7 +7,7 @@
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { assertNotRefused, streamParsed } from "../llm/client.js";
 import { config } from "../config.js";
-import { LearnerProfileSchema, type Course, type Learner, type LearnerProfile, type Session } from "../domain/types.js";
+import { LearnerProfileExtractionSchema, type Course, type Learner, type LearnerProfile, type Session } from "../domain/types.js";
 import { buildSystem, streamTurn, transcriptToMessages, type AgentTool, type AgentSpec, type TurnResult } from "./base.js";
 
 export const profilerAgent: AgentSpec = {
@@ -90,7 +90,7 @@ export async function finalizeProfile(ctx: Omit<ProfilerContext, "onFinish">): P
     model: config.model,
     max_tokens: 8_000,
     system: system.map((b) => ({ type: "text" as const, text: b.text, cache_control: b.cache_control })),
-    output_config: { effort: config.analysisEffort, format: zodOutputFormat(LearnerProfileSchema) },
+    output_config: { effort: config.analysisEffort, format: zodOutputFormat(LearnerProfileExtractionSchema) },
     messages: [
       {
         role: "user",

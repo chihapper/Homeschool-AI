@@ -35,6 +35,7 @@ import { buildSystem, prewarm, streamTurn, transcriptToMessages, type AgentTool,
 import { openThread, THREAD_PATIENCE, THREAD_PREFIX } from "../orchestrator/notes.js";
 import { isFollowUp, SAY_FIRST, type FlagInput } from "../orchestrator/outside.js";
 import { walkedConceptIds } from "../domain/focus.js";
+import { DEPTH_LABEL, depthOf } from "../domain/profile.js";
 
 export const tutorAgent: AgentSpec = {
   name: "Socratic Tutor",
@@ -165,7 +166,7 @@ export function buildTutorContext(ctx: TutorContext, mode: "speak" | "reflect" =
       `<learner_profile name="${learner.name}">\n` +
         `Intake preferences: ${profile.intakePreferences.join(", ")}\n` +
         `Demonstration preferences: ${profile.demonstrationPreferences.join(", ")}\n` +
-        `Challenge tolerance: ${profile.challengeTolerance}. Pace: ${profile.pace}. Verbal level: ${profile.verbalLevel}\n` +
+        `Challenge tolerance: ${profile.challengeTolerance}. Pace: ${profile.pace}. Depth: ${depthOf(profile)} (${DEPTH_LABEL[depthOf(profile)]}). Verbal level: ${profile.verbalLevel}\n` +
         `Interests: ${profile.interests.join(", ")}\n` +
         `Prior knowledge: ${profile.priorKnowledge.map((p) => `- ${p}`).join("\n")}\n` +
         `Observed gaps: ${profile.observedGaps.map((p) => `- ${p}`).join("\n")}\n` +
