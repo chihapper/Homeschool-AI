@@ -1,6 +1,6 @@
 # Handoff
 
-Last updated: 2026-09-25
+Last updated: 2026-09-27
 
 Read this before anything else. It is written for a session that has seen nothing.
 
@@ -15,7 +15,8 @@ deterministic orchestrator; Vite/React front end; file-backed JSON in `data/` (g
 **State on 2026-09-25:** `main` is at `18af54b`: the voice work from `feature/elevenlabs-voice` was
 fast-forwarded onto it and pushed at the user's request (the stage-direction fix `4da593e`, the ElevenLabs
 switch `82c8e5d`, Inworld with its pause slider `ecca428`, the lookup fix `18af54b`; 151 tests). The voice
-branch stays for further voice work. Branch `feature/outside-knowledge` (uncommitted, off `main`) builds what
+branch stays for further voice work. Branch `feature/outside-knowledge` (one commit off `main`, `a91f2e4`, not
+pushed; the user has not yet said whether to merge it) builds what
 the tutor does with facts a student brings in from outside the material: answer and check against Wikipedia
 in the background, a report section, and a parent setting; 184 tests. Typecheck is clean in both workspaces. The first real
 unit, the Fords' *Ancient Rome* parent's guide from Saint Emmelia Ministries (49 scanned pages), is
@@ -167,7 +168,7 @@ the product (#13, #18, #23, #26). Ordering and blockers only here.
 
 **Claude-side, in order**
 
-00. In progress 2026-09-25 on `feature/outside-knowledge` (uncommitted): facts from outside the material.
+00. Committed 2026-09-26 on `feature/outside-knowledge` (`a91f2e4`, not merged): facts from outside the material.
    The reflect pass flags them (`flag_outside_claim`), `orchestrator/outside.ts` runs the Reference Checker
    (`agents/reference-agent.ts`, `reference/wikipedia.ts`) as a background job and merges the verdict at the
    next turn, which follows up if the tutor was unsure or wrong; the report gets "Outside the reading", and
