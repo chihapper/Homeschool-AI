@@ -64,6 +64,13 @@ decision on hosting (issue #13) before any pilot. No deadline has been set.
   (user, 2026-09-25): the tutor sees the passages that match the topic, not the whole book, and a parent reads
   "not in your reading" as a fact about their book (the same rule as the coinage incident). It names the source
   when it knows it ("That's from Homer's Iliad"). The tutor never raises outside facts itself.
+- **The product is not a Khanmigo duplicate** (checked 2026-09-28, `docs/COMPETITORS.md`): Khanmigo tutors
+  only Khan's content (photo upload only), is turn-based in voice, and gives parents transcripts; the big-lab
+  study modes take uploads but are not constrained and give parents nothing; only Gemini Notebook is
+  constrained, and it is adults-first with no pedagogy. The moat is the combination (own material, constrained
+  and audited, live voice, parent mastery report, worldview rules, family-held data) and the homeschool focus,
+  not any one feature. The Khanmigo RCT (+0.06–0.08 SD a year, "resemble ... practice without AI") is the
+  warning that engagement and real gains, not features, are the risk: #6.
 - **Scholarly questions about scripture** ("historians doubt Matthew wrote Matthew") are handed to the parent
   for now and never checked against Wikipedia; whether the tutor may say more (the family's tradition, or the
   views described without a verdict) is the user's open question, #29.

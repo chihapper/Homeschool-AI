@@ -89,6 +89,13 @@ beyond the passage. A candidate (about 150 words, grade 5–9; the parent can re
 > lid: it slows the cold from reaching the water underneath, so fish and plants can live through the winter in
 > the liquid water below. If ice sank instead, a lake would freeze from the bottom up, and could freeze solid.
 
+**Questions in age bands, stepped up or down** (user, 2026-09-28). One passage, three bands of questions for
+steps 3 and 4 (grades 4–6, 7–9, 10 and up), each band asking for a further inference from the passage. The
+intake starts at the student's grade band; a strong, confident answer earns the next band's question, a weak
+one drops a band; at most two steps. This is the adaptive-placement idea in miniature (IRT tests reach the same
+reliability with half the items by choosing the next question from the last answer, Weiss 1982, R3 §1), and
+the band a student reaches is real evidence for `depth` and for placing an advanced student where they belong.
+
 **The sequence.** Each step: what is said, what it measures, where that came from, what it fills, and how it
 fits.
 
@@ -181,8 +188,8 @@ was known before; the Progress view shows a starting-point column.
 
 ## 7. Open questions, and how we iterate
 
-1. **The passage.** One candidate above. Whether one passage serves grades 4–9 or we need two by age band;
-   whether the parent should be able to swap it (probably not: comparability across students).
+1. **The passage.** One candidate above, with questions in three age bands (decided 2026-09-28); the parent
+   cannot swap it, so students stay comparable. The band questions themselves are still to be written.
 2. **How many probes** a 31-lesson course deserves, and whether "one course intake" should mean "per unit"
    for a year-long course (scope is one unit at a time, so mostly the same thing).
 3. **Confidence questions** add up to six exchanges to the course intake. Keep them (the evidence is good)

@@ -123,7 +123,7 @@ No mainstream child-facing Socratic tutor built on Hume EVI was found. Hume's pu
 
 ## 4. Recommendations
 
-**What this product can do that others don't.**
+**What this product can do that others don't.** (Checked against the 2026 products on 2026-09-28: `docs/COMPETITORS.md`. It holds: no product takes the family's own material, stays inside it, talks with the child in real time and reports mastery to the parent.)
 - *Grounding in the parent's curriculum.* No mainstream guided tutor is bound to a family's own material with an auditable "did not assert outside the text" guarantee. Alpha School's failure mode (AI-generated lessons) and the 0.1% error rates Google achieved only with human supervision both argue for a retrieval-grounded tutor whose factual claims are traceable to the parent's chosen text.
 - *A learner model that persists.* Generic modes have no prior-knowledge estimate, so they cannot implement expertise-reversal. The initial assessment and a per-concept mastery state let the orchestrator choose the novice/intermediate/advanced path per turn.
 - *Voice-first Socratic dialogue for K-12 beyond math.* Synthesis proves demand for voice Socratic math; Khanmigo lacks real-time voice; big-lab voice modes are not curriculum-grounded. Voice also raises the cost of copy-pasting an answer, which is the behaviour Bastani's Base group exhibited.
