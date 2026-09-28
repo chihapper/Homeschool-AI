@@ -61,6 +61,36 @@ pedagogy, no mastery model, no parent view, and reaches adults first.
   learner version is unchanged).
 - Sage or TutorBook constraining their tutoring to the family's material; TutorBook already takes uploads.
 
+## Moats we could build on top (2026-09-28)
+
+Candidates, ranked by how well they fit the scope (one unit at a time, the parent decides, no scheduling or
+grading) and how hard they are for a platform to copy. None is built; the numbers are issue references.
+
+1. **Proof, not promises.** Make the grounding audit a family-readable record per session: every claim the
+   tutor made, traced to the passage it came from, or flagged. It falls out of the assessor's audit and the
+   passages the tutor read, and no product in the table can produce it without our architecture.
+2. **Reading what homeschoolers actually use.** Workbook and activity pages as activities (#1), scans, and
+   then licensed integrations with the publishers families buy from (The Good and the Beautiful, Memoria
+   Press, Sonlight and BookShark, Saxon). Licensing is the honest answer to the copyright question (#13) and a
+   distribution moat: a platform with its own content library will not negotiate unit by unit with small
+   publishers.
+3. **Method fit.** Narration-first already serves Charlotte Mason families; classical families (memory work,
+   recitation) and unit-study families are other modes. The market is split by philosophy and platforms
+   optimise for the median.
+4. **Per-family worldview rules** (#29): the family decides how faith, values and disputed questions are
+   handled, and the tutor follows it. A platform cannot offer a per-family theology; we can offer it as a
+   setting.
+5. **The family's record over the years**, exportable as linked notes (Obsidian-ready) and usable as
+   portfolio evidence where a state requires one (Pennsylvania, Virginia; `docs/INTAKE.md` R2 §6). A switching
+   cost and a real pain point. Within scope as long as we hand the family their records rather than keep them.
+6. **Voice for children that respects the rules**: no audio kept, vendors on zero retention (#18, #23), and,
+   when it becomes practical, transcription on the family's own machine so no third party hears the child.
+   The amended COPPA rule makes this a trust advantage that grows.
+7. **Measured learning gains.** Publish our own evaluation (#6, then a pilot). The Khanmigo trial set the bar
+   at 0.06–0.08 standard deviations a year; credible evidence of more would be rare in this market.
+
+Not a moat, but a condition: cost per session low enough to price near the anchors above (#20, #22).
+
 ## Where the moat is, honestly
 
 Not in any single feature: uploads, Socratic prompting, voice and parent views each exist somewhere, and the

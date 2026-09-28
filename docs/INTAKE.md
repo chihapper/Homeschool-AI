@@ -117,6 +117,20 @@ entry point should follow prior knowledge instead: teach-first for a novice, que
 already knows something. That rule moves to the course-knowledge record. Prior knowledge and gaps move to the
 course record too.
 
+**Learning styles: the middle path (decided by the user, 2026-09-28).** Many parents believe in styles and
+speak that language, and the evidence against *matching* teaching to a style is strong (§1). So: no style
+field, no matching theory, and no quiz. What the tutor *does* keep is what a student does when confused,
+observed ("asks for an example first", "wants the term named before the explanation"), written into
+`tutoringGuidance` and honoured for the opening move of a concept only, never for the choice between
+teaching first and questioning first, which follows prior knowledge. The parent's own language ("he needs
+examples") goes in the parent's notes, where the tutor follows it as written. And the Students tab says, in
+one sentence with the two sources, why the app does not sort children into styles. The pros and cons behind
+the decision: for a style field, familiarity and trust, a possible effect on enjoyment, and the fact that a
+stated preference is often prior knowledge in disguise; against it, no adequate evidence in decades of
+studies, the risk of steering a novice into discovery (which hurts novices most), a label that follows the
+child into every report, and our own two intakes, where "which explanation clicked?" measured the
+explanations rather than the students.
+
 **Left out on purpose:** "which explanation clicked?" (self-report of a learning style); anything about
 mindset, grit, feelings, diagnoses, family or religion (§5); teaching from the parent's course.
 
@@ -141,7 +155,7 @@ underestimate, then fast-track, R1).
 |---|---|---|---|---|
 | 1. Open narration (1) | "Tell me everything you already know about ancient Rome — anything at all, in any order." | A map of what they bring | Free recall (Mason; Roediger & Karpicke 2006, R2 §6); the extraction maps it onto the course's concepts. | Prior knowledge, first estimates |
 | 2. First-step probes (one per concept) | "What's the first thing you'd say about why Rome's location was a good one? I don't know is a fine answer." | Estimate per concept: none / some / can explain | First-step questions correlate up to .92 with full tests (Kalyuga & Sweller 2004, R3 §1); "I don't know" is informative (Cosyn 2021, R1). | Per-concept estimate with the quote |
-| 3. Confidence (after each answered probe) | "How sure are you, 0 to 10?" | Calibration | Bandura 2006; Metcalfe & Finn 2012; Area9 (R1 §b). Skipped after "I don't know". | Confidence per estimate |
+| 3. Confidence (in the same turn as each probe) | "…and how sure are you, 0 to 10?" asked in the same breath as the probe, so it costs no extra exchange; the tutor asks again only if the student forgets the number (user decision, 2026-09-28). | Calibration | Bandura 2006; Metcalfe & Finn 2012; Area9 (R1 §b). Not asked after "I don't know". | Confidence per estimate |
 | 4. Hand-over (1) | "Great — let's start with the reading." | — | The pretesting effect needs the answers soon after (R3 §2): the tutor's first move on each probed concept revisits the student's answer. | — |
 
 **What it writes** (the course-knowledge record): per probed concept, the estimate, the student's words, the
@@ -192,8 +206,8 @@ was known before; the Progress view shows a starting-point column.
    cannot swap it, so students stay comparable. The band questions themselves are still to be written.
 2. **How many probes** a 31-lesson course deserves, and whether "one course intake" should mean "per unit"
    for a year-long course (scope is one unit at a time, so mostly the same thing).
-3. **Confidence questions** add up to six exchanges to the course intake. Keep them (the evidence is good)
-   or ask only after the first three probes.
+3. **Confidence questions** are asked in the same turn as each probe (decided 2026-09-28), so the course
+   intake stays at eight to twelve exchanges.
 4. **Read-aloud fluency in voice mode** (words correct per minute from the transcript's timing, no audio
    kept): valid (R3 §9), but Amira's validation is K–4, and the COPPA question comes first.
 5. **Pace** cannot be read from eight exchanges; expect the pass to set it over the first sessions.

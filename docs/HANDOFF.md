@@ -64,6 +64,13 @@ decision on hosting (issue #13) before any pilot. No deadline has been set.
   (user, 2026-09-25): the tutor sees the passages that match the topic, not the whole book, and a parent reads
   "not in your reading" as a fact about their book (the same rule as the coinage incident). It names the source
   when it knows it ("That's from Homer's Iliad"). The tutor never raises outside facts itself.
+- **Learning styles: no field, no matching, no quiz** (user, 2026-09-28, choosing the middle path in
+  `docs/INTAKE.md` §3). The tutor records what a student does when confused as guidance for the opening move
+  only; the path (teach-first or question-first) follows prior knowledge; the parent's language lives in the
+  parent's notes; the Students tab says in one sentence why children are not sorted into styles. The
+  `intakePreferences` field goes in stage A. Also decided: "how sure are you, 0 to 10?" rides in the same
+  turn as each course-intake probe; the general intake's questions come in three age bands, stepped up or
+  down.
 - **The product is not a Khanmigo duplicate** (checked 2026-09-28, `docs/COMPETITORS.md`): Khanmigo tutors
   only Khan's content (photo upload only), is turn-based in voice, and gives parents transcripts; the big-lab
   study modes take uploads but are not constrained and give parents nothing; only Gemini Notebook is
@@ -137,6 +144,11 @@ npm run ingest -- --title "Ancient Rome" "C:\Users\Alejandro\Downloads\8 Ancient
 ```
 
 Expect two balanced parts in parallel and ten to fifteen minutes at Opus 5 high effort.
+
+The user intends to pull the repo on a second laptop and host it there (2026-09-28). What git does **not**
+carry: `.env` (every key, and `WIKIPEDIA_CONTACT`), and `data/` (the Rome course, learners, sessions,
+reports, `settings.json`). Copy `data/` across or re-ingest the Rome PDF; copy `.env` by hand, never through
+git or chat. Node 20+ and `npm install` at the root.
 
 Gotchas that cost real time this week:
 
