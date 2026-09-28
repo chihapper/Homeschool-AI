@@ -95,8 +95,8 @@ decision on hosting (issue #13) before any pilot. No deadline has been set.
   higher, 2026-09-24). The Hume adapter stays in the code, unused; Hume EVI mode stays as it is.
 - **Reports and profiles use the learner's name** unless the transcript gives a pronoun. A report said
   "your son" from nothing; the user's records carry no gender.
-- **Research and report-writing subagents run on Sonnet, not Fable** (user, 2026-09-23); the main
-  session does the analysis.
+- **Research subagents run on Opus 5.5** for research the user will build on (user, 2026-09-27, for the
+  intake research; the 2026-09-23 decision was Sonnet); the main session does the analysis.
 - **Git has no author identity on this machine**: commit with `git -c user.name="Claude" -c user.email="noreply@anthropic.com"`,
   as the earlier history does, rather than changing the user's git config.
 - **Commits end with the `Co-Authored-By` line the harness gives for the model in use** (it changed from
@@ -176,6 +176,17 @@ the product (#13, #18, #23, #26). Ordering and blockers only here.
 
 **Claude-side, in order**
 
+0000. Next, once the user reacts to `docs/INTAKE.md` (written 2026-09-27, research plus design, three Opus 5.5
+   research reports appended): the two intakes. The user's structure: a general intake once per student
+   (the learner profile, "how they learn") and a course intake once per student per course (the
+   course-knowledge record, "where they start on this content"); build order A the record split, B the
+   general intake, C the course intake, D scripted personas. The design's main moves and their evidence are in
+   the doc: drop `intakePreferences` (learning-style matching has no evidence), move prior knowledge and gaps
+   to the course record, add the parent's notes, probe prior knowledge with first-step questions plus
+   "how sure are you?", never teach during an intake, use a built-in neutral passage for the general intake
+   (never the parent's course), hand over instead of saying goodbye, write records in the background. Waiting
+   on the user: the field changes, the passage, whether to ask confidence after every probe, and the merge of
+   `feature/dynamic-profile` (`cc200af`).
 000. In progress 2026-09-27 on `feature/dynamic-profile` (uncommitted): the dynamic profile (#28). Built:
    `agents/profile-agent.ts` (skill `profile-update`) proposes the whole revised profile with a reason per field;
    `domain/profile.ts` lands fast fields, holds slow ones (pace, challenge tolerance, verbal level, depth, intake
