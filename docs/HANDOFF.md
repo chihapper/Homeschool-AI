@@ -1,6 +1,6 @@
 # Handoff
 
-Last updated: 2026-09-27
+Last updated: 2026-09-28
 
 Read this before anything else. It is written for a session that has seen nothing.
 
@@ -12,26 +12,17 @@ nothing outside that material, and the parent gets a mastery report per session 
 across sessions. Fastify server with four agents (curriculum, profiler, tutor, assessor) and a
 deterministic orchestrator; Vite/React front end; file-backed JSON in `data/` (gitignored).
 
-**State on 2026-09-25:** `main` is at `18af54b`: the voice work from `feature/elevenlabs-voice` was
-fast-forwarded onto it and pushed at the user's request (the stage-direction fix `4da593e`, the ElevenLabs
-switch `82c8e5d`, Inworld with its pause slider `ecca428`, the lookup fix `18af54b`; 151 tests). The voice
-branch stays for further voice work. `feature/outside-knowledge` (what the tutor does with facts a student
-brings in from outside the material: answer and check against Wikipedia in the background, a report section,
-and a parent setting) was fast-forwarded onto `main` and pushed on 2026-09-27 (`main` = `18e0bc2`, 184 tests).
-Branch `feature/dynamic-profile` (uncommitted, off `main`) keeps the learner profile current: after every
-report a profile pass revises it, slow fields need two sessions to agree, the parent sees every change on the
-Students tab and can undo the latest; 194 tests. Typecheck is clean in both workspaces. The first real
-unit, the Fords' *Ancient Rome* parent's guide from Saint Emmelia Ministries (49 scanned pages), is
-ingested as a course in `data/courses/ancient-rome-muemem4s.json` (31 lessons, 110 concepts) and has
-been taught in four sessions, three of them assessed. Text mode works with an Anthropic key alone.
-Browser voice can now speak through **ElevenLabs, Inworld or Hume Octave** (a toggle at the top of Settings,
-Voice, added 2026-09-24/25 on `feature/elevenlabs-voice`; the user has tried both and finds them hard to tell
-apart). Inworld works
-(verified 2026-09-25): a Standard key is in `.env` (Realtime-only keys cannot call text-to-speech). Hume's balance is
-exhausted. ElevenLabs works: a real `sk_` key is in `.env` (Starter plan, 75,451 characters a month,
-resetting 2026-09-25), and a scripted two-turn voice session over the app's WebSocket spoke both replies
-with first audio at 1.6 to 1.8 s (numbers in `docs/LATENCY.md`). The user's own microphone session in
-Chrome has not happened yet.
+**State on 2026-09-28:** `main` = `1e96861`, pushed, and `feature/dynamic-profile` points at the same
+commit. Everything is merged: the voice work (ElevenLabs, Inworld, the lookup fix), facts from outside the
+reading (Wikipedia checks, `a91f2e4`), the dynamic profile (revised after every report, held slow fields,
+undo, `cc200af`), the intake research and design (`docs/INTAKE.md`), the competitive check
+(`docs/COMPETITORS.md`), and the user's intake decisions of 2026-09-28. 194 unit tests; typecheck clean in
+both workspaces. The Rome unit (`data/courses/ancient-rome-muemem4s.json`, 31 lessons) has been taught in
+about fifteen sessions; Test Student's profile carries one live revision. Text mode works with an Anthropic
+key alone; browser voice works through Inworld or ElevenLabs (Hume's balance is exhausted). The user's own
+microphone session in Chrome has not happened yet. The user intends to pull the repo on a second laptop and
+host it there: git carries neither `.env` nor `data/` (see the verification loop). Next build: stage A of the
+intakes, the record split (`docs/INTAKE.md` §8).
 
 **Goal and gate:** get the tool in front of homeschool families as an add-on study partner. The next
 gate is a repeatable pedagogy evaluation (issue #6) so skill edits stop being judged by hand, then a
