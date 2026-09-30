@@ -37,6 +37,15 @@ import { isFollowUp, SAY_FIRST, type FlagInput } from "../orchestrator/outside.j
 import { walkedConceptIds } from "../domain/focus.js";
 import { DEPTH_LABEL, depthOf } from "../domain/profile.js";
 
+/**
+ * Output caps for the two calls of a turn. `max_tokens` covers thinking as well as words (on every model since
+ * Sonnet 5 and Opus 5, and Opus 5.5 cannot stop thinking altogether), so the caps leave room for a little
+ * thinking before a short spoken reply, and for the reflect pass's notes plus the thinking it is meant to do.
+ * Measured 2026-09-30 on Sonnet 5: a spoken turn is 60 to 120 output tokens, a reflect pass 200 to 500.
+ */
+const SPEAK_MAX_TOKENS = 1200;
+const REFLECT_MAX_TOKENS = 2000;
+
 export const tutorAgent: AgentSpec = {
   name: "Socratic Tutor",
   role:
@@ -241,7 +250,7 @@ export function buildTutorContext(ctx: TutorContext, mode: "speak" | "reflect" =
         (followUps.length ? `Your reply starts with something you owe the learner, before anything else. ${followUps.join(" ")}\n\n` : "") +
         "You are speaking to the learner now and they are waiting, so answer straight away: two to four sentences ending in your single question, and nothing after it. " +
         "Do not answer your own question, and do not narrate a pause, a hesitation, or a reaction the learner has not actually given: their last message is the only thing they have said. " +
-        "Do not stop to weigh whether they are ready to move on and do not take notes; that happens after you speak, in a separate pass you do not run here. " +
+        "Whether they are ready to move on, and the notes on what they showed, are settled after you speak, in a separate pass you do not run here; this call only speaks. " +
         "Passages that match the learner's latest words are above when there are any. If you need another passage to answer honestly, call lookup_source before your first word, " +
         "and never announce or narrate a lookup (no \"let me check the material\"): say what the material says, not that you are checking it. Never mention tools, phases, or the profile out loud."
       : "The learner has just heard your reply (the last assistant message) and is listening; nothing you write here reaches them, so write nothing. " +
@@ -423,7 +432,7 @@ export function tutorTurn(ctx: TutorContext, signal?: AbortSignal): AsyncGenerat
   let messages = transcriptToMessages(ctx.session.transcript);
   if (!messages.length) messages = [{ role: "user", content: "(The student has just joined the lesson. Open with a warm one-line greeting and your first eliciting question.)" }];
   // Thinking off regardless of the session setting: this call is the one the learner waits on.
-  return streamTurn({ spec: { ...tutorAgent, thinking: "disabled" }, system, messages, tools: tutorTools(ctx, "speak"), maxTokens: 700, signal });
+  return streamTurn({ spec: { ...tutorAgent, thinking: "disabled" }, system, messages, tools: tutorTools(ctx, "speak"), maxTokens: SPEAK_MAX_TOKENS, signal });
 }
 
 /**
@@ -443,7 +452,7 @@ export async function reflectTurn(ctx: TutorContext, spokenText: string, signal?
       "(Reflect on the exchange above. Record any evidence with record_observation, quoting the learner, call advance if the phase is finished, and flag any fact from outside the material with flag_outside_claim. " +
       "Make the calls in one batch and write no words: the learner cannot hear this pass.)",
   });
-  const gen = streamTurn({ spec: reflectAgent, system, messages, tools: tutorTools(ctx, "reflect"), maxTokens: 700, signal });
+  const gen = streamTurn({ spec: reflectAgent, system, messages, tools: tutorTools(ctx, "reflect"), maxTokens: REFLECT_MAX_TOKENS, signal });
   let r = await gen.next();
   while (!r.done) r = await gen.next(); // its words are for nobody
   return r.value;

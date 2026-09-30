@@ -3,9 +3,9 @@ import { api, PROVIDER_NAME, type OutsideKnowledgeMode, type Readiness, type Run
 
 /** Plain-language notes shown next to each setting. */
 const HELP: Record<keyof RuntimeSettings, string> = {
-  tutorModel: "The live tutor and the intake conversation. This is what the student talks to, so it sets time-to-first-token. Sonnet 5 is the recommended voice tier; Opus 5 is slower but stronger; Haiku 4.5 is fastest and runs without effort/thinking parameters.",
+  tutorModel: "The live tutor and the intake conversation. This is what the student talks to, so it sets time-to-first-token. Sonnet 5.5 is the recommended voice tier (its lowest thinking setting keeps the first word fast); Opus 5.5 is slower but stronger and always thinks a little, so keep its effort low; Haiku 4.5 is fastest and runs without effort/thinking parameters. Any model ID can be typed in; it is checked with the API when you save.",
   tutorEffort: "How hard the tutor thinks before speaking. Lower = faster first word. The plan compares low and medium.",
-  tutorThinking: "Adaptive lets the model decide whether to think; at low effort it rarely does. Disabled shaves a little more latency but Opus 5 has known failure modes with it (tool calls emitted as text).",
+  tutorThinking: "Adaptive lets the model decide whether to think; at low effort it rarely does. Disabled asks for the least thinking the model allows: none on Opus 5 and Sonnet 5, only between tool calls on Sonnet 5.5, and just low effort on Opus 5.5, which never turns it off. Opus 5 has known failure modes with it (tool calls emitted as text).",
   model: "The offline agents: curriculum extraction at ingest, profile extraction after intake, and the assessor that writes the mastery report. Quality matters more than speed here.",
   analysisEffort: "Effort for those offline agents. High is the default; the assessor takes about two minutes at high on Opus.",
   reflectEffort: "The tutor takes its notes and decides whether to move on in a second pass that runs while the student is listening to the reply, so this costs the student no waiting. Raise it if the tutor's observations or phase changes look careless.",

@@ -1,0 +1,79 @@
+/**
+ * What each Claude model accepts, in one place, so a new model is one row here and one entry in MODEL_OPTIONS.
+ *
+ * Source: Anthropic's migration guides (platform.claude.com/docs/en/models/<model>/migration-guide) and the
+ * bundled `claude-api` skill (`/claude-api migrate`). The rules that matter to this app, as of 2026-09-30:
+ *  - Model IDs have no date suffix and use hyphens: `claude-sonnet-5-5`, never `claude-sonnet-5.5` (a 404 with
+ *    "Did you mean claude-sonnet-5-5?" is what the user hit on 2026-09-30).
+ *  - `output_config.effort` exists on Opus and Sonnet 4.6 and later and on the Fable and Mythos models; Haiku 4.5
+ *    and older models reject it, and get no `thinking` field either.
+ *  - Turning thinking off differs by generation: Opus 5 and Sonnet 5 (and the 4.6 to 4.8 family) accept
+ *    `{type: "disabled"}` (Opus 5 only at effort high or below); Sonnet 5.5 rejects it and takes
+ *    `{type: "between_tools"}` at high or below, with no other field; Opus 5.5, Fable and Mythos cannot turn
+ *    thinking off at all, and low effort is the control. `budget_tokens`, `temperature`, `top_p`, `top_k`
+ *    and forced `tool_choice` are never sent.
+ *  - Opus 5.5's default effort is medium, one below Opus 5's, so effort is always set explicitly.
+ * When a model ships: add its ID to MODEL_OPTIONS, add or adjust its row in `modelRules`, run the tests, and
+ * check the guide for anything new (thinking, tool_choice, betas). Nothing else in the app names a model.
+ */
+import type { Effort } from "../config.js";
+
+/** Models offered in the Settings tab. Any model ID can still be typed in; it is normalised and checked on save. */
+export const MODEL_OPTIONS = ["claude-opus-5-5", "claude-sonnet-5-5", "claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5"] as const;
+
+/** Code defaults when the environment sets nothing: the offline agents on Opus 5.5, the live tutor on Sonnet 5.5 (its lowest thinking setting keeps the first word fast). */
+export const DEFAULT_MODEL = "claude-opus-5-5";
+export const DEFAULT_TUTOR_MODEL = "claude-sonnet-5-5";
+
+export interface ModelRules {
+  /** `output_config.effort` (and adaptive thinking) are accepted. */
+  effort: boolean;
+  /**
+   * How to run with thinking off: "disabled" (`{type: "disabled"}`), "between_tools" (Sonnet 5.5's lowest
+   * setting), or "never" (thinking is always on; low effort is the only control).
+   */
+  thinkingOff: "disabled" | "between_tools" | "never";
+  /** Highest effort at which thinking may be off ("disabled" or "between_tools" is a 400 above it). */
+  thinkingOffMaxEffort: "high" | "max";
+}
+
+const EFFORT_RANK: Record<Effort, number> = { low: 0, medium: 1, high: 2, xhigh: 3, max: 4 };
+
+/** A model ID as a person might type it, made canonical: lower case, hyphens, "5.5" as "5-5". */
+export function normalizeModelId(input: string): string {
+  let id = input.trim().toLowerCase().replace(/\s+/g, "");
+  id = id.replace(/(\d)\.(\d)/g, "$1-$2"); // claude-sonnet-5.5 -> claude-sonnet-5-5
+  if (/^(opus|sonnet|haiku|fable|mythos)\b/.test(id)) id = `claude-${id}`; // "sonnet-5-5" -> "claude-sonnet-5-5"
+  return id;
+}
+
+/** Family and version ("claude-sonnet-5-5" -> sonnet 5.5; "claude-opus-4-8" -> opus 4.8; "claude-opus-5" -> opus 5.0). */
+export function parseModelId(model: string): { family: string; version: number } | undefined {
+  const m = normalizeModelId(model).match(/^claude-(opus|sonnet|haiku|fable|mythos)-(\d+)(?:-(\d))?(?:-\d{8})?$/);
+  if (!m) return undefined;
+  return { family: m[1], version: Number(m[2]) + (m[3] ? Number(m[3]) / 10 : 0) };
+}
+
+/** The rules for a model. An unrecognised ID gets the newest rules (effort on, thinking never off), the safe default for anything future. */
+export function modelRules(model: string): ModelRules {
+  const parsed = parseModelId(model);
+  if (!parsed) return { effort: true, thinkingOff: "never", thinkingOffMaxEffort: "max" };
+  const { family, version } = parsed;
+  if (family === "haiku") return { effort: false, thinkingOff: "disabled", thinkingOffMaxEffort: "max" };
+  if (family === "fable" || family === "mythos") return { effort: true, thinkingOff: "never", thinkingOffMaxEffort: "max" };
+  if (version < 4.6) return { effort: false, thinkingOff: "disabled", thinkingOffMaxEffort: "max" };
+  if (family === "sonnet") {
+    if (version >= 6) return { effort: true, thinkingOff: "never", thinkingOffMaxEffort: "max" }; // not yet shipped: the safe rules until its guide is read
+    if (version >= 5.5) return { effort: true, thinkingOff: "between_tools", thinkingOffMaxEffort: "high" };
+    return { effort: true, thinkingOff: "disabled", thinkingOffMaxEffort: "max" };
+  }
+  // opus
+  if (version >= 5.5) return { effort: true, thinkingOff: "never", thinkingOffMaxEffort: "max" };
+  if (version >= 5) return { effort: true, thinkingOff: "disabled", thinkingOffMaxEffort: "high" };
+  return { effort: true, thinkingOff: "disabled", thinkingOffMaxEffort: "max" };
+}
+
+/** True when thinking may be off at this effort on this model. */
+export function thinkingOffAllowed(rules: ModelRules, effort: Effort): boolean {
+  return rules.thinkingOff !== "never" && EFFORT_RANK[effort] <= EFFORT_RANK[rules.thinkingOffMaxEffort];
+}

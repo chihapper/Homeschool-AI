@@ -15,6 +15,7 @@ import { buildProgress } from "../domain/progress.js";
 import { courses, learners, reports, sessions } from "../store/index.js";
 import { activeTtsProvider, config, getSettings, MODEL_OPTIONS, REPO_ROOT, resetSettings, RuntimeSettingsSchema, ttsModelLabel, ttsVoiceLabel, updateSettings } from "../config.js";
 import { undoProfileUpdate } from "../domain/profile.js";
+import { anthropic, normalizeModelId } from "../llm/client.js";
 import { checkReadiness } from "../doctor.js";
 import { humeConfigured, mintAccessToken } from "../voice/hume.js";
 import { pcm16ToWav } from "../voice/pcm.js";
@@ -99,6 +100,30 @@ function sampleFile(name: string): string {
   return file;
 }
 
+/**
+ * A model ID typed into Settings is checked with the API before it is saved, so a typo fails here with the
+ * API message ("model: claude-sonnet-5.5 was not found. Did you mean claude-sonnet-5-5?") rather than at the
+ * first tutor turn. IDs are normalised first (dots to hyphens, lower case), so the common slip is accepted
+ * as what was meant. The patch is edited in place so the normalised ID is what gets saved.
+ */
+async function checkModelIds(body: unknown): Promise<void> {
+  if (!body || typeof body !== "object") return;
+  const patch = body as Record<string, unknown>;
+  for (const key of ["model", "tutorModel"] as const) {
+    const raw = patch[key];
+    if (typeof raw !== "string") continue;
+    const id = normalizeModelId(raw);
+    patch[key] = id;
+    try {
+      await anthropic.models.retrieve(id);
+    } catch (err) {
+      const e = err as { error?: { error?: { message?: string } }; message?: string };
+      const detail = e.error?.error?.message ?? e.message ?? String(err);
+      throw new Error(`${key === "model" ? "Offline model" : "Tutor model"} "${raw}": ${detail}`);
+    }
+  }
+}
+
 export function registerApiRoutes(app: FastifyInstance): void {
   app.get("/health", async () => health());
   app.get("/api/health", async () => health());
@@ -107,6 +132,7 @@ export function registerApiRoutes(app: FastifyInstance): void {
   app.get("/api/settings", async () => settingsView());
   app.put("/api/settings", async (req, reply) => {
     try {
+      await checkModelIds(req.body);
       updateSettings(req.body ?? {});
     } catch (err) {
       return reply.code(400).send({ error: err instanceof Error ? err.message : String(err) });

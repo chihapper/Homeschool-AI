@@ -1,6 +1,6 @@
 # Handoff
 
-Last updated: 2026-09-28
+Last updated: 2026-09-30
 
 Read this before anything else. It is written for a session that has seen nothing.
 
@@ -23,6 +23,14 @@ key alone; browser voice works through Inworld or ElevenLabs (Hume's balance is 
 microphone session in Chrome has not happened yet. The user intends to pull the repo on a second laptop and
 host it there: git carries neither `.env` nor `data/` (see the verification loop). Next build: stage A of the
 intakes, the record split (`docs/INTAKE.md` §8).
+
+**State on 2026-09-30:** branch `feature/models-5-5` (off `main` at `807d069`) carries the move to Claude
+Opus 5.5 and Sonnet 5.5: what each model accepts is one table in `apps/server/src/llm/models.ts`, IDs are
+normalised (the user's `claude-sonnet-5.5` was a 404), Settings checks a typed ID with the API before saving,
+and the runtime settings on this machine now hold `claude-opus-5-5` / `claude-sonnet-5-5` (in
+`data/settings.json`, which wins over `.env`; the user's `.env` still says the 5 models). Verified live: doctor
+ping, three scripted turns on Sonnet 5.5, 201 unit tests. Not merged: the user decides. Also diagnosed but not
+fixed: the tutor denying it had supplied a date (work queue, item 0000a).
 
 **Goal and gate:** get the tool in front of homeschool families as an add-on study partner. The next
 gate is a repeatable pedagogy evaluation (issue #6) so skill edits stop being judged by hand, then a
@@ -186,6 +194,37 @@ the product (#13, #18, #23, #26). Ordering and blockers only here.
 
 **Claude-side, in order**
 
+00000. Done 2026-09-30 on `feature/models-5-5`: Opus 5.5 and Sonnet 5.5. Per Anthropic's migration guides
+   (`/claude-api migrate`): Sonnet 5.5 rejects `thinking: {type: "disabled"}` and takes `between_tools` at
+   effort high or below; Opus 5.5 never turns thinking off (low effort is the control) and its own default
+   effort is medium, so effort is always sent; `max_tokens` covers thinking (speak cap 700 to 1200, reflect
+   700 to 2000, doctor ping 5 to 64); forced `tool_choice` is a 400 (never used here). `reasoningParams`
+   reads `modelRules`; "disabled" now means the least thinking the model allows. Unknown IDs get the safe rules
+   (effort on, thinking never off). The speak instruction no longer says "do not stop to weigh" (the guide:
+   lines telling the model not to think make it leak internal tags). To adopt the next model: CLAUDE.md,
+   conventions. Live 2026-09-30: a bad ID returns the API's "Did you mean" hint; dotted IDs save normalised;
+   Sonnet 5.5 spoke three scripted turns with `between_tools` on the speak call and adaptive on the reflect
+   call, TTFT 1.8 to 2.4 s (Sonnet 5 measured 1.3 to 1.5 s the same day; small samples), observations recorded.
+   `thinkingChars` reads 0 on the 5.5 models (thinking text is omitted by default); `outputTokens` still counts it.
+0000a. Open 2026-09-30, diagnosed, fix not yet approved: in the user's voice session (`7e285a2c`) the tutor
+   gave "merged around 753 B.C." itself (turn 8, reading the merger passage aloud), later quizzed the learner
+   on the date (turns 14, 16), and when the learner said "you told me" it denied it twice (turns 20, 22). The
+   transcript the model sees is complete (`transcriptToMessages` sends every turn), so nothing was lost. What
+   went wrong: the reflect pass filed the date as a *gap* and then as *recalled* without noticing the tutor had
+   said it, those notes sit in `<observations_so_far>`, and the fast speaking call (thinking off) trusts its
+   notes over re-reading twenty turns. Replays with the state as it was (`replay-date.mts` in the session
+   scratchpad, observations cut at the learner's turn): Sonnet 5 owned the earlier statement 2 of 3, Sonnet
+   5.5 2 of 3; with the later observations included (which called the learner's objection a check), 3 of 3 and
+   2 of 2. So the denial is a one-in-three sampling outcome of a state the notes set up, on either model, and
+   the second denial was compounded by a thread that called the learner "contesting" instead of settling who
+   said what. Proposed fix, three parts, none built: (1) reflect pass: before filing a key fact as a gap or as
+   recalled, check whether the tutor stated it earlier in the conversation and file it as *told* instead; when
+   the learner disputes who said what, verify against the transcript and write the thread as a settled fact
+   ("the learner is right: the tutor gave the date in an earlier turn"); (2) speak instruction and the
+   socratic skill: what you have already said in this conversation is told, not recalled: never quiz it as a
+   memory test, and if the learner says you told them, believe the transcript and say so plainly; (3)
+   optional, deterministic: mark in `<current_concept>` the key facts whose numbers or dates already appear in
+   the tutor's own lines. Also worth knowing: the "gap" observation at 20:42:42 is in Sam's report as evidence.
 0000. Next, once the user reacts to `docs/INTAKE.md` (written 2026-09-27, research plus design, three Opus 5.5
    research reports appended): the two intakes. The user's structure: a general intake once per student
    (the learner profile, "how they learn") and a course intake once per student per course (the
@@ -287,8 +326,10 @@ the product (#13, #18, #23, #26). Ordering and blockers only here.
   `walkedConceptIds` in `apps/server/src/domain/focus.ts` (the frozen `Session.conceptIds`). Reading
   the lesson directly reintroduces the bug where a mid-session Focus edit changes the walk and
   invalidates the tutor's cached prompt prefix.
-- **The speaking call never thinks and never gets bookkeeping tools.** `tutorTurn` has only
-  `lookup_source` with thinking disabled; `reflectTurn` has the rest. Moving anything back puts 5 to
+- **The speaking call gets the least thinking its model allows and never gets bookkeeping tools.**
+  `tutorTurn` has only `lookup_source` and asks `reasoningParams` for thinking "disabled", which the model
+  table turns into `{type: "disabled"}` (Opus 5, Sonnet 5), `{type: "between_tools"}` (Sonnet 5.5) or plain
+  adaptive at low effort (Opus 5.5, Fable: never send "disabled" to them, it is a 400); `reflectTurn` has the rest. Moving anything back puts 5 to
   15 s of silence before the first word (measured 2026-09-22).
 - **The stable prefix must stay byte-identical across turns.** Blocks 0 and 1 of the tutor prompt
   (course+lesson, learner) are cached; anything per-turn goes after them.

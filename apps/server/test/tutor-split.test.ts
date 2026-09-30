@@ -19,7 +19,7 @@ describe("the tutor's turn is split into speaking and reflecting", () => {
   it("tells the speak call to answer now and the reflect call to stay silent", () => {
     const speak = buildTutorContext(ctx, "speak").at(-1) ?? "";
     expect(speak).toMatch(/waiting/i);
-    expect(speak).toMatch(/do not take notes/i);
+    expect(speak).toMatch(/notes on what they showed, are settled after you speak/i);
     expect(speak).toMatch(/lookup_source/);
 
     const reflect = buildTutorContext(ctx, "reflect").at(-1) ?? "";

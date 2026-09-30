@@ -13,6 +13,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { OutsideKnowledgeModeSchema, type OutsideKnowledgeMode } from "./domain/types.js";
+import { DEFAULT_MODEL, DEFAULT_TUTOR_MODEL, MODEL_OPTIONS, normalizeModelId } from "./llm/models.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -60,10 +61,10 @@ function envNumber(name: string, min: number, max: number, fallback: number): nu
 }
 
 export const RuntimeSettingsSchema = z.object({
-  /** Model used by the offline agents (curriculum, profile extraction, assessor). */
-  model: z.string().min(1),
+  /** Model used by the offline agents (curriculum, profile extraction, assessor). Normalised: "claude-opus-5.5" becomes "claude-opus-5-5". */
+  model: z.string().min(1).transform(normalizeModelId),
   /** The live tutor and intake conversation are latency-sensitive; they can use a different model. */
-  tutorModel: z.string().min(1),
+  tutorModel: z.string().min(1).transform(normalizeModelId),
   /** Effort for the live tutor. Lower effort = faster first token. */
   tutorEffort: EffortSchema,
   /** Effort for the offline agents. */
@@ -117,8 +118,8 @@ export type RuntimeSettings = z.infer<typeof RuntimeSettingsSchema>;
 
 /** Values from the environment (or the code defaults). Never change while the process runs. */
 export const envDefaults: RuntimeSettings = {
-  model: env("CLAUDE_MODEL", "claude-opus-5")!,
-  tutorModel: env("CLAUDE_TUTOR_MODEL", env("CLAUDE_MODEL", "claude-opus-5"))!,
+  model: normalizeModelId(env("CLAUDE_MODEL", DEFAULT_MODEL)!),
+  tutorModel: normalizeModelId(env("CLAUDE_TUTOR_MODEL", DEFAULT_TUTOR_MODEL)!),
   tutorEffort: EffortSchema.catch("low").parse(env("CLAUDE_TUTOR_EFFORT", "low")),
   analysisEffort: EffortSchema.catch("high").parse(env("CLAUDE_ANALYSIS_EFFORT", "high")),
   reflectEffort: EffortSchema.catch("medium").parse(env("CLAUDE_REFLECT_EFFORT", "medium")),
@@ -148,8 +149,8 @@ export const envDefaults: RuntimeSettings = {
   sttMaxSilenceMs: Number(env("ASSEMBLYAI_MAX_TURN_SILENCE", "1500")),
 };
 
-/** Models offered in the Settings tab. Any model id can still be typed in. */
-export const MODEL_OPTIONS = ["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5"] as const;
+/** Models offered in the Settings tab (defined with their rules in llm/models.ts). Any model ID can still be typed in; the API checks it on save. */
+export { MODEL_OPTIONS };
 
 let settingsFile = path.join(dataDir, "settings.json");
 let overrides: Partial<RuntimeSettings> = loadOverrides(settingsFile);

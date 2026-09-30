@@ -17,6 +17,22 @@ describe("model-aware reasoning params", () => {
     // disabled is rejected at xhigh/max: fall back to adaptive
     expect(reasoningParams("claude-opus-5", "xhigh", "disabled").thinking).toEqual({ type: "adaptive" });
   });
+
+  it("turns thinking off the way each 5.5 model allows (Anthropic migration guides, 2026-09-30)", () => {
+    // Sonnet 5.5 rejects {type: "disabled"}; its lowest setting is between_tools, accepted up to high effort.
+    expect(reasoningParams("claude-sonnet-5-5", "low", "disabled")).toEqual({ output_config: { effort: "low" }, thinking: { type: "between_tools" } });
+    expect(reasoningParams("claude-sonnet-5-5", "high", "disabled").thinking).toEqual({ type: "between_tools" });
+    expect(reasoningParams("claude-sonnet-5-5", "xhigh", "disabled").thinking).toEqual({ type: "adaptive" });
+    expect(reasoningParams("claude-sonnet-5-5", "low")).toEqual({ output_config: { effort: "low" }, thinking: { type: "adaptive" } });
+    // Opus 5.5 and Fable never turn thinking off: adaptive at the given effort is the whole control.
+    expect(reasoningParams("claude-opus-5-5", "low", "disabled")).toEqual({ output_config: { effort: "low" }, thinking: { type: "adaptive" } });
+    expect(reasoningParams("claude-fable-5-1", "medium", "disabled").thinking).toEqual({ type: "adaptive" });
+    // Sonnet 5 keeps "disabled" at every effort; Opus 5 only up to high (unchanged).
+    expect(reasoningParams("claude-sonnet-5", "max", "disabled").thinking).toEqual({ type: "disabled" });
+    // The ID as a person types it still gets the right rules.
+    expect(reasoningParams("claude-sonnet-5.5", "low", "disabled").thinking).toEqual({ type: "between_tools" });
+    expect(reasoningParams("Claude-Opus-5.5", "low", "disabled").thinking).toEqual({ type: "adaptive" });
+  });
 });
 
 describe("buildSystem cache breakpoints", () => {

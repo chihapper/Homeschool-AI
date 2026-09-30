@@ -17,20 +17,29 @@ export function fallbackParams(): { betas: string[]; fallbacks: "default" } | Re
   return config.refusalFallbacks ? { betas: [REFUSAL_FALLBACK_BETA], fallbacks: "default" } : {};
 }
 
-/**
- * `output_config.effort` and adaptive thinking exist on Opus 4.6+ / Sonnet 4.6+ / Opus 5 / Sonnet 5 / Fable.
- * Haiku 4.5 and older models reject them, so callers must gate on this.
- */
+import { modelRules, thinkingOffAllowed } from "./models.js";
+export { MODEL_OPTIONS, modelRules, normalizeModelId, parseModelId } from "./models.js";
+
+/** `output_config.effort` and adaptive thinking are accepted by this model. The rules live in llm/models.ts. */
 export function supportsEffort(model: string): boolean {
-  return /claude-(opus|sonnet|fable|mythos)-(4-[6-9]|5|4-[6-9]-|5-)/.test(model) || /claude-(opus|sonnet)-5\b/.test(model);
+  return modelRules(model).effort;
 }
 
-/** Request params for thinking + effort that are valid for the given model. */
+/**
+ * Request params for thinking + effort that the given model accepts (rules in llm/models.ts).
+ *
+ * "disabled" means "as little thinking as this model allows": `{type: "disabled"}` where the model takes it
+ * (Opus 5, Sonnet 5, the 4.6 to 4.8 family), Sonnet 5.5's `{type: "between_tools"}` (no thinking before the
+ * first words, which is what a speaking call needs), or plain adaptive at the given effort on the models that
+ * never turn thinking off (Opus 5.5, Fable, Mythos), where low effort is the control. Above the effort at
+ * which a model allows thinking off, adaptive is sent rather than a 400.
+ */
 export function reasoningParams(model: string, effort: Effort, thinking: "adaptive" | "disabled" = "adaptive"): Record<string, unknown> {
-  if (!supportsEffort(model)) return {}; // Haiku 4.5: no thinking (fastest), no effort param.
+  const rules = modelRules(model);
+  if (!rules.effort) return {}; // Haiku 4.5 and older: no thinking (fastest), no effort param.
   const params: Record<string, unknown> = { output_config: { effort } };
-  if (thinking === "disabled" && (effort === "low" || effort === "medium" || effort === "high")) {
-    params.thinking = { type: "disabled" };
+  if (thinking === "disabled" && thinkingOffAllowed(rules, effort)) {
+    params.thinking = { type: rules.thinkingOff };
   } else {
     params.thinking = { type: "adaptive" };
   }

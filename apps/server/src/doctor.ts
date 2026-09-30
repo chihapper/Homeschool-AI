@@ -63,9 +63,10 @@ export async function checkReadiness(opts: { ping?: boolean } = {}): Promise<Rea
   add(1, hasKey ? "ok" : "fail", "ANTHROPIC_API_KEY", hasKey ? `models: ${config.model} (tutor ${config.tutorModel} @ ${config.tutorEffort})` : "Needed for ingestion, tutoring, and assessment.");
   if (opts.ping && hasKey) {
     try {
-      const { anthropic } = await import("./llm/client.js");
+      const { anthropic, reasoningParams } = await import("./llm/client.js");
       const t0 = Date.now();
-      const r = await anthropic.messages.create({ model: config.tutorModel, max_tokens: 5, messages: [{ role: "user", content: "Say hi." }] });
+      // Room for a model that thinks before it speaks (Opus 5.5 always does a little): max_tokens covers thinking too.
+      const r = await anthropic.messages.create({ model: config.tutorModel, max_tokens: 64, ...reasoningParams(config.tutorModel, "low", "disabled"), messages: [{ role: "user", content: "Say hi." }] });
       add(1, "ok", "Claude API ping", `${config.tutorModel} answered in ${Date.now() - t0} ms (stop_reason ${r.stop_reason})`);
     } catch (err) {
       add(1, "fail", "Claude API ping", err instanceof Error ? err.message : String(err));
