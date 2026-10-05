@@ -309,8 +309,9 @@ export type OutsideClaim = z.infer<typeof OutsideClaimSchema>;
 export const ObservationSchema = z.object({
   at: z.string(),
   conceptId: z.string(),
-  kind: z.enum(["understanding", "partial", "misconception", "gap", "engagement"]),
-  evidence: z.string().describe("What the learner said or did, briefly quoted."),
+  /** `told` marks a fact the tutor stated outright: what the learner says about it afterwards is not independent recall, and it never counts as assessment evidence (domain/told.ts). */
+  kind: z.enum(["understanding", "partial", "misconception", "gap", "engagement", "told"]),
+  evidence: z.string().describe("What the learner said or did, briefly quoted. For kind told: what the tutor said."),
   note: z.string().describe("Why this matters for mastery."),
 });
 export type Observation = z.infer<typeof ObservationSchema>;

@@ -36,6 +36,7 @@ import { openThread, THREAD_PATIENCE, THREAD_PREFIX } from "../orchestrator/note
 import { isFollowUp, SAY_FIRST, type FlagInput } from "../orchestrator/outside.js";
 import { walkedConceptIds } from "../domain/focus.js";
 import { DEPTH_LABEL, depthOf } from "../domain/profile.js";
+import { toldFigures } from "../domain/told.js";
 
 /**
  * Output caps for the two calls of a turn. `max_tokens` covers thinking as well as words (on every model since
@@ -100,6 +101,8 @@ export interface TutorContext {
   onOutsideClaim?: (input: FlagInput) => string;
   /** Words the orchestrator has already spoken at the start of this reply (a check's follow-up); the model carries on from them. */
   saidFirst?: string;
+  /** The reply the learner has just heard, not yet in the transcript (reflect pass only), so what it told them is counted. */
+  justSpoken?: string;
 }
 
 /**
@@ -211,6 +214,29 @@ export function buildTutorContext(ctx: TutorContext, mode: "speak" | "reflect" =
     );
   }
 
+  // Figures from this concept's key facts that the tutor was the first to say (domain/told.ts). The model has
+  // the whole transcript, but nothing in it points at its own earlier words: on 2026-09-30 it asked a learner
+  // for a date it had read out six turns before, and then denied having said it.
+  // Every concept of the walk counts: the learner may object after the tutor has moved on to the next one.
+  const told = toldFigures([...concept.keyFacts, ...lessonConcepts.filter((c) => c.id !== concept.id).flatMap((c) => c.keyFacts)], session.transcript, ctx.justSpoken);
+  const when = (t: (typeof told)[number]) => (t.repliesAgo <= 1 ? (ctx.justSpoken ? "in the reply they just heard" : "in your latest reply") : `${t.repliesAgo} replies ago`);
+  // The reflect call gets them as a block. The speaking call gets them inside its final instruction instead:
+  // as a block of their own they set off lookups after the reply (18 in 10 replies on one replayed turn,
+  // against none once moved, 2026-10-05), and a late lookup can make a reply repeat itself.
+  const toldLine =
+    mode === "speak" && told.length
+      ? `You were the first to say these in this conversation, so the learner has been told them: ${told.map((t) => `${t.figure} (${when(t)}: "${t.quote}")`).join("; ")}. ` +
+        "Do not ask for them back as a memory test; if the learner says you told them, say so plainly and test the idea another way. "
+      : "";
+  if (told.length && mode === "reflect") {
+    blocks.push(
+      `<already_told>\nYou were the first to say these in this conversation, so the learner has been told them:\n` +
+        told.map((t) => `- ${t.figure}: you said it ${when(t)}: "${t.quote}"`).join("\n") +
+        `\nA fact you told them is told, not recalled. Do not ask for it back as a test of memory. Their saying it back is not recall, and their not saying it is a weak signal at most. ` +
+        `If they say you told them, they are right: say so plainly and test the idea another way.\n</already_told>`,
+    );
+  }
+
   // The phase is what kind of work this turn does; the thread is what the work is on. One dialogue, so
   // they are given together rather than as competing instructions.
   const thread = openThread(session);
@@ -251,14 +277,19 @@ export function buildTutorContext(ctx: TutorContext, mode: "speak" | "reflect" =
         "You are speaking to the learner now and they are waiting, so answer straight away: two to four sentences ending in your single question, and nothing after it. " +
         "Do not answer your own question, and do not narrate a pause, a hesitation, or a reaction the learner has not actually given: their last message is the only thing they have said. " +
         "Whether they are ready to move on, and the notes on what they showed, are settled after you speak, in a separate pass you do not run here; this call only speaks. " +
+        toldLine +
         "Passages that match the learner's latest words are above when there are any. If you need another passage to answer honestly, call lookup_source before your first word, " +
         "and never announce or narrate a lookup (no \"let me check the material\"): say what the material says, not that you are checking it. Never mention tools, phases, or the profile out loud."
       : "The learner has just heard your reply (the last assistant message) and is listening; nothing you write here reaches them, so write nothing. " +
         "Take your notes now: call record_observation for what the learner showed in their LATEST reply only, quoting them; everything from earlier turns is already on file above, so do not record it again, " +
         "and call advance when the phase is genuinely finished. " +
+        "A fact you stated outright, in the reply they just heard or earlier, is told, not recalled: record it once as kind told, quoting your own words. " +
+        "Their saying a told fact back is not understanding, and their failing to is a weak signal at most: if you record either, the note says the fact had been told. Judge them on what they do with it. " +
         "This is also the only place you get to think before teaching: the next spoken turn happens fast and cannot weigh anything. " +
         "So decide what this dialogue is still working on and call open_thread with it in one sentence — a question they answered around, a claim that contradicts something they said earlier, " +
         "an answer that was right but sounded like a guess. If the thread is finished, do not call it, and the next turn moves on. " +
+        "If the learner says you already told them something, or disputes who said what, read back through the conversation before you record anything and settle it: " +
+        'the thread states who is right as a fact (for example "He is right: I gave him 753 B.C. earlier; own it, test the idea differently"), never as a dispute still open. ' +
         "If the latest exchange brought up a checkable fact the material does not settle, from the learner or from you, call flag_outside_claim for it; never for faith, values or opinion. " +
         (flagged.length ? `Already flagged this session, so never flag these again, however you would word them now: ${flagged.join("; ")}. ` : "") +
         "Make every call in one batch. If there is nothing to record, no reason to advance and nothing unfinished, do nothing at all." +
@@ -311,13 +342,14 @@ export function tutorTools(ctx: TutorContext, mode: "speak" | "reflect" = "speak
     definition: {
       name: "record_observation",
       description:
-        "Record evidence about the learner's understanding of a concept, for the assessment report. Call this every time the learner demonstrates understanding, partial understanding, a misconception, a gap, or a notable change in engagement. Quote what they said.",
+        "Record evidence about the learner's understanding of a concept, for the assessment report. Call this every time the learner demonstrates understanding, partial understanding, a misconception, a gap, or a notable change in engagement. Quote what they said. " +
+        "Kind 'told' is the one entry about you: a fact you stated outright to the learner, with your own words as the evidence. It marks that whatever they say about that fact afterwards is not independent recall.",
       input_schema: {
         type: "object",
         properties: {
           conceptId: { type: "string", description: "Concept id, usually the current concept." },
-          kind: { type: "string", enum: ["understanding", "partial", "misconception", "gap", "engagement"] },
-          evidence: { type: "string", description: "What the learner said or did, briefly quoted." },
+          kind: { type: "string", enum: ["understanding", "partial", "misconception", "gap", "engagement", "told"] },
+          evidence: { type: "string", description: "What the learner said or did, briefly quoted. For kind told: what you said." },
           note: { type: "string", description: "Why this matters for mastery." },
         },
         required: ["conceptId", "kind", "evidence", "note"],
@@ -441,7 +473,7 @@ export function tutorTurn(ctx: TutorContext, signal?: AbortSignal): AsyncGenerat
  * Returns when the bookkeeping is done; anything it writes as text is ignored.
  */
 export async function reflectTurn(ctx: TutorContext, spokenText: string, signal?: AbortSignal): Promise<TurnResult> {
-  const system = buildSystem(reflectAgent, buildTutorContext(ctx, "reflect"), STABLE_CONTEXT_BLOCKS);
+  const system = buildSystem(reflectAgent, buildTutorContext({ ...ctx, justSpoken: spokenText || undefined }, "reflect"), STABLE_CONTEXT_BLOCKS);
   const messages = transcriptToMessages([...ctx.session.transcript, ...(spokenText ? [{ role: "assistant" as const, content: spokenText }] : [])]);
   if (!messages.length) return { text: "", appended: [], stopReason: null, latency: { ttftMs: 0, totalMs: 0, iterations: 0, cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 0, outputTokens: 0, suppressedChars: 0 } };
   // The API requires the conversation to end with a user message, and this one ends with the tutor's own

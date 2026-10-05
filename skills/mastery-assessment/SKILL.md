@@ -73,6 +73,12 @@ evidence is what counts for level 3 and above. When a session opened with the le
 material before the tutor had asked anything, that first exchange is independent by construction: weigh
 it like any unhinted answer.
 
+An observation of kind `told` is the tutor's own words: a fact it stated outright during the session.
+The learner saying that fact back afterwards is hinted evidence, however sure it sounded, and their
+failing to say it back minutes later is a weak signal at most. Judge the concept on what they did with
+the fact (explained it, applied it, connected it), and read the transcript around it rather than the
+later observations alone.
+
 ## Effective formats
 
 Note which demonstration formats (explain-in-own-words, solve, predict, teach-back, compare) produced

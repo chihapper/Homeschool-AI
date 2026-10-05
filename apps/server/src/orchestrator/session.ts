@@ -22,6 +22,7 @@ import { config } from "../config.js";
 import { assessSession } from "../agents/assessor-agent.js";
 import { checkOutsideClaim } from "../agents/reference-agent.js";
 import { mergeFinishedChecks, recordOutsideClaim, SAY_FIRST, settleChecks, spokenFollowUps, startCheck } from "./outside.js";
+import { isEvidence } from "../domain/told.js";
 
 const indexCache = new Map<string, ChunkIndex>();
 function indexFor(course: Course): ChunkIndex {
@@ -160,13 +161,13 @@ export function applyAdvance(session: Session, course: Course, lesson: Lesson, t
       if (session.phase !== "inquire" && session.phase !== "teach") return `Refused: cannot move to assess from ${session.phase}.`;
       // Nothing recorded means nothing was taught: a session was seen moving to assess on a concept it had
       // not started (2026-09-24), and then noting its own mistake.
-      if (!obsForConcept.some((o) => o.kind !== "engagement")) return `Refused: nothing is recorded for ${conceptId} yet. Teach it and record what the learner shows before assessing.`;
+      if (!obsForConcept.some((o) => isEvidence(o.kind))) return `Refused: nothing is recorded for ${conceptId} yet. Teach it and record what the learner shows before assessing.`;
       session.phase = "assess";
       session.pendingDirectives.push("Now in ASSESS: ask for demonstrations, one per turn, and record at least two observations before advancing. No hints in this phase.");
       return `OK: phase is now assess (${rationale}).`;
     case "next-concept": {
       if (session.phase !== "assess") return "Refused: assess the current concept first (advance to 'assess').";
-      const assessObs = obsForConcept.filter((o) => o.kind !== "engagement");
+      const assessObs = obsForConcept.filter((o) => isEvidence(o.kind)); // not engagement, and not what the tutor itself told them
       if (assessObs.length < 2) return `Refused: only ${assessObs.length} observation(s) recorded for ${conceptId}. Record evidence of the learner's demonstration first.`;
       if (session.conceptIndex + 1 >= walk.length) {
         session.phase = "wrap-up";

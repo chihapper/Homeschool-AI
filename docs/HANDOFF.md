@@ -1,6 +1,6 @@
 # Handoff
 
-Last updated: 2026-09-30
+Last updated: 2026-10-05
 
 Read this before anything else. It is written for a session that has seen nothing.
 
@@ -29,8 +29,8 @@ Opus 5.5 and Sonnet 5.5: what each model accepts is one table in `apps/server/sr
 normalised (the user's `claude-sonnet-5.5` was a 404), Settings checks a typed ID with the API before saving,
 and the runtime settings on this machine now hold `claude-opus-5-5` / `claude-sonnet-5-5` (in
 `data/settings.json`, which wins over `.env`; the user's `.env` still says the 5 models). Verified live: doctor
-ping, three scripted turns on Sonnet 5.5, 201 unit tests. Not merged: the user decides. Also diagnosed but not
-fixed: the tutor denying it had supplied a date (work queue, item 0000a).
+ping, three scripted turns on Sonnet 5.5, 201 unit tests. Not merged: the user decides. The tutor denying it had supplied a date is fixed on
+`fix/told-not-recalled` (2026-10-05, work queue item 0000a), stacked on the models branch.
 
 **Goal and gate:** get the tool in front of homeschool families as an add-on study partner. The next
 gate is a repeatable pedagogy evaluation (issue #6) so skill edits stop being judged by hand, then a
@@ -206,25 +206,40 @@ the product (#13, #18, #23, #26). Ordering and blockers only here.
    Sonnet 5.5 spoke three scripted turns with `between_tools` on the speak call and adaptive on the reflect
    call, TTFT 1.8 to 2.4 s (Sonnet 5 measured 1.3 to 1.5 s the same day; small samples), observations recorded.
    `thinkingChars` reads 0 on the 5.5 models (thinking text is omitted by default); `outputTokens` still counts it.
-0000a. Open 2026-09-30, diagnosed, fix not yet approved: in the user's voice session (`7e285a2c`) the tutor
-   gave "merged around 753 B.C." itself (turn 8, reading the merger passage aloud), later quizzed the learner
-   on the date (turns 14, 16), and when the learner said "you told me" it denied it twice (turns 20, 22). The
-   transcript the model sees is complete (`transcriptToMessages` sends every turn), so nothing was lost. What
-   went wrong: the reflect pass filed the date as a *gap* and then as *recalled* without noticing the tutor had
-   said it, those notes sit in `<observations_so_far>`, and the fast speaking call (thinking off) trusts its
-   notes over re-reading twenty turns. Replays with the state as it was (`replay-date.mts` in the session
-   scratchpad, observations cut at the learner's turn): Sonnet 5 owned the earlier statement 2 of 3, Sonnet
-   5.5 2 of 3; with the later observations included (which called the learner's objection a check), 3 of 3 and
-   2 of 2. So the denial is a one-in-three sampling outcome of a state the notes set up, on either model, and
-   the second denial was compounded by a thread that called the learner "contesting" instead of settling who
-   said what. Proposed fix, three parts, none built: (1) reflect pass: before filing a key fact as a gap or as
-   recalled, check whether the tutor stated it earlier in the conversation and file it as *told* instead; when
-   the learner disputes who said what, verify against the transcript and write the thread as a settled fact
-   ("the learner is right: the tutor gave the date in an earlier turn"); (2) speak instruction and the
-   socratic skill: what you have already said in this conversation is told, not recalled: never quiz it as a
-   memory test, and if the learner says you told them, believe the transcript and say so plainly; (3)
-   optional, deterministic: mark in `<current_concept>` the key facts whose numbers or dates already appear in
-   the tutor's own lines. Also worth knowing: the "gap" observation at 20:42:42 is in Sam's report as evidence.
+0000a. Done 2026-10-05 on `fix/told-not-recalled` (user approved the fix): told, not recalled. In the user's
+   voice session of 2026-09-30 (`7e285a2c`) the tutor read out "merged around 753 B.C." (turn 8), later asked
+   the learner for the date (turns 14, 16), filed "I don't remember" as a gap and "753 BC" as recall, and
+   denied having said it when the learner objected (turns 20, 22). Nothing was lost: the model sees every
+   turn. The first diagnosis (2026-09-30) blamed the notes and put the denial at one in three; a controlled
+   replay corrected both. By the objection the tutor had already advanced to the next concept, so the
+   founding notes were not in front of it; the speaking call simply misread its own transcript, taking its
+   latest mention (the confirmation, after the learner) for its only one. Sixteen samples each, real prompt
+   builder, `told-exp.mts` in the session scratchpad:
+
+   | Turn replayed | Model | Before | After |
+   |---|---|---|---|
+   | Learner: "didn't you already tell me 753?" Tutor denies it | Sonnet 5 (the session's model) | 10 of 16 | 1 of 16 |
+   | same | Sonnet 5.5 (the setting now) | 0 of 24 | 0 of 12 |
+   | Tutor asks for the date it gave | Sonnet 5 | 7 of 12 | 4 of 12 |
+   | same | Sonnet 5.5 | 5 of 22 | 1 of 22 |
+
+   What was built: `domain/told.ts` (the key-fact figures the tutor was the first to say, across every
+   concept of the walk, with its own words and how many replies ago); the speaking call gets them in its
+   final instruction, the reflect call as an `<already_told>` block; observation kind `told` (the tutor's own
+   words; never assessment evidence, `isEvidence`); the reflect pass records it and settles "you told me"
+   in the thread as a fact; the Socratic skill has a section "What you have already told them" and the
+   assessor's skill reads `told` as hinted evidence. Replayed, the reflect pass filed `told` in 13 of 13
+   tries, stopped filing "recalled", and after the denial wrote "Sam is right that I gave 753 first; own it
+   plainly" in 3 of 3, so a denial that slips through is corrected on the next turn. Two things it does not
+   do: figures only (a prose fact the tutor gave away relies on the reflect pass), and a miss on a told
+   fact is still filed as a gap, with a note that it had been told (the profile already lists that date as
+   a gap, and failing to repeat something heard three minutes earlier is a weak signal, not none).
+   Found on the way, not fixed: a reply that ends without a question mark followed by a late
+   `lookup_source` call is spoken twice (`streamTurn` only ends the turn when the reply ends in "?"); late
+   lookups happen at baseline on some turns (7 of 16 replies on the objection turn, either model). And a
+   block of its own for the told figures set off late lookups in the speaking call (18 in 10 replies), which
+   is why they ride in the final instruction there. Bash commands over about 8,000 characters are cut off by
+   the shell wrapper on this machine: keep heredoc edits small or write a file.
 0000. Next, once the user reacts to `docs/INTAKE.md` (written 2026-09-27, research plus design, three Opus 5.5
    research reports appended): the two intakes. The user's structure: a general intake once per student
    (the learner profile, "how they learn") and a course intake once per student per course (the

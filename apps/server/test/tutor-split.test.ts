@@ -193,3 +193,62 @@ describe("the tutor's turn is split into speaking and reflecting", () => {
     expect(speak.at(-1)).not.toEqual(reflect.at(-1));
   });
 });
+
+describe("what the tutor has already told the learner", () => {
+  const dated: Concept = { ...concept, keyFacts: ["Rome's traditional founding date is 754 or 753 B.C."] };
+  const at = "";
+
+  it("points the model at figures it was the first to say: a block for the reflect call, a line in the speaking call's final instruction", () => {
+    const told: Session = {
+      ...session,
+      transcript: [
+        { role: "user", content: "Some scholars regard it as a myth.", at },
+        { role: "assistant", content: "Your reading says two villages merged around 753 B.C. to form one town. What do you make of that?", at },
+        { role: "user", content: "I don't remember.", at },
+      ],
+    };
+    const c = { ...ctx, concept: dated, session: told } as TutorContext;
+    const block = buildTutorContext(c, "reflect").find((b) => b.startsWith("<already_told>")) ?? "";
+    expect(block).toContain('- 753: you said it in your latest reply: "');
+    expect(block).toContain("merged around 753 B.C.");
+    expect(block).toMatch(/told, not recalled/);
+    expect(block).not.toContain("754"); // nobody has said it
+    // The speaking call: no block of its own (it set off lookups after the reply), the same facts in its last instruction.
+    const speak = buildTutorContext(c, "speak");
+    expect(speak.some((b) => b.startsWith("<already_told>"))).toBe(false);
+    expect(speak.at(-1)).toContain('753 (in your latest reply: "');
+    expect(speak.at(-1)).toContain("merged around 753 B.C.");
+    expect(speak.at(-1)).toMatch(/Do not ask for them back as a memory test; if the learner says you told them, say so plainly/);
+  });
+
+  it("says nothing when nothing was told, or when the learner brought the figure first", () => {
+    const brought: Session = { ...session, transcript: [{ role: "user", content: "It was 753 BC.", at }, { role: "assistant", content: "Yes, 753 B.C.", at }] };
+    for (const c of [{ ...ctx, concept: dated }, { ...ctx, concept: dated, session: brought }] as TutorContext[]) {
+      expect(buildTutorContext(c, "reflect").some((b) => b.startsWith("<already_told>"))).toBe(false);
+      expect(buildTutorContext(c, "speak").at(-1)).not.toMatch(/You were the first to say/);
+    }
+  });
+
+  it("counts the reply the reflect pass is reflecting on, which is not in the transcript yet", () => {
+    const justNow = buildTutorContext({ ...ctx, concept: dated, justSpoken: "It was founded in 754 B.C., the reading says." } as TutorContext, "reflect");
+    expect(justNow.find((b) => b.startsWith("<already_told>"))).toContain("- 754: you said it in the reply they just heard:");
+  });
+
+  it("still lists a figure from an earlier concept of the walk after the tutor has moved on", () => {
+    const next: Concept = { ...concept, id: "site", name: "The site", keyFacts: ["The sea lies some 29 miles to the west."] };
+    const two: Lesson = { ...lesson, conceptIds: [dated.id, next.id] };
+    const moved: Session = { ...session, conceptIndex: 1, transcript: [{ role: "user", content: "A myth.", at }, { role: "assistant", content: "Two villages merged around 753 B.C.", at }, { role: "user", content: "You told me 753.", at }] };
+    const after = { ...ctx, course: { ...course, lessons: [two], concepts: [dated, next] }, lesson: two, concept: next, session: moved } as TutorContext;
+    expect(buildTutorContext(after, "speak").at(-1)).toContain('753 (in your latest reply: "');
+    expect(buildTutorContext(after, "reflect").find((b) => b.startsWith("<already_told>"))).toContain("- 753: you said it in your latest reply:");
+  });
+
+  it("lets the reflect pass file what the tutor told as its own kind, and tells both calls what told means", () => {
+    const record = tutorTools(ctx, "reflect").find((t) => t.definition.name === "record_observation");
+    expect(JSON.stringify(record?.definition.input_schema)).toContain('"told"');
+    const reflect = buildTutorContext(ctx, "reflect").at(-1) ?? "";
+    expect(reflect).toMatch(/record it once as kind told/);
+    expect(reflect).toMatch(/if you record either, the note says the fact had been told/);
+    expect(reflect).toMatch(/never as a dispute still open/);
+  });
+});

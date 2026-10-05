@@ -20,7 +20,7 @@ export interface Learner { id: string; name: string; age?: number; gradeLevel?: 
 export type Phase = "intake" | "teach" | "inquire" | "assess" | "wrap-up" | "complete";
 export interface Latency { ttftMs: number; totalMs: number; iterations: number; cacheReadTokens: number; cacheWriteTokens: number; inputTokens: number; outputTokens: number; suppressedChars?: number; thinkingChars?: number; toolsBeforeSpeech?: boolean; reflectMs?: number; reflectThinkingChars?: number; firstAudioMs?: number; transcriptMs?: number; interrupted?: boolean }
 export interface Turn { role: "user" | "assistant"; content: string; at: string; expressions?: string[]; latency?: Latency }
-export interface Observation { at: string; conceptId: string; kind: "understanding" | "partial" | "misconception" | "gap" | "engagement"; evidence: string; note: string }
+export interface Observation { at: string; conceptId: string; kind: "understanding" | "partial" | "misconception" | "gap" | "engagement" | "told"; evidence: string; note: string }
 /** What the tutor does with facts from outside the family's material (mirrors OutsideKnowledgeModeSchema). */
 export type OutsideKnowledgeMode = "check" | "answer" | "material-only";
 /** A fact from outside the material that came up in a session, with the reference check's verdict (mirrors OutsideClaimSchema). */

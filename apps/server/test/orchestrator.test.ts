@@ -32,6 +32,9 @@ describe("applyAdvance", () => {
     // Engagement alone is not teaching evidence.
     s.observations.push({ at: "", conceptId: "a", kind: "engagement", evidence: "asked for the answer", note: "" });
     expect(applyAdvance(s, course, lesson, "assess", "r")).toMatch(/^Refused/);
+    // Nor is a fact the tutor told them: that is the tutor talking, not the learner showing anything.
+    s.observations.push({ at: "", conceptId: "a", kind: "told", evidence: "merged around 753 B.C.", note: "" });
+    expect(applyAdvance(s, course, lesson, "assess", "r")).toMatch(/^Refused/);
     s.observations.push(taught("a"));
     expect(applyAdvance(s, course, lesson, "assess", "r")).toMatch(/^OK/);
   });
@@ -39,7 +42,7 @@ describe("applyAdvance", () => {
   it("refuses next-concept without recorded evidence", () => {
     const s = session({ phase: "assess" });
     expect(applyAdvance(s, course, lesson, "next-concept", "r")).toMatch(/Refused: only 0/);
-    s.observations.push({ at: "", conceptId: "a", kind: "engagement", evidence: "", note: "" });
+    s.observations.push({ at: "", conceptId: "a", kind: "engagement", evidence: "", note: "" }, { at: "", conceptId: "a", kind: "told", evidence: "", note: "" });
     expect(applyAdvance(s, course, lesson, "next-concept", "r")).toMatch(/Refused: only 0/);
     s.observations.push({ at: "", conceptId: "a", kind: "understanding", evidence: "", note: "" }, { at: "", conceptId: "a", kind: "partial", evidence: "", note: "" });
     expect(applyAdvance(s, course, lesson, "next-concept", "r")).toMatch(/^OK: moved to concept 2/);
