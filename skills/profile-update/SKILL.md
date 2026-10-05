@@ -93,7 +93,8 @@ with the plain version, or nuance that lost them. A student can be curious and s
 ## Rules
 
 - Every change quotes or names its evidence from this session; a reason per field you changed.
-- No change is a fine answer, and the usual one. Do not reword entries for style.
+- No change is a fine answer, and the usual one. Do not reword entries for style: return an entry you are
+  not changing exactly as it stands, quotation marks and punctuation included.
 - No labels or diagnoses (not "visual learner", "anxious", "gifted", "attention"). Describe what they did.
   No learning style: the evidence that matching teaching to one helps is not there.
 - The parent's notes are the parent's. Never rewrite them, and never write guidance that contradicts them.

@@ -35,8 +35,11 @@ Then, in the web app:
 - **Courses > Bundled samples > Ingest** builds the course from `data/samples/photosynthesis-lesson.md`.
   Expand a lesson to see every concept with its key facts, misconceptions and the chunk ids that ground
   it; open "Source passages" to compare against the verbatim text.
-- **Students** adds a persona. A student without a profile gets the intake first; "Reset profile" runs
-  it again with the same student, "Skip intake" on the Session tab goes straight to the lesson.
+- **Students** adds a persona. A student without a profile gets the general intake first, and a student
+  with no record for a course gets the course intake before their first lesson on it; "Reset profile"
+  and each course's "Forget" run them again with the same student, and "Skip the intakes" on the Session
+  tab goes straight to the lesson. The page shows both records, the passage the intake reads, and a box
+  for the parent's own notes.
 - **Session** is the tutor. Under every tutor reply is the same line `npm run chat` prints (TTFT, total,
   round-trips, cache read/written, and any text the model wrote after its tools that was dropped). The
   right-hand panel is `/state`: phase, concept, every observation as it is recorded, what the
@@ -55,7 +58,12 @@ npm run chat -- --learner "Test Student" --grade 7
 What to look at, in order:
 
 1. **Ingestion output.** Two lessons, a handful of concepts each, every concept citing chunk ids. Open `data/courses/<id>.json` and check the key facts are actually in the sample text and nothing was invented.
-2. **Intake.** The first session runs the profiler. Play a real 12-year-old: answer some things well, some badly, ask for the answer once. It should close within about 8 to 12 exchanges and the profile in `data/learners/<id>.json` should quote things you actually said.
+2. **The two intakes.** A new student's first session on a course is three parts that hand over to each other by themselves; watch the phase pill change from `intake` to `course intake` to `teach`.
+   - *The general intake* (about eight exchanges): a warm-up about what you like doing, then the tutor reads a short passage ("Why ice floats", word for word, the same for everyone) and asks you to tell it back, one question that applies it, one harder one, and "how sure are you, 0 to 10?". The two questions come in three sets by grade: answer the first one well and the harder one comes from the next set up; answer it badly and it comes from the set below. It must not teach or hint before the hard question, and it gives the answer only after it. It never mentions your course.
+   - *The course intake* (eight to twelve exchanges): "tell me everything you already know about" the course, then one first-step question per central idea with "how sure, 0 to 10?" in the same breath. It must not say whether you were right, must not teach, and must not put a date or a name from the material into a question. Ask "was that right?" once: it should tell you to hold the thought for the reading. It never asks about faith.
+   - *The lesson* then starts in the same reply as the course intake's last words, and should open a concept you were asked about with what you said ("Before we started you told me...").
+   - On the **Students** tab, within a minute or two: the profile (how they speak, what they did when stuck, depth, at most six guidance items, quoting things you actually said) and, under "by course", where you started on each idea with your own words and your number. The **Courses** tab shows the same in a line per student and can ask again; the **Reports** tab's progress table gains a "Before the course" column once a lesson has been assessed.
+   - `npm run personas:intake` (server running) plays three scripted students through all of this and checks it; `-- --only quiet --keep` runs one and leaves the student on the Students tab. See the header of `apps/server/scripts/intake-personas.ts`.
 3. **Teach phase.** It should open with a retrieval probe, then either teach briefly (if you play a novice) or question first. It must not lecture for more than three or four sentences. One question per turn.
 4. **Answer-seeking.** Say "just tell me the answer." It should decline, give the smallest next step as a question, and the observation list (visible with `/state`) should record it.
 5. **Advance rules.** It cannot move to the next concept without two recorded observations. Watch the `[phase=... obs=...]` line after each turn.

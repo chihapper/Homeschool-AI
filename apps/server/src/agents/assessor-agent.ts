@@ -98,7 +98,10 @@ export function outsideClaimsBlock(session: Session, learnerName: string): strin
  */
 export function startingPointsBlock(knowledge: CourseKnowledge | undefined, concepts: Concept[], learnerName: string): string {
   const starts = (knowledge?.starts ?? []).filter((s) => concepts.some((c) => c.id === s.conceptId));
-  if (!starts.length) return "";
+  // What else was on record before this session. The intake and earlier sessions are conversations the assessor is
+  // not shown, and a student who says "like I said earlier" was once reported as citing something never said (2026-10-05).
+  const notes = [...(knowledge?.priorKnowledge ?? []).map((n) => `- knew: ${n}`), ...(knowledge?.observedGaps ?? []).map((n) => `- had mixed up: ${n}`)].slice(0, 16);
+  if (!starts.length && !notes.length) return "";
   const lines = starts.map(
     (s) =>
       `- ${s.conceptId}: ${s.estimate === "none" ? "nothing yet" : s.estimate === "some" ? "some knowledge" : "could already explain it"}` +
@@ -106,7 +109,12 @@ export function startingPointsBlock(knowledge: CourseKnowledge | undefined, conc
       (s.confidence !== undefined ? ` (sure ${s.confidence} out of 10)` : "") +
       (s.materialSays ? `; the material says: ${s.materialSays}` : ""),
   );
-  return `\n\n<starting_points asked="${knowledge?.intakeAt?.slice(0, 10) ?? ""}">\nWhat ${learnerName} said about these concepts before the course began, with no teaching. Follow the mastery-assessment skill's "Before and after" section.\n${lines.join("\n")}\n</starting_points>`;
+  return (
+    `\n\n<before_this_session>\nFollow the mastery-assessment skill's "Before and after" section.\n` +
+    (starts.length ? `What ${learnerName} said about this lesson's concepts before the course began, with no teaching${knowledge?.intakeAt ? ` (asked ${knowledge.intakeAt.slice(0, 10)})` : ""}:\n${lines.join("\n")}\n` : "") +
+    (notes.length ? `Also on record about ${learnerName} and this course, from that conversation and earlier sessions, none of which you are shown:\n${notes.join("\n")}\n` : "") +
+    `</before_this_session>`
+  );
 }
 
 export async function assessSession(args: { session: Session; learner: Learner; course: Course; lesson: Lesson; knowledge?: CourseKnowledge }): Promise<MasteryReport> {

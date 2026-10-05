@@ -44,14 +44,19 @@ afterwards, in the reading. If they ask "was that right?": "Hold that thought, y
 - `starts`: one entry per concept you asked about, or that their opening account covered.
   - `estimate`: `none` (did not know, or said something unrelated), `some` (a true piece, or a partly
     right account), `can-explain` (the idea in their own words, with the reason).
-  - `said`: their own words, quoted; empty if they did not know.
+  - `said`: their own words, quoted, and nothing of yours inside the quotation (no "(earlier: ...)", no
+    summary); empty if they did not know.
   - `confidence`: the number they gave; -1 if they gave none.
   - `materialSays`: only where their answer *contradicts* the key facts you are given: what the material
     says instead, in one sentence. "Wrong" means wrong by this family's material, never by general
     knowledge. Empty otherwise, including when they simply did not know.
   - `from`: `probe` for a question you asked, `narration` when it came from their opening account.
-- `priorKnowledge`: what they showed they know, one entry per fact, quoted.
-- `observedGaps`: what they got wrong, in their words. Not the things they have simply not met yet.
+- `priorKnowledge`: what they showed they know, one entry per fact. Each entry is a plain statement of
+  what they know, then their words in quotation marks: `Knows the twins were raised by a wolf: "raised by
+  a wolf or something"`. Never an entry that is only a quotation: the tutor and the parent need to read
+  what it shows.
+- `observedGaps`: what they got wrong, the same way: `Says Julius Caesar founded Rome: "Julius Caesar
+  founded Rome way back"`. Not the things they have simply not met yet.
 - `guidance`: at most four instructions for the tutor on this course, from what you saw ("Sure of the
   legend and right about it: start from the two-village account", "Says 9 out of 10 on answers that
   contradict the reading: correct those fully and early"). Often one or two, sometimes none.

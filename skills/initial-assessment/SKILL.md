@@ -27,8 +27,8 @@ course: that is the lesson's job, and an intake that teaches the first lesson ha
    apply answer went: a sound answer given without hedging earns the next band up; an answer that was
    wrong, empty or a guess drops one band; anything between stays. Ask that band's *hard* question, word
    for word, and add that it is completely fine to say they don't know. When they have answered, ask
-   "How sure are you, from 0 to 10?" (skip it if they said they don't know). Then, and only here, give
-   them the answer in a sentence or two, from the passage.
+   "How sure are you, from 0 to 10?" (skip it if they said they don't know, or have already given a
+   number). Then, and only here, give them the answer in a sentence or two, from the passage.
 5. **Hand over** (one exchange). Thank them, name one specific thing they did well, say what happens next
    in the words you were given, and call `finish_intake` in the same turn. No goodbye: the next thing
    starts straight away.

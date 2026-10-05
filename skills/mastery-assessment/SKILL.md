@@ -81,8 +81,13 @@ later observations alone.
 
 ## Before and after
 
-When you are given starting points, they are what the student said about a concept before the course
-began, with no teaching: a baseline. Use them to say what this session added.
+When you are given what was on record before this session, it is a baseline: the starting points are
+what the student said about a concept before the course began, with no teaching, and the notes are what
+earlier conversations showed. Use them to say what this session added.
+
+- The course intake and earlier sessions are separate conversations that you are not shown. When the
+  student says "like I said before", look in the starting points and the notes before calling it
+  something they never said.
 
 - In a concept's `evidence`, and in `parentSummary`, tell apart what they already knew from what they
   learned here: "already knew the legend before the course; the two-village account is new."

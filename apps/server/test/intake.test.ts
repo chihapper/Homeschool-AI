@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { BANDS, COURSE_PROBES, gradeBand, PASSAGE, planSitting, selectProbeConcepts, stepBand, toCourseKnowledge, UNIT_PROBES } from "../src/domain/intake.js";
-import type { Concept, Course, Lesson } from "../src/domain/types.js";
+import { BANDS, COURSE_PROBES, gradeBand, PASSAGE, planSitting, RETELL_PROMPT, selectProbeConcepts, stepBand, toCourseKnowledge, UNIT_PROBES } from "../src/domain/intake.js";
+import type { Concept, Course, Lesson, Session } from "../src/domain/types.js";
+import { passageReading, passageWasRead } from "../src/agents/profiler-agent.js";
+import { startingPointsBlock } from "../src/agents/assessor-agent.js";
 
 /** A course of `sizes.length` lessons, lesson i holding sizes[i] concepts named l<i>c<j>. */
 function courseOf(sizes: number[], prerequisites: Record<string, string[]> = {}, focus?: Course["focus"]): Course {
@@ -151,5 +153,40 @@ describe("the record a course intake leaves behind", () => {
     expect(k.createdAt).toBe("2026-09-01T00:00:00Z");
     expect(k.intakeSessionId).toBe("s1");
     expect(k.pending).toBeUndefined();
+  });
+});
+
+describe("the passage is read once", () => {
+  const base: Session = { id: "s", learnerId: "l", kind: "general-intake", conceptIndex: 0, phase: "intake", transcript: [], observations: [], pendingDirectives: [], startedAt: "" };
+  it("knows from the transcript whether the learner has heard it", () => {
+    expect(passageWasRead(base)).toBe(false);
+    const read: Session = { ...base, transcript: [{ role: "assistant", content: `I am going to read you something short.\n\n${passageReading()}`, at: "" }] };
+    expect(passageWasRead(read)).toBe(true);
+    // The student quoting a line back is not a reading.
+    expect(passageWasRead({ ...base, transcript: [{ role: "user", content: PASSAGE.text, at: "" }] })).toBe(false);
+    expect(passageReading().startsWith(`${PASSAGE.title}. `)).toBe(true);
+    expect(passageReading().endsWith(RETELL_PROMPT)).toBe(true);
+  });
+});
+
+describe("what the assessor is told about before the session", () => {
+  const concepts: Concept[] = [{ id: "founding", name: "The founding", summary: "", keyFacts: [], commonMisconceptions: [], sourceChunkIds: [], prerequisites: [] }];
+  const record = {
+    id: "l__c", learnerId: "l", courseId: "c", createdAt: "", updatedAt: "", intakeAt: "2026-10-05T10:00:00Z", guidance: [],
+    priorKnowledge: ["Knows the wolf story"], observedGaps: ["Says Rome was a seaport on the coast"],
+    starts: [
+      { conceptId: "founding", estimate: "none" as const, said: "Julius Caesar founded it", confidence: 10, materialSays: "Romulus and Remus, by tradition.", from: "probe" as const },
+      { conceptId: "another-lesson", estimate: "some" as const, said: "bread", from: "probe" as const },
+    ],
+  };
+  it("gives the lesson's starting points and the notes on record, and nothing when there is no record", () => {
+    const block = startingPointsBlock(record, concepts, "Jordan");
+    expect(block).toContain('- founding: nothing yet; said "Julius Caesar founded it" (sure 10 out of 10); the material says: Romulus and Remus, by tradition.');
+    expect(block).not.toContain("another-lesson"); // a concept of another lesson is not this report's business
+    expect(block).toContain("- had mixed up: Says Rome was a seaport on the coast");
+    expect(block).toContain("- knew: Knows the wolf story");
+    expect(startingPointsBlock(undefined, concepts, "Jordan")).toBe("");
+    // Notes alone (a student who had sessions but no course intake) still reach the assessor.
+    expect(startingPointsBlock({ ...record, starts: [] }, concepts, "Jordan")).toContain("had mixed up");
   });
 });

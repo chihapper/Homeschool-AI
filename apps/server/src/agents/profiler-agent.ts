@@ -15,6 +15,17 @@ import { config } from "../config.js";
 import { LearnerProfileExtractionSchema, type Learner, type LearnerProfile, type Session } from "../domain/types.js";
 import { BAND_ORDER, BANDS, gradeBand, PASSAGE, RETELL_PROMPT, type Band } from "../domain/intake.js";
 import { buildSystem, streamTurn, transcriptToMessages, type AgentTool, type AgentSpec, type TurnResult } from "./base.js";
+import { licensedBy, withoutAssignedGender } from "./pronouns.js";
+import type { z } from "zod";
+
+/** What an extraction is told about pronouns: none, unless the parent's notes used one for their child. */
+export function genderNote(learner: Learner): string {
+  const first = learner.name.split(/\s+/)[0];
+  const licensed = [...licensedBy(learner.parentNotes)];
+  return licensed.length
+    ? `The parent's notes refer to ${first} as "${licensed[0]}", so you may; otherwise use the name.`
+    : `Nobody has stated ${first}'s gender: write "${first}" or "they", never "he" or "she", whatever the name suggests.`;
+}
 
 export const profilerAgent: AgentSpec = {
   name: "Intake (general)",
@@ -44,7 +55,12 @@ export interface NextStep {
 /** The hand-over an intake is asked to make. The next thing starts in the same breath, so it is never a goodbye. */
 export function handOverWords(next: NextStep | undefined): string {
   if (!next) return 'Nothing follows this conversation. Thank them and say that is everything for now, for example: "Thanks, that\'s everything for now."';
-  if (next.kind === "course-intake") return `Next comes a few questions about what they already know about "${next.courseTitle}". Say so in your own words, for example: "Thanks. Now let's see what you already know about ${next.courseTitle}." Do not ask the first of those questions yourself: it follows straight after your words.`;
+  if (next.kind === "course-intake") {
+    return (
+      `Next comes a few questions about what they already know about "${next.courseTitle}", and the first of them follows straight after your words, in the same breath. ` +
+      `So lead into it without asking anything and without naming the course, for example: "Thanks. Before we start the reading, I have a few quick questions for you."`
+    );
+  }
   return `Next comes the lesson${next.lessonTitle ? ` "${next.lessonTitle}"` : ""}. Say so in your own words, for example: "Thanks. Now let's start today's reading." Do not start the lesson yourself: it follows straight after your words.`;
 }
 
@@ -82,8 +98,10 @@ function contextBlock(ctx: Pick<ProfilerContext, "session" | "learner" | "next">
   if (forExtraction) return parts.join("\n\n");
   parts.push(
     `<what_happens_next>\n${handOverWords(ctx.next)}\n</what_happens_next>`,
-    "In step 2, say your one sentence and call read_passage in the same turn; the passage and the request to tell it back are then read out for you, and that turn is over. " +
-      `The request is always these words, so never ask it yourself: "${RETELL_PROMPT}" ` +
+    (passageWasRead(ctx.session)
+      ? "The passage has been read to the learner, once, and is not read again: however short their retelling, go on from it. "
+      : "In step 2, say your one sentence and call read_passage in the same turn; the passage and the request to tell it back are then read out for you, and that turn is over. " +
+        `The request is always these words, so never ask it yourself: "${RETELL_PROMPT}" `) +
       "When the five steps are done (six to eight exchanges), speak the hand-over and call finish_intake in the same turn: speak first, then call the tool. " +
       "The hand-over asks no question. Nothing you write after finish_intake reaches the learner. " +
       "On every other turn, end with your single question and call no tool.",
@@ -130,8 +148,16 @@ export function profilerTurn(ctx: ProfilerContext, signal?: AbortSignal): AsyncG
   const system = buildSystem(profilerAgent, [contextBlock(ctx)]);
   let messages = transcriptToMessages(ctx.session.transcript);
   if (!messages.length) messages = [{ role: "user", content: "(The student has just joined. Greet them by name in a few words and begin with the warm-up.)" }];
+  // The passage is read once. Told so in the tool's description, the model still asked for it a second time when
+  // a quiet student's retelling was thin (2026-10-05), so once it has been read the tool is simply not offered.
+  const tools = passageWasRead(ctx.session) ? [finish as AgentTool<never>] : [read as AgentTool<never>, finish as AgentTool<never>];
   // Room for a little thinking before a short turn: max_tokens covers both.
-  return streamTurn({ spec: profilerAgent, system, messages, tools: [read as AgentTool<never>, finish as AgentTool<never>], maxTokens: 1000, signal });
+  return streamTurn({ spec: profilerAgent, system, messages, tools, maxTokens: 1000, signal });
+}
+
+/** The passage has already been read to the learner in this session. */
+export function passageWasRead(session: Session): boolean {
+  return session.transcript.some((t) => t.role === "assistant" && t.content.includes(PASSAGE.text));
 }
 
 /** The passage as it is read out after the agent's lead-in: title, text, and the request to tell it back. */
@@ -144,7 +170,7 @@ export async function finalizeProfile(ctx: Pick<ProfilerContext, "session" | "le
   const system = buildSystem({ ...profilerAgent, model: config.model, effort: config.analysisEffort }, [contextBlock(ctx, true)]);
   const transcript = ctx.session.transcript.map((t) => `${t.role === "user" ? ctx.learner.name : "Tutor"}: ${t.content}`).join("\n");
   // Streamed, like the other offline extractions: never lose a long high-effort generation to the request timeout.
-  const { message, parsed } = await streamParsed<LearnerProfile>({
+  const { message, parsed } = await streamParsed<z.infer<typeof LearnerProfileExtractionSchema>>({
     model: config.model,
     // The profile is short, but thinking at high effort counts against this too (8,000 was cut off, 2026-09-27).
     max_tokens: 32_000,
@@ -155,12 +181,17 @@ export async function finalizeProfile(ctx: Pick<ProfilerContext, "session" | "le
         role: "user",
         content:
           `Here is the whole intake conversation with ${ctx.learner.name}. Produce the learner profile, following "Producing the profile" in the skill. ` +
-          `Every field must rest on something in the transcript.\n\n<transcript>\n${transcript}\n</transcript>`,
+          `Every field must rest on something in the transcript. ${genderNote(ctx.learner)}\n\n<transcript>\n${transcript}\n</transcript>`,
       },
     ],
   });
   assertNotRefused(message);
   if (message.stop_reason === "max_tokens") throw new Error("Profile extraction was cut off at the output limit.");
   if (!parsed) throw new Error("Profile extraction returned no parsable output.");
-  return parsed;
+  // Checked in code, because the skill's rule alone did not hold: see agents/pronouns.ts.
+  return withoutAssignedGender(parsed, LearnerProfileExtractionSchema, {
+    name: ctx.learner.name,
+    parentNotes: ctx.learner.parentNotes,
+    texts: (p) => [p.verbalLevel, p.parentSummary, ...p.interests, ...p.tutoringGuidance],
+  });
 }

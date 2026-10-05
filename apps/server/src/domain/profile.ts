@@ -102,6 +102,19 @@ export function normalizeCourseNotes(n: CourseNotes): CourseNotes {
   };
 }
 
+/** What an entry says, whatever it is wrapped in: case, punctuation, quotation marks and spacing set aside. */
+const entryKey = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+/**
+ * Keep the old wording of every entry the revision only re-punctuated. The pass is told not to reword for style
+ * and still does: on 2026-10-05 it took the quotation marks off twenty-two course notes, which the parent would
+ * have seen as twenty-two removals and twenty-two additions that changed nothing.
+ */
+export function keepWording(before: string[], after: string[]): string[] {
+  const old = new Map(before.map((item) => [entryKey(item), item] as const));
+  return after.map((item) => old.get(entryKey(item)) ?? item);
+}
+
 /** Every difference between two profiles, one entry per changed scalar and per list item added or removed. The parent summary is not a fact about the learner and is left out. */
 export function diffProfile(before: LearnerProfile, after: LearnerProfile, reasons: ProfileRevision["reasons"] = []): ProfileChange[] {
   const why = (field: ProfileField): string => norm(reasons.find((r) => r.field === field)?.why ?? "");
@@ -175,6 +188,8 @@ export function applyRevision(learner: Learner, revision: ProfileRevision, meta:
   const before = learner.profile;
   if (!before) throw new Error(`${learner.name} has no profile to revise; the intake writes the first one.`);
   const candidate = normalizeProfile(revision.profile, before);
+  candidate.interests = keepWording(before.interests, candidate.interests);
+  candidate.tutoringGuidance = keepWording(before.tutoringGuidance, candidate.tutoringGuidance);
   const previousHeld = learner.profileHistory?.at(-1)?.held ?? [];
   const changes: ProfileChange[] = [];
   const held: ProfileChange[] = [];
@@ -189,7 +204,12 @@ export function applyRevision(learner: Learner, revision: ProfileRevision, meta:
   }
   // The course notes are all fast: what a student knows about a course changes with every session on it.
   const notesBefore = courseBefore ? normalizeCourseNotes(courseBefore) : EMPTY_NOTES;
-  const notesAfter = revision.course ? normalizeCourseNotes(revision.course) : undefined;
+  const proposed = revision.course ? normalizeCourseNotes(revision.course) : undefined;
+  const notesAfter = proposed && {
+    priorKnowledge: keepWording(notesBefore.priorKnowledge, proposed.priorKnowledge),
+    observedGaps: keepWording(notesBefore.observedGaps, proposed.observedGaps),
+    guidance: keepWording(notesBefore.guidance, proposed.guidance),
+  };
   const courseChanges = notesAfter ? diffCourseNotes(notesBefore, notesAfter, revision.reasons) : [];
   changes.push(...courseChanges);
 

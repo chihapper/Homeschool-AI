@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyRevision, depthOf, describeChange, diffCourseNotes, diffProfile, EMPTY_NOTES, MAX_COURSE_GUIDANCE, MAX_GAPS, MAX_GUIDANCE, MAX_INTERESTS, MAX_PRIOR_KNOWLEDGE, normalizeCourseNotes, normalizeProfile, studentLevel, undoProfileUpdate, type ProfileRevision } from "../src/domain/profile.js";
+import { applyRevision, depthOf, describeChange, diffCourseNotes, diffProfile, EMPTY_NOTES, keepWording, MAX_COURSE_GUIDANCE, MAX_GAPS, MAX_GUIDANCE, MAX_INTERESTS, MAX_PRIOR_KNOWLEDGE, normalizeCourseNotes, normalizeProfile, studentLevel, undoProfileUpdate, type ProfileRevision } from "../src/domain/profile.js";
 import { reviseContext } from "../src/agents/profile-agent.js";
 import type { Course, CourseKnowledge, CourseNotes, Learner, LearnerProfile, MasteryReport, ProfileUpdate, Session } from "../src/domain/types.js";
 
@@ -193,5 +193,22 @@ describe("revising the profile after a session", () => {
     expect(full).toContain('startingPoints (from the course intake on 2026-09-26; a baseline, not yours to change):\n  - The founding legend: some; said "Romulus built it alone" (sure 8/10); the material says: two villages merged');
     expect(full).toContain("<parent_notes>");
     expect(full).toContain("He shuts down if rushed.");
+  });
+});
+
+describe("a revision that only re-punctuates an entry changes nothing", () => {
+  it("keeps the old wording when the words are the same, and still sees a real change", () => {
+    const before = ['"Julius Caesar founded Rome way back"', "Knows the Tiber runs through Rome"];
+    expect(keepWording(before, ["Julius Caesar founded Rome way back", "knows the Tiber runs through Rome.", "Knows the seven hills"])).toEqual([...before, "Knows the seven hills"]);
+    // The pass took the quotation marks off every course note (2026-10-05): nothing to show the parent.
+    const quoted: CourseNotes = { priorKnowledge: ['"Mostly bread, olives, and wine"'], observedGaps: ['"They spoke Italian"'], guidance: [] };
+    const bare: CourseNotes = { priorKnowledge: ["Mostly bread, olives, and wine"], observedGaps: ["They spoke Italian", "Rome was right on the coast"], guidance: [] };
+    const { course, update } = applyRevision(learner, { ...revision({}), course: bare }, meta, quoted);
+    expect(update?.changes).toEqual([{ field: "observedGaps", from: "", to: "Rome was right on the coast", why: "" }]);
+    expect(course?.priorKnowledge).toEqual(quoted.priorKnowledge);
+    expect(course?.observedGaps).toEqual(['"They spoke Italian"', "Rome was right on the coast"]);
+    // The same for the profile's own lists.
+    const same = applyRevision(learner, revision({ interests: ["Soccer."], tutoringGuidance: ["open with an example"] }), meta);
+    expect(same.update).toBeUndefined();
   });
 });

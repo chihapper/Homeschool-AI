@@ -1,6 +1,7 @@
 # The two intakes: research and design
 
-Written 2026-09-27. Status: **proposal**, not built. It answers two questions the user put on 2026-09-27: what
+Written 2026-09-27. Status: **built on 2026-10-05** (§0 says what exists and where it differs); the rest is the
+proposal as written, kept for its reasoning and sources. It answers two questions the user put on 2026-09-27: what
 should the app ask a new student, and what can the agents actually use from the answers? Every element below
 says where it came from, why, and whether it fits our model. The three research reports it rests on are
 appended in full (Appendix A: AI tutoring products; B: schools, tutoring companies and homeschool publishers;
@@ -16,6 +17,100 @@ Two features, by the user's decision:
 
 A rule that runs through both: **the general intake never uses the parent's course as its material.** The
 old intake did, and taught lesson one before the lesson (sessions of 2026-09-15 and 2026-09-21).
+
+## 0. As built (2026-10-05)
+
+Stages A to D of §8 are built, on branch `feature/intakes`. This section says what exists, where, and where
+it differs from the proposal below, which is kept as written for its reasoning and sources.
+
+| Piece | Where | In short |
+|---|---|---|
+| Two records | `LearnerProfileSchema`, `CourseKnowledgeSchema` in `domain/types.ts`; `data/course-knowledge/` | The profile lost `intakePreferences`, `priorKnowledge` and `observedGaps`. The course record holds starting points, prior knowledge, gaps, course guidance and a summary for the parent. `Learner.parentNotes` is the parent's box. |
+| Migration | `store/migrate.ts`, run when a server or CLI starts | Entries tagged with a course ("Rome: ...") moved to that course's record, untagged ones to the course of the student's first session. Originals are in `data/backups/intake-split/`. |
+| The passage and its questions | `domain/intake.ts` | "Why ice floats", as proposed. The band questions that §7.1 left open are written (below). |
+| General intake | `agents/profiler-agent.ts`, skill `initial-assessment` | The agent calls `read_passage` and the orchestrator speaks the passage word for word, once. |
+| Course intake | `agents/course-intake-agent.ts`, skill `course-intake`, `selectProbeConcepts` | Six questions up to twelve kept lessons, eight beyond: half from the first two kept lessons, one from each later stretch, the concept most others build on first. |
+| The sitting | `planSitting`, `createSession`, `continueSitting` in `orchestrator/session.ts` | Each intake is its own session with its own transcript. The hand-over and the next opening are one reply. |
+| Records in the background | `writeIntakeRecord` | A pending mark on the learner or the course record while it is written; a failed write is shown with a way to try again, and the conversation is never held twice. |
+| Tutor | the learner block and `startingPoint` in `agents/tutor-agent.ts`; skills `learner-adaptation`, `socratic-method` | Entry point from what the student knows; opens a probed concept with their own words; a confident wrong answer is corrected early and in full. |
+| Assessor and progress | `startingPointsBlock`; `buildProgress(..., knowledge)`; skill `mastery-assessment` | "Before and after" in the report; a "Before the course" column in the progress table. |
+| Profile pass | `agents/profile-agent.ts`, `domain/profile.ts`, skill `profile-update` | Revises both records; undo puts both back. |
+| The parent's side | Students, Courses, Session and Reports tabs | Both records, the notes box, the passage, why there is no learning style, "ask now" per student on a course, the sitting described before it starts. |
+| Scripted personas | `apps/server/scripts/intake-personas.ts` | Three students through both intakes on a running server, with checks. |
+
+**The questions, by band.** One passage; the intake starts in the student's grade band, and the hard question
+comes from the next band up after a sound answer, the band below after a weak one.
+
+| Band | Apply (step 3) | The hard one (step 4) |
+|---|---|---|
+| A, grades 4 to 6 (and below) | An ice cube dropped in a full glass: where does it end up, and what does the passage say is the reason? | Fish live through the winter under the ice. If ice sank, what would happen to the lake, and to the fish? |
+| B, grades 7 to 9 | A bottle filled to the top, sealed, put in the freezer: what happens to it, and why? | The ice works like a lid: step by step, why does ice form on top, and how does that keep the fish alive? |
+| C, grade 10 and up | A pipe bursts on a freezing night: why, and would it if water behaved like most things? | Suppose water were not the odd one out: a winter in that lake step by step, and the one fact everything depends on. |
+
+**Where it differs from the proposal, and why.**
+
+1. **Faith is never asked about.** §5 says religion is never asked of a child, and the Rome unit has a lesson on
+   God's plan. The course intake leaves out any concept whose name or summary trips the guard that already keeps
+   scripture away from Wikipedia (`aboutFaith`), and asks about the next most central one instead; the lesson
+   teaches the concept from the family's material as before. A course with nothing left to ask has no course
+   intake.
+2. **The passage is spoken by the orchestrator, not the model**, so every student hears the same words, and it is
+   read once: after the first reading the tool is no longer offered (a quiet student's thin retelling got a
+   second reading in a test run).
+3. **A concept the opening narration covered is not asked again** (the proposal said "a shorter probe or none").
+4. **`challengeTolerance` keeps its name and three values**, and is shown to the parent as "When stuck" with a
+   sentence per value. What the student actually did is in the guidance.
+5. **The lesson does not wait for the notes.** A record takes about a minute to write. Until it lands, the lesson
+   that follows a course intake reads the intake's exchange itself, so the first concept still opens with the
+   student's own answer.
+6. **The records are checked in code for a gender nobody stated** (`agents/pronouns.ts`). The skill's rule alone
+   did not hold: test runs wrote "her" for a Maya and "He" for an Eli. A record that trips the check is sent
+   back once to be reworded. A pronoun in the parent's notes is the only thing that licenses one.
+7. **Course guidance has a ceiling of four items**, like the profile's six.
+8. **Not built:** read-aloud fluency in voice mode (§7.4, waits on the COPPA question in #13); a periodic refresh
+   of the general intake ("Reset profile" runs it again); a per-lesson pre-assessment (the tutor's opening
+   retrieval question does that job, as decided on 2026-09-28).
+
+**Stage D: three scripted students, both intakes, on the running server** (2026-10-05; tutor on Sonnet 5.5, records
+written by Opus 5.5, the students played by Sonnet 5.5, text mode, the Ancient Rome unit). Run it again with
+`npm run personas:intake` while the server is up.
+
+| | Confident, grade 7 | Quiet, grade 5 | Bluffer, grade 9 |
+|---|---|---|---|
+| General intake, exchanges (limit 8) | 5 | 7 | 5 to 6 |
+| Its two questions | band B, then band C: stepped up | band A, then band A | band B, then band A: stepped down after a right answer with a wrong reason |
+| Course intake, exchanges (limit 12) | 8 to 10 | 4: stopped after two "I don't know"s in a row | 10 |
+| Hand-over replies, closing words and next opening together | 7.5 to 10.8 s, then 4.9 to 5.2 s | 6.2 to 6.9 s, then 5.2 to 5.5 s | 9.8 to 11.1 s, then 4.2 to 5.3 s |
+| How the lesson opened | with the legend as they had told it | "you said you didn't know how Rome began", then taught first | "you told me Julius Caesar founded Rome, 10 out of 10 sure. Here is exactly what your reading says" |
+
+The words stream from the first second of a hand-over reply; the seconds above are for the whole of it, two
+calls back to back. In every run the passage was read word for word, the apply question matched the student's
+grade band, nothing was given away before the hard question, the course intake never said whether an answer
+was right and put no date or figure in a question, and "that's right, isn't it?" got "Hold that thought, you'll
+see in the reading." Checks passed: 59 of 63 on the first run of all three, 67 of 69 on the second, then 23 of
+23 (quiet) and 24 of 24 (bluffer, through to a report). What the misses were:
+
+- **Assigned gender** (runs 1 and 2): "her" and "He" in the records. Now checked in code (item 6 above); the
+  second run and after were clean.
+- **The passage read twice** (run 2, the quiet student): fixed by no longer offering the tool once it is read.
+- **The hand-over repeated itself** ("…what you already know about Ancient Rome. Tell me everything you already
+  know about Ancient Rome."): the general intake now leads in without naming the course.
+- **One question without "how sure"** (the quiet student's second question, both runs): the tutor drops it
+  after an "I don't know" on the question before. The student gave a number anyway; left as it is.
+- **Three were my checks, not the product**: counting an apostrophe as a quotation mark, counting a line written
+  for the tutor as the student's words, and expecting "how sure?" when the student had already said.
+
+Two things the report run showed and that are fixed: the profile pass took the quotation marks off twenty-two
+course notes, which would have shown the parent twenty-two removals and twenty-two additions (a revision that
+only re-punctuates an entry now changes nothing, `keepWording`), and the assessor called a student's "like I
+said earlier" a claim never made, because the course intake is a conversation it does not see (it is now given
+the notes on record as well as the starting points). The report itself used the baseline as intended: "Before
+the course, Jordan was completely sure (10 out of 10) that Julius Caesar founded Rome… That change is real
+progress, but it came right after the tutor read the passage aloud, so it is not yet solid recall."
+
+Not covered by these runs: voice mode (the hand-over is the same code path, with the socket following the
+session; not yet heard aloud), a real child, and estimates on a guess that happens to be right, which the
+record files as "some knowledge" with a low number rather than "nothing yet".
 
 ## 1. What the research says, in short
 

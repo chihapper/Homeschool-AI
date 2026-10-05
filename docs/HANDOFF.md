@@ -12,25 +12,22 @@ nothing outside that material, and the parent gets a mastery report per session 
 across sessions. Fastify server with four agents (curriculum, profiler, tutor, assessor) and a
 deterministic orchestrator; Vite/React front end; file-backed JSON in `data/` (gitignored).
 
-**State on 2026-09-28:** `main` = `1e96861`, pushed, and `feature/dynamic-profile` points at the same
-commit. Everything is merged: the voice work (ElevenLabs, Inworld, the lookup fix), facts from outside the
-reading (Wikipedia checks, `a91f2e4`), the dynamic profile (revised after every report, held slow fields,
-undo, `cc200af`), the intake research and design (`docs/INTAKE.md`), the competitive check
-(`docs/COMPETITORS.md`), and the user's intake decisions of 2026-09-28. 194 unit tests; typecheck clean in
-both workspaces. The Rome unit (`data/courses/ancient-rome-muemem4s.json`, 31 lessons) has been taught in
-about fifteen sessions; Test Student's profile carries one live revision. Text mode works with an Anthropic
-key alone; browser voice works through Inworld or ElevenLabs (Hume's balance is exhausted). The user's own
-microphone session in Chrome has not happened yet. The user intends to pull the repo on a second laptop and
-host it there: git carries neither `.env` nor `data/` (see the verification loop). Next build: stage A of the
-intakes, the record split (`docs/INTAKE.md` §8).
-
-**State on 2026-09-30:** branch `feature/models-5-5` (off `main` at `807d069`) carries the move to Claude
-Opus 5.5 and Sonnet 5.5: what each model accepts is one table in `apps/server/src/llm/models.ts`, IDs are
-normalised (the user's `claude-sonnet-5.5` was a 404), Settings checks a typed ID with the API before saving,
-and the runtime settings on this machine now hold `claude-opus-5-5` / `claude-sonnet-5-5` (in
-`data/settings.json`, which wins over `.env`; the user's `.env` still says the 5 models). Verified live: doctor
-ping, three scripted turns on Sonnet 5.5, 201 unit tests. Not merged: the user decides. The tutor denying it had supplied a date is fixed on
-`fix/told-not-recalled` (2026-10-05, work queue item 0000a), stacked on the models branch.
+**State on 2026-10-05:** three branches are stacked on `main` (`807d069`), all pushed, none merged:
+`feature/models-5-5` (`3ce1589`: Opus 5.5 and Sonnet 5.5, one table of what each model accepts),
+`fix/told-not-recalled` (`beb4e35`: the tutor keeps track of what it has already said), and
+`feature/intakes` on top (the profile split into two records, the general intake, the course intake, scripted
+personas). Merging `feature/intakes` into `main` brings all three as a fast-forward. **The merge is the
+user's call**: they approved the fix and the intake build on 2026-10-05 and have not said to merge.
+248 unit tests; typecheck clean in both workspaces. On this machine the runtime settings hold
+`claude-opus-5-5` / `claude-sonnet-5-5` (`data/settings.json`, which wins over `.env`; the user's `.env` still
+names the 5 models), and the two saved students (Test Student, Sam) were converted to the two-record shape
+when the server started (`store/migrate.ts`; originals in `data/backups/intake-split/`). The Rome unit
+(`data/courses/ancient-rome-muemem4s.json`, 31 lessons) has about fifteen lesson sessions on it. Text mode
+works with an Anthropic key alone; browser voice works through Inworld or ElevenLabs (Hume's balance is
+exhausted). **Next: the user tests the intakes themselves** (`docs/TESTING.md`, step 2), in text and then
+by voice; the intake hand-over has not been heard aloud yet, and the user's own microphone session in Chrome
+has still not happened. The user intends to pull the repo on a second laptop: git carries neither `.env` nor
+`data/` (see the verification loop), and until the merge the work is on the `feature/intakes` branch.
 
 **Goal and gate:** get the tool in front of homeschool families as an add-on study partner. The next
 gate is a repeatable pedagogy evaluation (issue #6) so skill edits stop being judged by hand, then a
@@ -38,6 +35,19 @@ decision on hosting (issue #13) before any pilot. No deadline has been set.
 
 ## Standing decisions
 
+- **A student has two records, and two intakes write them** (user, 2026-09-27 and 2026-09-28; built
+  2026-10-05). The general intake runs once per student, on a passage built into the app, never on the
+  family's course (the old intake taught lesson one before the lesson, twice). The course intake runs once
+  per student per course, asks and never teaches. No learning-style field: the middle path the user chose is
+  observed behaviour-when-confused in the guidance, the parent's own words in a notes box, and a sentence on
+  the Students tab saying why. Questions come in three bands by grade and step up or down on the answer.
+  "How sure, 0 to 10?" rides in the same turn as each course-intake question.
+- **The course intake never asks about faith** (Claude's reading of `docs/INTAKE.md` §5, 2026-10-05; told
+  to the user, not yet confirmed by them). Concepts about scripture or faith are left to the lesson, where
+  the family's material speaks. If the user wants them asked on their own curriculum, it is one predicate
+  (`notAskedAbout` in `orchestrator/session.ts`).
+- **Scripted test students are deleted after a run** unless `--keep`; the user's two test students and their
+  records are theirs.
 - **Scope is an add-on, not a curriculum engine** (user, 2026-09-23). One unit of the family's own
   material at a time, Socratic sessions, a parent's progress view. No scheduling, no planning of
   coursework, no grading of publisher tests, no records. Reason: the three curricula the user chose
@@ -130,7 +140,11 @@ Before any commit:
 npm test && npm run typecheck
 ```
 
-184 tests as of 2026-09-25, all pure (no network, no binaries). The end-to-end check for tutoring
+248 tests as of 2026-10-05, all pure (no network, no binaries). For the two intakes there is a ready-made
+end-to-end check: `npm run personas:intake`, with the server running, plays three scripted students
+(confident, quiet, a bluffer) through the general intake, the course intake and the start of the lesson,
+waits for both records, and prints the transcripts and about twenty checks each (`--only quiet`, `--keep`,
+`--report`; real model calls, about three minutes). The end-to-end check for other tutoring
 changes is a scripted session through the HTTP API: create a session, post persona lines to
 `/api/sessions/:id/message` reading the SSE stream until `reflected`, then `POST /end` and read the
 report and `GET /api/progress/:learnerId/:courseId`. The Python prototype is pasted into issue #6;
@@ -240,17 +254,33 @@ the product (#13, #18, #23, #26). Ordering and blockers only here.
    block of its own for the told figures set off late lookups in the speaking call (18 in 10 replies), which
    is why they ride in the final instruction there. Bash commands over about 8,000 characters are cut off by
    the shell wrapper on this machine: keep heredoc edits small or write a file.
-0000. Next, once the user reacts to `docs/INTAKE.md` (written 2026-09-27, research plus design, three Opus 5.5
-   research reports appended): the two intakes. The user's structure: a general intake once per student
-   (the learner profile, "how they learn") and a course intake once per student per course (the
-   course-knowledge record, "where they start on this content"); build order A the record split, B the
-   general intake, C the course intake, D scripted personas. The design's main moves and their evidence are in
-   the doc: drop `intakePreferences` (learning-style matching has no evidence), move prior knowledge and gaps
-   to the course record, add the parent's notes, probe prior knowledge with first-step questions plus
-   "how sure are you?", never teach during an intake, use a built-in neutral passage for the general intake
-   (never the parent's course), hand over instead of saying goodbye, write records in the background. Waiting
-   on the user: the field changes, the passage, whether to ask confidence after every probe, and the merge of
-   `feature/dynamic-profile` (`cc200af`).
+0000. Done 2026-10-05 on `feature/intakes` (the user: "go with your proposed fix then move forward with
+   intakes"): the two intakes, stages A to D of `docs/INTAKE.md` §8. What exists and where it differs from
+   the proposal is `docs/INTAKE.md` §0; the conventions are in CLAUDE.md. In one breath: a student has two
+   records (the learner profile, how to work with them; a course-knowledge record per course, what they know
+   about it, with starting points from the course intake); a sitting is a chain of sessions (general intake on
+   a built-in passage, course intake of one first-step question per central concept, lesson), each handing
+   over inside one reply while its record is written in the background; the tutor opens a concept from the
+   student's own answer, the assessor reports before and after, the profile pass revises both records, and
+   undo puts both back. Verified live by three scripted students (`npm run personas:intake`): 59 of 63 checks,
+   then 67 of 69, then 23 of 23 and 24 of 24 after the fixes those runs prompted (assigned pronouns, the
+   passage read twice, a repeated hand-over line, a revision that only re-punctuated notes, the assessor
+   not seeing the intake). The web pages were checked by reading the rendered text (the app's browser pane
+   would not take screenshots that day), and the notes, undo, forget, ask-now and skip flows through the API.
+   **Left open, in order of how much they matter:**
+   (a) not heard by voice yet: the hand-over reply is two calls back to back (4 to 11 s in all, words from
+   the first second), and the passage is about a minute of speech; listen for the join and for barge-in
+   during the reading;
+   (b) faith is never asked about in the course intake (`aboutFaith` on a concept's name and summary): my
+   call from §5 of the design, told to the user, who may want it otherwise for their own curriculum;
+   (c) a correct guess is filed as "some knowledge" with a low number, not "nothing yet";
+   (d) the tutor sometimes drops "how sure?" on the question after an "I don't know";
+   (e) Sam's Rome record carries a gap from the 2026-09-30 session that the told fix would no longer file
+   ("could not produce the founding date": the tutor had told him); the next pass on that course can clear
+   it, or the parent can Forget the record;
+   (f) in a lesson the tutor asks for a line "word for word" although the student may not have the reading
+   in front of them (a scripted student said so; the report repeated it to the parent);
+   (g) read-aloud fluency, a periodic refresh of the general intake: not built, by decision.
 000. In progress 2026-09-27 on `feature/dynamic-profile` (uncommitted): the dynamic profile (#28). Built:
    `agents/profile-agent.ts` (skill `profile-update`) proposes the whole revised profile with a reason per field;
    `domain/profile.ts` lands fast fields, holds slow ones (pace, challenge tolerance, verbal level, depth, intake
@@ -337,6 +367,29 @@ the product (#13, #18, #23, #26). Ordering and blockers only here.
 
 ## Landmines
 
+- **A key removed from a record's schema is dropped silently the next time the record is saved** (the store
+  parses with Zod, which strips unknown keys). Moving or removing a persisted field needs a migration that
+  runs before anything writes: `store/migrate.ts`, called when a server or CLI starts, never on import (tests
+  import the store).
+- **An intake's record is written in the background, never before the reply.** The hand-over line and the next
+  session's opening are one reply (`respondTurn` continues into the next session); the profile or the course's
+  starting points land a minute later (`writeIntakeRecord`). Awaiting the extraction before answering brings
+  back thirty seconds of silence and "wait are we done already?" (2026-09-15).
+- **Editing a server source file restarts the dev server** (`tsx watch`) and kills whatever it was writing in
+  the background: an intake's record, a profile pass, a reference check. The pending marks
+  (`Learner.profilePending`, `CourseKnowledge.pending`) are how the next `createSession` picks an intake's
+  record up again; a profile pass that dies is simply lost. Do not edit `apps/server/src` while a scripted run
+  is in flight.
+- **The passage is spoken by the orchestrator and read once.** The model asks with `read_passage`; once the
+  transcript holds the passage the tool is no longer offered. Never let the model read or paraphrase it.
+- **No learning-style field, and no question about how a child "learns best"**, however it is renamed. The
+  entry point of a concept follows what the student knows about it. `intakePreferences` was removed on purpose.
+- **A record must not give a child a gender nobody stated.** The intake extractions are checked in code
+  (`agents/pronouns.ts`); anything new that writes prose about a student needs the same check, because the
+  rule in a skill does not hold on its own.
+- **Bash commands over about 8,000 characters are cut off by the shell wrapper on this machine**, which shows
+  up as "unexpected EOF while looking for matching quote". Keep heredoc edits small, or write the text to a
+  file and apply it with a script.
 - **Never read `lesson.conceptIds` live inside a running session.** Every read goes through
   `walkedConceptIds` in `apps/server/src/domain/focus.ts` (the frozen `Session.conceptIds`). Reading
   the lesson directly reintroduces the bug where a mid-session Focus edit changes the walk and

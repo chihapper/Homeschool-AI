@@ -13,7 +13,8 @@ import { assertNotRefused, streamParsed } from "../llm/client.js";
 import { config } from "../config.js";
 import { CourseIntakeExtractionSchema, type Concept, type Course, type CourseIntakeExtraction, type Learner, type Session } from "../domain/types.js";
 import { buildSystem, streamTurn, transcriptToMessages, type AgentTool, type AgentSpec, type TurnResult } from "./base.js";
-import { handOverWords, type NextStep } from "./profiler-agent.js";
+import { genderNote, handOverWords, type NextStep } from "./profiler-agent.js";
+import { withoutAssignedGender } from "./pronouns.js";
 
 export const courseIntakeAgent: AgentSpec = {
   name: "Intake (course)",
@@ -97,7 +98,7 @@ export function courseIntakeTurn(ctx: CourseIntakeContext, signal?: AbortSignal)
       {
         role: "user",
         content: ctx.carriedOn
-          ? `(The learner is already with you. You have just said to them: "${ctx.carriedOn}" Carry straight on with the opening question about what they already know, without greeting them again and without repeating that sentence.)`
+          ? `(The learner is already with you. You have just said to them: "${ctx.carriedOn}" Carry straight on from those words with the opening question, without greeting them again and without repeating that sentence.)`
           : `(The student has just joined. Greet them by name in a few words, say you would like to hear what they already know about ${ctx.course.title} before starting it, and ask the opening question.)`,
       },
     ];
@@ -119,12 +120,17 @@ export async function extractCourseKnowledge(ctx: Pick<CourseIntakeContext, "ses
         role: "user",
         content:
           `Here is the whole course-intake conversation with ${ctx.learner.name} about "${ctx.course.title}". Produce the record, following "Producing the record" in the skill. ` +
-          `Use only the concept ids given above. Every entry must rest on something ${ctx.learner.name} said.\n\n<transcript>\n${transcript}\n</transcript>`,
+          `Use only the concept ids given above. Every entry must rest on something ${ctx.learner.name} said. ${genderNote(ctx.learner)}\n\n<transcript>\n${transcript}\n</transcript>`,
       },
     ],
   });
   assertNotRefused(message);
   if (message.stop_reason === "max_tokens") throw new Error("The course-intake extraction was cut off at the output limit.");
   if (!parsed) throw new Error("The course-intake extraction returned no parsable output.");
-  return parsed;
+  // The student's own words (`said`) are left alone; everything the record says in its own voice is checked.
+  return withoutAssignedGender(parsed, CourseIntakeExtractionSchema, {
+    name: ctx.learner.name,
+    parentNotes: ctx.learner.parentNotes,
+    texts: (r) => [r.baselineSummary, ...r.priorKnowledge, ...r.observedGaps, ...r.guidance, ...r.starts.map((s) => s.materialSays)],
+  });
 }

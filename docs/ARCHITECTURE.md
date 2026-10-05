@@ -27,11 +27,12 @@ and giveaway counts. What is deliberately not built is in [ROADMAP.md](ROADMAP.m
 | Agent | When it runs | Skills | Output |
 |---|---|---|---|
 | **Curriculum Agent** | On upload | `curriculum-parsing`, `grounding` | `Course` (lessons, concepts, objectives, guiding questions, cited source chunks) |
-| **Profiler Agent** | First session with a new learner | `initial-assessment`, `voice-conversation`, `grounding` | Intake conversation, then the first `LearnerProfile` (kept current afterwards by the Profile Reviser) |
+| **Intake (general)** (`profiler-agent.ts`) | A new student's first session, once | `initial-assessment`, `voice-conversation` | A six-to-eight-exchange conversation on a passage built into the app (never the family's course), then, written in the background, the first `LearnerProfile`: how to work with this student on any course |
+| **Intake (course)** (`course-intake-agent.ts`) | A student's first session on each course, once | `course-intake`, `voice-conversation` | One first-step question on each of six to eight central concepts, with "how sure, 0 to 10?" and no teaching, then, written in the background, the `CourseKnowledge` record: where this student starts on this course |
 | **Socratic Tutor** | Every teaching turn (voice or text) | `socratic-method`, `learner-adaptation`, `grounding`, `voice-conversation` | Spoken turn + tool calls (`lookup_source`, `record_observation`, `advance`) |
 | **Assessor Agent** | When a session ends | `mastery-assessment`, `grounding` | `MasteryReport` (0-4 per concept, misconceptions, grounding audit, parent/student summaries) |
 | **Reference Checker** | In the background, when the reflect pass flags a fact from outside the material | `reference-check` | A verdict on one fact from Wikipedia passages (supported, contradicted, complicated, not found), with a word-for-word quotation and a link to the version read |
-| **Profile Reviser** | In the background, after every mastery report | `profile-update` | A revised `LearnerProfile` with a reason per changed field; `domain/profile.ts` lands the fast fields, holds the slow ones until two sessions agree, and records every change with undo |
+| **Profile Reviser** | In the background, after every mastery report | `profile-update` | A revised `LearnerProfile` and revised notes for the course's `CourseKnowledge` record, with a reason per changed field; `domain/profile.ts` lands the course notes and the profile's fast fields, holds the slow ones until two sessions agree, and records every change with undo for both records |
 | **Orchestrator** | Always (plain code, no LLM) | — | Session state machine, persistence, routing |
 
 Skills live in `skills/<name>/SKILL.md` and are concatenated into the agent's system prompt. They are
@@ -62,19 +63,30 @@ lecturer's explanation).
 ```
 upload material ──> Curriculum Agent ──> Course (data/courses/*.json)
 
-new learner ──> Session(phase=intake) ──> Profiler Agent (conversation)
-                     │ finish_intake tool
-                     ▼
-              finalizeProfile ──> LearnerProfile stored on the learner
+A sitting is a chain of sessions, each with its own transcript (domain/intake.ts, planSitting):
 
-Session(phase=teach) ─ Tutor ─> inquire ─> assess ─(≥2 observations)─> next concept ... ─> wrap-up ─> complete
+new student ──> Session(kind=general-intake) ── built-in passage, questions in three bands by grade
+                     │ finish_intake: hands over inside the same reply; the profile is written in the background
+                     ▼
+first time on a course ──> Session(kind=course-intake) ── one first-step question per central concept, no teaching
+                     │ finish_intake: hands over inside the same reply; the course record is written in the background
+                     ▼
+Session(kind=lesson, phase=teach) ─ Tutor ─> inquire ─> assess ─(≥2 observations)─> next concept ... ─> wrap-up ─> complete
                                                                                       │
                                                                        endSession ──> Assessor Agent ──> MasteryReport
+                                                                                      └─> Profile Reviser ──> both records
 ```
+
+A student with a profile skips the first box; a student with a record for the course skips the second. The
+two records are the learner profile (how to work with this student, on the learner) and the course-knowledge
+record (what they know about one course: starting points from the course intake, and notes kept since;
+`data/course-knowledge/<learner>__<course>.json`). A message sent to a finished intake is answered by the
+session that took over (`Session.continuedIn`), so a browser, a voice socket or Hume can keep one session id.
 
 Phase transitions are requested by the tutor through the `advance` tool and validated in
 `orchestrator/session.ts`. For example, the tutor cannot move to the next concept until it has recorded
-at least two non-engagement observations for the current one. That is the "assess via conversation"
+at least two observations of what the learner showed for the current one (engagement notes and facts the
+tutor itself told them do not count). That is the "assess via conversation"
 requirement enforced in code rather than left to the prompt.
 
 ## Voice path (Hume EVI)
