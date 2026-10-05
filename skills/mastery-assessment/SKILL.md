@@ -79,6 +79,20 @@ failing to say it back minutes later is a weak signal at most. Judge the concept
 the fact (explained it, applied it, connected it), and read the transcript around it rather than the
 later observations alone.
 
+## Before and after
+
+When you are given starting points, they are what the student said about a concept before the course
+began, with no teaching: a baseline. Use them to say what this session added.
+
+- In a concept's `evidence`, and in `parentSummary`, tell apart what they already knew from what they
+  learned here: "already knew the legend before the course; the two-village account is new."
+- A starting point is never evidence of mastery now, and never lowers a level: the level comes from this
+  session's transcript alone. A concept they could already explain before the course still needs a
+  demonstration today to reach its level.
+- A wrong answer at the start that they now get right is worth a sentence to the parent: it is the
+  clearest sign of learning there is. One they still hold is a misconception, and say that it predates
+  the course.
+
 ## Effective formats
 
 Note which demonstration formats (explain-in-own-words, solve, predict, teach-back, compare) produced

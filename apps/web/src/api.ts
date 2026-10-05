@@ -8,15 +8,39 @@ export interface CourseFocus { skippedLessonIds: string[]; skippedConceptIds: st
 export interface Course { id: string; title: string; subject: string; level: string; description: string; lessons: Lesson[]; concepts: Concept[]; chunkCount: number; sources?: Array<{ name: string; kind: string; url?: string }>; focus?: CourseFocus; createdAt: string }
 /** How much of an answer the student is ready for (mirrors DepthSchema); absent on older profiles means "simple". */
 export type Depth = "simple" | "some-nuance" | "full";
+/** How to work with a student, whatever the course (mirrors LearnerProfileSchema). What they know about a course is a CourseKnowledge record. */
 export interface Profile {
-  intakePreferences: string[]; demonstrationPreferences: string[]; challengeTolerance: string; pace: string; verbalLevel: string;
-  interests: string[]; priorKnowledge: string[]; observedGaps: string[]; parentSummary: string; tutoringGuidance: string[]; depth?: Depth;
+  demonstrationPreferences: string[]; challengeTolerance: string; pace: string; verbalLevel: string;
+  interests: string[]; parentSummary: string; tutoringGuidance: string[]; depth?: Depth;
 }
+export type StartingEstimate = "none" | "some" | "can-explain";
+/** Where a student started on one concept, in their own words, from the course intake. */
+export interface ConceptStart { conceptId: string; estimate: StartingEstimate; said: string; confidence?: number; materialSays?: string; from: "probe" | "narration" }
+/** What one student knows about one course (mirrors CourseKnowledgeSchema). */
+export interface CourseKnowledge {
+  id: string; learnerId: string; courseId: string; starts: ConceptStart[]; priorKnowledge: string[]; observedGaps: string[]; guidance: string[];
+  baselineSummary?: string; intakeSessionId?: string; intakeAt?: string; createdAt: string; updatedAt: string;
+  /** A course intake is done and its starting points are being written (or that failed, with the reason). */
+  pending?: { sessionId: string; since: string; error?: string };
+}
+/** The passage the general intake reads to every student, and its two questions in three sets by grade. */
+export interface IntakePassage { title: string; text: string; retell: string; bands: Array<{ id: "A" | "B" | "C"; grades: string; apply: string; hard: string }> }
+/** An intake finished inside a reply and the sitting went straight on in another session. */
+export interface Handover { from: string; to: string; kind: SessionKind }
+/** How a turn ended. `sessionId` is the session that answered: after a hand-over, the one that took over. */
+export interface TurnDone { sessionId: string; handover: Handover | null; phase: Phase; conceptIndex: number; latency: Latency | null }
+/** What a session is for. A sitting can chain them: the general intake, then the course intake, then the lesson. */
+export type SessionKind = "general-intake" | "course-intake" | "lesson";
 /** One difference the profile pass made (or held): a list field gets one entry per item added (from "") or removed (to ""). */
 export interface ProfileChange { field: string; from: string; to: string; why: string }
 /** One revision of the profile after a session (mirrors ProfileUpdateSchema). */
 export interface ProfileUpdate { at: string; sessionId: string; courseId?: string; courseTitle?: string; summary: string; changes: ProfileChange[]; held: ProfileChange[]; previous: Profile }
-export interface Learner { id: string; name: string; age?: number; gradeLevel?: string; profile?: Profile; profileHistory?: ProfileUpdate[]; profileReviewedAt?: string; createdAt: string }
+export interface Learner {
+  id: string; name: string; age?: number; gradeLevel?: string; parentNotes?: string; profile?: Profile; profileHistory?: ProfileUpdate[]; profileReviewedAt?: string;
+  /** The general intake is done and its profile is being written (or that failed, with the reason). */
+  profilePending?: { sessionId: string; since: string; error?: string };
+  createdAt: string;
+}
 export type Phase = "intake" | "teach" | "inquire" | "assess" | "wrap-up" | "complete";
 export interface Latency { ttftMs: number; totalMs: number; iterations: number; cacheReadTokens: number; cacheWriteTokens: number; inputTokens: number; outputTokens: number; suppressedChars?: number; thinkingChars?: number; toolsBeforeSpeech?: boolean; reflectMs?: number; reflectThinkingChars?: number; firstAudioMs?: number; transcriptMs?: number; interrupted?: boolean }
 export interface Turn { role: "user" | "assistant"; content: string; at: string; expressions?: string[]; latency?: Latency }
@@ -30,8 +54,8 @@ export interface OutsideClaim {
   verdict?: "supported" | "contradicted" | "complicated" | "not-found"; explanation?: string; evidence?: string;
   source?: { title: string; url: string; revisionId?: number; quality?: string }; followUp?: string; checkedAt?: string;
 }
-export interface Session { id: string; learnerId: string; courseId?: string; lessonId?: string; conceptIndex: number; conceptIds?: string[]; narrationFirst?: boolean; outsideKnowledge?: OutsideKnowledgeMode; outsideClaims?: OutsideClaim[]; phase: Phase; transcript: Turn[]; observations: Observation[]; pendingDirectives: string[]; startedAt: string; endedAt?: string }
-export interface SessionSummary { id: string; learnerId: string; courseId?: string; lessonId?: string; phase: Phase; conceptIndex: number; turns: number; observations: number; startedAt: string; endedAt?: string; hasReport: boolean }
+export interface Session { id: string; learnerId: string; kind?: SessionKind; continuedIn?: string; continuedFrom?: string; probeConceptIds?: string[]; courseId?: string; lessonId?: string; conceptIndex: number; conceptIds?: string[]; narrationFirst?: boolean; outsideKnowledge?: OutsideKnowledgeMode; outsideClaims?: OutsideClaim[]; phase: Phase; transcript: Turn[]; observations: Observation[]; pendingDirectives: string[]; startedAt: string; endedAt?: string }
+export interface SessionSummary { id: string; learnerId: string; kind?: SessionKind; continuedIn?: string; continuedFrom?: string; courseId?: string; lessonId?: string; phase: Phase; conceptIndex: number; turns: number; observations: number; startedAt: string; endedAt?: string; hasReport: boolean }
 export interface LatencySummary { turns: number; ttftP50Ms: number; ttftMaxMs: number; totalP50Ms: number; cacheHitRate: number; firstAudioP50Ms?: number }
 export interface Report {
   sessionId: string; learnerId: string; courseId?: string; lessonId?: string; createdAt: string;
@@ -39,13 +63,16 @@ export interface Report {
   parentSummary: string; studentSummary: string; recommendedNext: string[]; ungroundedClaims: string[]; effectiveFormats: string[];
   answerSeekingTurns: number; tutorAnswerGiveaways: number; outsideClaims?: OutsideClaim[];
 }
-export interface ConceptProgress { conceptId: string; name: string; level: number; previousLevel?: number; asOf: string; misconceptions: string[] }
+export interface ConceptProgress { conceptId: string; name: string; level: number; previousLevel?: number; asOf: string; misconceptions: string[]; start?: ConceptStart }
 export interface ProgressCounts { ungroundedClaims: number; tutorAnswerGiveaways: number; answerSeekingTurns: number }
 /** Where a student stands on a course, across every report so far (mirrors domain/progress.ts). */
 export interface ProgressSummary {
   learnerId: string; courseId: string; sessionsAssessed: number; latestSessionAt: string; concepts: ConceptProgress[];
   misconceptionsAtLatestSession: Array<{ conceptId: string; name: string; misconceptions: string[] }>;
   latestRecommendedNext: string[]; latestParentSummary: string; totals: ProgressCounts; latest: ProgressCounts;
+  /** Concepts the course intake asked about that no session has assessed yet. */
+  startsNotYetTaught: Array<ConceptStart & { name: string }>;
+  baselineSummary?: string;
 }
 export type TtsProvider = "hume" | "elevenlabs" | "inworld";
 /** How a person would name the provider in a sentence. */
@@ -112,11 +139,23 @@ export const api = {
   learners: () => fetch("/api/learners").then(j<Learner[]>),
   createLearner: (body: { name: string; age?: number; gradeLevel?: string }) => fetch("/api/learners", json("POST", body)).then(j<Learner>),
   resetProfile: (id: string) => fetch(`/api/learners/${id}/profile`, { method: "DELETE" }).then(j<Learner>),
+  /** The parent's own words about their child. An empty text removes them. */
+  saveNotes: (id: string, parentNotes: string) => fetch(`/api/learners/${id}/notes`, json("PUT", { parentNotes })).then(j<Learner>),
+  /** Write the profile again from an intake whose write failed. */
+  retryProfile: (id: string) => fetch(`/api/learners/${id}/profile/retry`, { method: "POST" }).then(j<Learner>),
+  /** Write a course's starting points again from a course intake whose write failed. */
+  retryKnowledge: (learnerId: string, courseId: string) => fetch(`/api/knowledge/${learnerId}/${courseId}/retry`, { method: "POST" }).then(j<CourseKnowledge>),
+  intakePassage: () => fetch("/api/intake/passage").then(j<IntakePassage>),
+  /** Every course record: what each student knows about each course. */
+  knowledge: () => fetch("/api/knowledge").then(j<CourseKnowledge[]>),
+  /** Forget what a student knows about a course; their next session on it opens with the course intake again. */
+  forgetKnowledge: (learnerId: string, courseId: string) => fetch(`/api/knowledge/${learnerId}/${courseId}`, { method: "DELETE" }).then(j<{ ok: true }>),
   undoProfileUpdate: (id: string) => fetch(`/api/learners/${id}/profile/undo`, { method: "POST" }).then(j<Learner>),
   deleteLearner: (id: string) => fetch(`/api/learners/${id}`, { method: "DELETE" }).then(j<{ ok: true }>),
 
   sessions: () => fetch("/api/sessions").then(j<SessionSummary[]>),
-  createSession: (body: { learnerId: string; courseId?: string; lessonId?: string; skipIntake?: boolean; narrationFirst?: boolean }) => fetch("/api/sessions", json("POST", body)).then(j<Session>),
+  /** Starts a sitting and returns its first session: an intake when one is due, else the lesson. `only` runs one intake by itself. */
+  createSession: (body: { learnerId: string; courseId?: string; lessonId?: string; skipIntake?: boolean; narrationFirst?: boolean; only?: "general-intake" | "course-intake" }) => fetch("/api/sessions", json("POST", body)).then(j<Session>),
   session: (id: string) => fetch(`/api/sessions/${id}`).then(j<Session>),
   deleteSession: (id: string) => fetch(`/api/sessions/${id}`, { method: "DELETE" }).then(j<{ ok: true }>),
   latency: (sessionId: string) => fetch(`/api/sessions/${sessionId}/latency`).then(j<LatencySummary>),
@@ -135,13 +174,13 @@ export const api = {
    * Text-mode turn: streams deltas via SSE. The reply ends at `done`; the tutor's notes and any phase
    * change arrive a few seconds later as `reflected`, which calls `onReflected` if given.
    */
-  async *message(sessionId: string, text: string, onReflected?: () => void): AsyncGenerator<string, { phase: Phase; conceptIndex: number; latency: Latency | null }, void> {
+  async *message(sessionId: string, text: string, onReflected?: (sessionId: string) => void): AsyncGenerator<string, TurnDone, void> {
     const res = await fetch(`/api/sessions/${sessionId}/message`, json("POST", { text }));
     if (!res.ok || !res.body) throw new Error(`${res.status} ${res.statusText}`);
     const reader = res.body.getReader();
     const dec = new TextDecoder();
     let buf = "";
-    let done = { phase: "teach" as Phase, conceptIndex: 0, latency: null as Latency | null };
+    let done: TurnDone = { sessionId, handover: null, phase: "teach", conceptIndex: 0, latency: null };
     for (;;) {
       const { value, done: end } = await reader.read();
       if (end) break;
@@ -151,11 +190,11 @@ export const api = {
         const line = buf.slice(0, i).trim();
         buf = buf.slice(i + 2);
         if (!line.startsWith("data: ")) continue;
-        const ev = JSON.parse(line.slice(6)) as { delta?: string; done?: boolean; reflected?: boolean; phase?: Phase; conceptIndex?: number; latency?: Latency | null; error?: string };
+        const ev = JSON.parse(line.slice(6)) as { delta?: string; done?: boolean; reflected?: boolean; sessionId?: string; handover?: Handover | null; phase?: Phase; conceptIndex?: number; latency?: Latency | null; error?: string };
         if (ev.error) throw new Error(ev.error);
         if (ev.delta) yield ev.delta;
-        if (ev.done) done = { phase: ev.phase ?? "teach", conceptIndex: ev.conceptIndex ?? 0, latency: ev.latency ?? null };
-        if (ev.reflected) onReflected?.();
+        if (ev.done) done = { sessionId: ev.sessionId ?? sessionId, handover: ev.handover ?? null, phase: ev.phase ?? "teach", conceptIndex: ev.conceptIndex ?? 0, latency: ev.latency ?? null };
+        if (ev.reflected) onReflected?.(ev.sessionId ?? done.sessionId);
       }
     }
     return done;

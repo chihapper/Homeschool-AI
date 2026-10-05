@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { VoiceProvider, useVoice } from "@humeai/voice-react";
-import { api, fmtDate, fmtMs, PROVIDER_KEY, PROVIDER_NAME, summarizeLatency, type Course, type Health, type Learner, type Report, type Session, type SessionSummary, type Turn } from "../api";
+import { api, fmtDate, fmtMs, PROVIDER_KEY, PROVIDER_NAME, summarizeLatency, type Course, type CourseKnowledge, type Health, type Learner, type Report, type Session, type SessionSummary, type Turn } from "../api";
 import { VoiceClient, type ReadyMessage, type VoiceState } from "../voice";
 
 interface Props {
   courses: Course[];
   learners: Learner[];
+  /** What each student knows about each course: a student with no record for a course is asked first. */
+  knowledge: CourseKnowledge[];
   health: Health | null;
   session: Session | null;
   onSession: (s: Session | null) => void;
@@ -62,7 +64,13 @@ const TALK_LABEL: Record<VoiceState, string> = {
   speaking: "🎙 Interrupt and talk",
 };
 
-function SessionInner({ courses, learners, health, session, onSession, onReport, humeError, clearHumeError }: Props & { humeError: string | null; clearHumeError: () => void }) {
+/** What to tell the person at the screen when an intake hands over, by what the sitting went on to. */
+const HANDOVER_NOTE: Record<string, string> = {
+  "course-intake": "The intake conversation is finished and the profile is being written. Next: a few questions about what they already know about the course.",
+  lesson: "That part is finished and its notes are being written. The lesson has started.",
+};
+
+function SessionInner({ courses, learners, knowledge, health, session, onSession, onReport, humeError, clearHumeError }: Props & { humeError: string | null; clearHumeError: () => void }) {
   const voiceReady = Boolean(health?.voice.stt === "assemblyai" && health?.voice.tts && health.voice.tts !== "none");
   // Which provider speaks, in words: "ElevenLabs eleven_flash_v2_5", "Inworld inworld-tts-2" or "Hume Octave 2".
   const ttsLabel = health ? `${PROVIDER_NAME[health.voice.ttsProvider]} ${health.voice.ttsModel}` : "";
@@ -167,6 +175,9 @@ function SessionInner({ courses, learners, health, session, onSession, onReport,
   const startable = course?.lessons.filter((l) => !focus?.skippedLessonIds.includes(l.id) && l.conceptIds.some((id) => !focus?.skippedConceptIds.includes(id))) ?? [];
   const lesson = course?.lessons.find((l) => l.id === (session?.lessonId ?? lessonId)) ?? startable[0] ?? course?.lessons[0];
   const conceptName = (id: string) => course?.concepts.find((c) => c.id === id)?.name ?? id;
+  // What this student's sitting will open with (mirrors planSitting on the server, which decides).
+  const needsGeneral = Boolean(learner && !learner.profile && !learner.profilePending);
+  const needsCourse = Boolean(learner && course && !knowledge.some((k) => k.learnerId === learner.id && k.courseId === course.id));
   // A running session walks its own frozen list, which may be shorter than the lesson's.
   const walk = session?.conceptIds ?? lesson?.conceptIds ?? [];
   const currentConceptId = walk[session?.conceptIndex ?? 0];
@@ -204,8 +215,16 @@ function SessionInner({ courses, learners, health, session, onSession, onReport,
         setPending({ user: t, assistant: "" });
       });
       c.on("delta", (d) => setPending((p) => ({ user: p?.user, assistant: (p?.assistant ?? "") + d })));
-      c.on("done", () => {
-        refreshSession(sid)
+      // After an intake's hand-over the connection speaks for the session that took over; the panel follows it.
+      let active = sid;
+      c.on("session", (s) => {
+        if (!s.sessionId) return;
+        active = s.sessionId;
+        setInfo(HANDOVER_NOTE[s.kind] ?? null);
+      });
+      c.on("done", (m) => {
+        if (m.sessionId) active = m.sessionId;
+        refreshSession(active)
           .catch((e) => setErr((e as Error).message))
           .finally(() => setPending(null));
       });
@@ -272,13 +291,16 @@ function SessionInner({ courses, learners, health, session, onSession, onReport,
     try {
       // The reply streams first; the tutor's notes and phase change arrive a few seconds later and refresh
       // the state panel on their own, so the student is never blocked waiting for bookkeeping.
-      const gen = api.message(sid, text, () => void refreshSession(sid).catch(() => {}));
+      const gen = api.message(sid, text, (id) => void refreshSession(id).catch(() => {}));
       let r = await gen.next();
       while (!r.done) {
         const delta = r.value;
         setPending((p) => ({ user: p?.user, assistant: (p?.assistant ?? "") + delta }));
         r = await gen.next();
       }
+      // An intake finished in this reply and the sitting went straight on: show the session that took over.
+      if (r.value.handover) setInfo(HANDOVER_NOTE[r.value.handover.kind] ?? null);
+      sid = r.value.sessionId;
     } catch (e) {
       setErr((e as Error).message);
     } finally {
@@ -288,6 +310,15 @@ function SessionInner({ courses, learners, health, session, onSession, onReport,
     }
   };
 
+  // A session started somewhere else (the Courses tab's "ask now") arrives with nothing said yet: the tutor speaks first.
+  const opened = useRef<string | null>(null);
+  useEffect(() => {
+    if (!session || session.transcript.length || session.phase === "complete" || mode !== "text" || busy || opened.current === session.id) return;
+    opened.current = session.id;
+    void runTurn(session.id, "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.id]);
+
   const start = async () => {
     setErr(null);
     setInfo(null);
@@ -295,6 +326,7 @@ function SessionInner({ courses, learners, health, session, onSession, onReport,
     setBusy(true);
     try {
       const s = await api.createSession({ learnerId, courseId: courseId || undefined, lessonId: lessonId || undefined, skipIntake, narrationFirst });
+      opened.current = s.id; // this function opens it, in whichever mode was chosen
       onSession(s);
       if (mode === "voice") {
         await connectVoice(s.id);
@@ -327,6 +359,7 @@ function SessionInner({ courses, learners, health, session, onSession, onReport,
     setErr(null);
     clearHumeError();
     try {
+      opened.current = resumeId;
       const s = await refreshSession(resumeId);
       if (mode === "voice") await connectVoice(s.id);
       else if (mode === "evi") {
@@ -406,7 +439,7 @@ function SessionInner({ courses, learners, health, session, onSession, onReport,
           {!learners.length && <p className="muted">Add a student first (Students tab).</p>}
           {!courses.length && <p className="muted">Ingest some material first (Courses tab).</p>}
           <div className="row">
-            <label>Student<select value={learnerId} onChange={(e) => setLearnerId(e.target.value)}>{learners.map((l) => <option key={l.id} value={l.id}>{l.name}{l.profile ? "" : " (intake first)"}</option>)}</select></label>
+            <label>Student<select value={learnerId} onChange={(e) => setLearnerId(e.target.value)}>{learners.map((l) => <option key={l.id} value={l.id}>{l.name}{l.profile || l.profilePending ? "" : " (intake first)"}</option>)}</select></label>
             <label>Course<select value={courseId} onChange={(e) => { setCourseId(e.target.value); setLessonId(""); }}>{courses.map((c) => <option key={c.id} value={c.id}>{c.title}</option>)}</select></label>
             <label>Lesson<select value={lessonId} onChange={(e) => setLessonId(e.target.value)}><option value="">First kept lesson</option>{startable.map((l) => <option key={l.id} value={l.id}>{l.title}</option>)}</select></label>
             <label>
@@ -417,8 +450,8 @@ function SessionInner({ courses, learners, health, session, onSession, onReport,
                 <option value="evi">Voice via Hume EVI (needs a public URL)</option>
               </select>
             </label>
-            {learner && !learner.profile && (
-              <label className="check"><span><input type="checkbox" checked={skipIntake} onChange={(e) => setSkipIntake(e.target.checked)} /> Skip intake</span><span className="hint">Go straight to the lesson with no profile.</span></label>
+            {(needsGeneral || needsCourse) && (
+              <label className="check"><span><input type="checkbox" checked={skipIntake} onChange={(e) => setSkipIntake(e.target.checked)} /> Skip the intake{needsGeneral && needsCourse ? "s" : ""}</span><span className="hint">Go straight to the lesson.</span></label>
             )}
             <label className="check"><span><input type="checkbox" checked={narrationFirst} onChange={(e) => setNarrationFirst(e.target.checked)} /> Already read this</span><span className="hint">Opens by asking the student to tell it back before any questions.</span></label>
             <button className="primary" disabled={!learnerId || !courseId || busy || (mode === "voice" && !voiceReady)} onClick={start}>{busy ? "Starting..." : "Begin"}</button>
@@ -426,7 +459,11 @@ function SessionInner({ courses, learners, health, session, onSession, onReport,
           {course && startable.length === 0 && <p className="warn small">Every lesson in this course is skipped in its Focus (Courses tab). Keep at least one concept to start a session.</p>}
           {mode === "voice" && !voiceReady && <p className="warn small">Browser voice needs ASSEMBLYAI_API_KEY (speech-to-text) and {PROVIDER_KEY[health?.voice.ttsProvider ?? "hume"]} (text-to-speech for the provider selected in Settings, Voice). See Settings › Readiness.</p>}
           {mode === "voice" && voiceReady && <p className="muted small">The tutor speaks first. Click Talk (or just wait for it to listen), speak, and pause when you are done. Speech-to-text: AssemblyAI · voice: {health?.voice.ttsVoice} ({ttsLabel}). Switch provider in Settings, Voice.</p>}
-          {learner && !learner.profile && !skipIntake && <p className="muted">{learner.name} has no profile yet, so the session opens with a short intake conversation before the lesson. Reset a profile from the Students tab to run intake again.</p>}
+          {learner && course && !skipIntake && (needsGeneral || needsCourse) && (
+            <p className="muted">
+              This sitting: {[needsGeneral && `the intake conversation, to learn how to work with ${learner.name} (about eight exchanges, on a passage built into the app)`, needsCourse && `a few questions about what ${learner.name} already knows about ${course.title}, with no teaching`, "the lesson"].filter(Boolean).join("; then ")}. Each part hands over to the next by itself.
+            </p>
+          )}
           {health && <p className="muted small">Tutor: <code>{health.tutorModel}</code> @ {health.tutorEffort}, {health.tutorThinking} thinking. Change in Settings before starting.</p>}
           {err && <p className="error">{err}</p>}
         </div>
@@ -463,7 +500,8 @@ function SessionInner({ courses, learners, health, session, onSession, onReport,
       <div className="card">
         <div className="row" style={{ justifyContent: "space-between" }}>
           <div className="row">
-            <span className="pill">{session.phase}</span>
+            <span className="pill">{session.phase === "intake" ? (session.kind === "course-intake" ? "course intake" : "intake") : session.phase}</span>
+            {session.continuedFrom && session.transcript.length <= 2 && <span className="muted small">carried straight on from the part before</span>}
             {lesson && currentConceptId && session.phase !== "intake" && (
               <span className="muted">Concept {session.conceptIndex + 1} of {walk.length}{walk.length < lesson.conceptIds.length ? ` kept (of ${lesson.conceptIds.length})` : ""}: <strong>{conceptName(currentConceptId)}</strong></span>
             )}

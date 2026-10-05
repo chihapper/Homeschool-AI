@@ -8,11 +8,12 @@ import { z } from "zod";
 import { ingestCourse } from "../agents/curriculum-agent.js";
 import { documentFromUpload, documentsFromUrl, type SourceDocument } from "../ingest/media/sources.js";
 import { UnsupportedFileError } from "../ingest/extract.js";
-import { annotateLastTurn, createSession, endSession, getSession, latencySummary, respond } from "../orchestrator/session.js";
+import { annotateLastTurn, createSession, endSession, getSession, latencySummary, respond, retryIntakeRecord } from "../orchestrator/session.js";
+import { BAND_ORDER, BANDS, PASSAGE, RETELL_PROMPT } from "../domain/intake.js";
 import { CourseFocusSchema } from "../domain/types.js";
 import { sanitizeFocus } from "../domain/focus.js";
 import { buildProgress } from "../domain/progress.js";
-import { courses, learners, reports, sessions } from "../store/index.js";
+import { courseKnowledge, courses, knowledgeFor, knowledgeId, knowledgeOf, learners, putCourseNotes, reports, sessions } from "../store/index.js";
 import { activeTtsProvider, config, getSettings, MODEL_OPTIONS, REPO_ROOT, resetSettings, RuntimeSettingsSchema, ttsModelLabel, ttsVoiceLabel, updateSettings } from "../config.js";
 import { undoProfileUpdate } from "../domain/profile.js";
 import { anthropic, normalizeModelId } from "../llm/client.js";
@@ -25,8 +26,17 @@ import { inworldText } from "../voice/live.js";
 import { SentenceChunker, type Segment } from "../voice/sentence-chunker.js";
 import { listHumeVoices, speakHume } from "../voice/tts-hume.js";
 
-const LearnerBody = z.object({ name: z.string().min(1), age: z.number().int().optional(), gradeLevel: z.string().optional() });
-const SessionBody = z.object({ learnerId: z.string(), courseId: z.string().optional(), lessonId: z.string().optional(), skipIntake: z.boolean().optional(), narrationFirst: z.boolean().optional() });
+const LearnerBody = z.object({ name: z.string().min(1), age: z.number().int().optional(), gradeLevel: z.string().optional(), parentNotes: z.string().max(4000).optional() });
+const NotesBody = z.object({ parentNotes: z.string().max(4000) });
+const SessionBody = z.object({
+  learnerId: z.string(),
+  courseId: z.string().optional(),
+  lessonId: z.string().optional(),
+  skipIntake: z.boolean().optional(),
+  narrationFirst: z.boolean().optional(),
+  /** Run one intake on its own, with nothing after it. */
+  only: z.enum(["general-intake", "course-intake"]).optional(),
+});
 const IngestBody = z
   .object({
     urls: z.array(z.string().url()).optional(),
@@ -330,13 +340,16 @@ export function registerApiRoutes(app: FastifyInstance): void {
   });
   /** Forget the profile, and its revisions, so the next session runs the intake again (re-test a persona). */
   app.delete("/api/learners/:id/profile", async (req: FastifyRequest<{ Params: { id: string } }>) => {
-    const { profile, profileHistory, profileReviewedAt, ...rest } = learners.require(req.params.id);
+    const { profile, profileHistory, profileReviewedAt, profilePending, ...rest } = learners.require(req.params.id);
     return learners.put(rest);
   });
   /** Undo the latest revision of the profile: back to what it was before that session. */
   app.post("/api/learners/:id/profile/undo", async (req: FastifyRequest<{ Params: { id: string } }>, reply) => {
     try {
-      return learners.put(undoProfileUpdate(learners.require(req.params.id)));
+      // Both records go back: the profile, and the course notes when that revision changed them.
+      const { learner, course } = undoProfileUpdate(learners.require(req.params.id));
+      if (course) putCourseNotes(learner.id, course.courseId, course.notes);
+      return learners.put(learner);
     } catch (err) {
       return reply.code(409).send({ error: err instanceof Error ? err.message : String(err) });
     }
@@ -344,6 +357,47 @@ export function registerApiRoutes(app: FastifyInstance): void {
   app.delete("/api/learners/:id", async (req: FastifyRequest<{ Params: { id: string } }>) => {
     learners.require(req.params.id);
     learners.delete(req.params.id);
+    // Their course records are keyed by the learner and mean nothing without them.
+    for (const k of knowledgeOf(req.params.id)) courseKnowledge.delete(k.id);
+    return { ok: true };
+  });
+  /** The parent's own words about their child. The tutor follows them as written and no pass rewrites them; an empty text removes them. */
+  app.put("/api/learners/:id/notes", async (req: FastifyRequest<{ Params: { id: string } }>) => {
+    const text = NotesBody.parse(req.body ?? {}).parentNotes.trim();
+    const { parentNotes: _previous, ...rest } = learners.require(req.params.id);
+    return learners.put(text ? { ...rest, parentNotes: text } : rest);
+  });
+
+  /** The intake conversation happened but its profile was not written (the write failed, or the server stopped): write it again from the transcript. */
+  app.post("/api/learners/:id/profile/retry", async (req: FastifyRequest<{ Params: { id: string } }>, reply) => {
+    const learner = learners.require(req.params.id);
+    if (!learner.profilePending) return reply.code(409).send({ error: `${learner.name} has no intake waiting to be written up.` });
+    retryIntakeRecord(learner.profilePending.sessionId);
+    return learners.require(req.params.id);
+  });
+  /** What the general intake reads to every student, and its questions, for the parent to see. */
+  app.get("/api/intake/passage", async () => ({
+    title: PASSAGE.title,
+    text: PASSAGE.text,
+    retell: RETELL_PROMPT,
+    bands: BAND_ORDER.map((id) => ({ id, grades: BANDS[id].grades, apply: BANDS[id].apply, hard: BANDS[id].hard })),
+  }));
+
+  // ---- Course knowledge: what one student knows about one course ---------------
+  app.get("/api/knowledge", async () => courseKnowledge.list());
+  app.get("/api/knowledge/:learnerId/:courseId", async (req: FastifyRequest<{ Params: { learnerId: string; courseId: string } }>, reply) => {
+    return knowledgeFor(req.params.learnerId, req.params.courseId) ?? reply.code(404).send({ error: "No record for this student on this course yet." });
+  });
+  /** A course intake happened but its starting points were not written: write them again from the transcript. */
+  app.post("/api/knowledge/:learnerId/:courseId/retry", async (req: FastifyRequest<{ Params: { learnerId: string; courseId: string } }>, reply) => {
+    const k = knowledgeFor(req.params.learnerId, req.params.courseId);
+    if (!k?.pending) return reply.code(409).send({ error: "No course intake is waiting to be written up for this student and course." });
+    retryIntakeRecord(k.pending.sessionId);
+    return knowledgeFor(req.params.learnerId, req.params.courseId);
+  });
+  /** Forget what a student knows about a course, so their next session on it opens with the course intake again. */
+  app.delete("/api/knowledge/:learnerId/:courseId", async (req: FastifyRequest<{ Params: { learnerId: string; courseId: string } }>) => {
+    courseKnowledge.delete(knowledgeId(req.params.learnerId, req.params.courseId));
     return { ok: true };
   });
 
@@ -356,6 +410,9 @@ export function registerApiRoutes(app: FastifyInstance): void {
         learnerId: s.learnerId,
         courseId: s.courseId,
         lessonId: s.lessonId,
+        kind: s.kind ?? (s.phase === "intake" ? "general-intake" : "lesson"),
+        continuedIn: s.continuedIn,
+        continuedFrom: s.continuedFrom,
         phase: s.phase,
         conceptIndex: s.conceptIndex,
         turns: s.transcript.length,
@@ -393,11 +450,12 @@ export function registerApiRoutes(app: FastifyInstance): void {
       // tutor's notes and any phase change land a few seconds later, in a second event on the same
       // stream; the next turn waits for them anyway (settleReflection).
       const spoken = [...r.value.session.transcript].reverse().find((t) => t.role === "assistant");
-      reply.raw.write(`data: ${JSON.stringify({ done: true, phase: r.value.session.phase, conceptIndex: r.value.session.conceptIndex, latency: spoken?.latency ?? null })}\n\n`);
+      // `sessionId` is the session that answered: after an intake's hand-over it is the one that took over, and the browser follows it.
+      reply.raw.write(`data: ${JSON.stringify({ done: true, sessionId: r.value.session.id, handover: r.value.handover ?? null, phase: r.value.session.phase, conceptIndex: r.value.session.conceptIndex, latency: spoken?.latency ?? null })}\n\n`);
       const settled = await r.value.reflection?.catch(() => undefined);
       if (settled) {
         const last = [...settled.transcript].reverse().find((t) => t.role === "assistant");
-        reply.raw.write(`data: ${JSON.stringify({ reflected: true, phase: settled.phase, conceptIndex: settled.conceptIndex, latency: last?.latency ?? null })}\n\n`);
+        reply.raw.write(`data: ${JSON.stringify({ reflected: true, sessionId: settled.id, phase: settled.phase, conceptIndex: settled.conceptIndex, latency: last?.latency ?? null })}\n\n`);
       }
     } catch (err) {
       req.log.error({ err }, "turn failed");
@@ -429,7 +487,7 @@ export function registerApiRoutes(app: FastifyInstance): void {
   app.get("/api/progress/:learnerId/:courseId", async (req: FastifyRequest<{ Params: { learnerId: string; courseId: string } }>, reply) => {
     const course = courses.require(req.params.courseId);
     learners.require(req.params.learnerId);
-    const progress = buildProgress(reports.list(), course, req.params.learnerId, req.params.courseId);
+    const progress = buildProgress(reports.list(), course, req.params.learnerId, req.params.courseId, knowledgeFor(req.params.learnerId, req.params.courseId));
     return progress ?? reply.code(404).send({ error: "No completed sessions yet for this student and course." });
   });
 

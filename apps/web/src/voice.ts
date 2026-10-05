@@ -30,7 +30,10 @@ export interface VoiceEvents {
   partial: (text: string) => void;
   transcript: (text: string) => void;
   delta: (text: string) => void;
-  done: (msg: { text: string; phase: Phase; conceptIndex: number; interrupted: boolean }) => void;
+  /** `sessionId` is the session that answered: after an intake's hand-over, the one that took over. */
+  done: (msg: { text: string; phase: Phase; conceptIndex: number; interrupted: boolean; sessionId?: string }) => void;
+  /** An intake finished inside a reply and the sitting went on in another session; this connection now speaks for it. */
+  session: (msg: { sessionId: string; kind: string }) => void;
   latency: (marks: Record<string, number>) => void;
   /** Mic input level, 0..1, a few times a second while listening. */
   level: (peak: number) => void;
@@ -162,8 +165,11 @@ export class VoiceClient {
         this.player?.port.postMessage({ type: "status" }); // unless it already has
         break;
       case "assistant_done":
-        this.emit("done", { text: String(msg.text ?? ""), phase: msg.phase as Phase, conceptIndex: Number(msg.conceptIndex ?? 0), interrupted: Boolean(msg.interrupted) });
+        this.emit("done", { text: String(msg.text ?? ""), phase: msg.phase as Phase, conceptIndex: Number(msg.conceptIndex ?? 0), interrupted: Boolean(msg.interrupted), sessionId: typeof msg.sessionId === "string" ? msg.sessionId : undefined });
         if (this._state === "thinking") this.setState("idle"); // no audio came (text-only)
+        break;
+      case "session":
+        this.emit("session", { sessionId: String(msg.sessionId ?? ""), kind: String(msg.kind ?? "lesson") });
         break;
       case "latency":
         this.emit("latency", (msg.marks as Record<string, number>) ?? {});

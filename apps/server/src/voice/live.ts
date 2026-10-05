@@ -365,6 +365,12 @@ export function registerLiveVoiceRoutes(app: FastifyInstance): void {
           const s = await producer;
           phase = s.phase;
           conceptIndex = s.conceptIndex;
+          // An intake finished in this reply and the sitting went on in another session: this connection follows it.
+          if (s.id !== conn.sessionId) {
+            conn.sessionId = s.id;
+            conn.course = s.courseId ? courses.get(s.courseId) : undefined;
+            send({ type: "session", sessionId: s.id, kind: s.kind ?? "lesson", phase: s.phase });
+          }
         } catch (err) {
           if (!abort.signal.aborted) {
             log.error({ err }, "voice turn failed");
@@ -389,7 +395,7 @@ export function registerLiveVoiceRoutes(app: FastifyInstance): void {
           }
         }
         const interrupted = abort.signal.aborted;
-        send({ type: "assistant_done", text: fullText, phase, conceptIndex, interrupted });
+        send({ type: "assistant_done", text: fullText, phase, conceptIndex, interrupted, sessionId: conn.sessionId });
         send({ type: "latency", marks });
         if (!interrupted && fullText) {
           try {

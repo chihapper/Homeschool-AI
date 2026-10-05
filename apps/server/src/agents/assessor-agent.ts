@@ -6,7 +6,7 @@
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { assertNotRefused, streamParsed } from "../llm/client.js";
 import { config } from "../config.js";
-import { MasteryExtractionSchema, type Concept, type Course, type Learner, type Lesson, type MasteryExtraction, type MasteryReport, type Session } from "../domain/types.js";
+import { MasteryExtractionSchema, type Concept, type Course, type CourseKnowledge, type Learner, type Lesson, type MasteryExtraction, type MasteryReport, type Session } from "../domain/types.js";
 import { walkedConceptIds } from "../domain/focus.js";
 import { buildSystem, type AgentSpec } from "./base.js";
 
@@ -92,7 +92,24 @@ export function outsideClaimsBlock(session: Session, learnerName: string): strin
   return `\n\n<outside_the_material>\nFacts from outside the family's material that came up in this session, with the reference check's verdict where there was one. The parent sees this list in the report. Follow the mastery-assessment skill's "Outside the material" section.\n${lines.join("\n")}\n</outside_the_material>`;
 }
 
-export async function assessSession(args: { session: Session; learner: Learner; course: Course; lesson: Lesson }): Promise<MasteryReport> {
+/**
+ * Where the student started on this lesson's concepts, from the course intake: what they could say before any
+ * teaching. With it the report can tell what was learned here from what was already known.
+ */
+export function startingPointsBlock(knowledge: CourseKnowledge | undefined, concepts: Concept[], learnerName: string): string {
+  const starts = (knowledge?.starts ?? []).filter((s) => concepts.some((c) => c.id === s.conceptId));
+  if (!starts.length) return "";
+  const lines = starts.map(
+    (s) =>
+      `- ${s.conceptId}: ${s.estimate === "none" ? "nothing yet" : s.estimate === "some" ? "some knowledge" : "could already explain it"}` +
+      (s.said ? `; said "${s.said}"` : "; said they did not know") +
+      (s.confidence !== undefined ? ` (sure ${s.confidence} out of 10)` : "") +
+      (s.materialSays ? `; the material says: ${s.materialSays}` : ""),
+  );
+  return `\n\n<starting_points asked="${knowledge?.intakeAt?.slice(0, 10) ?? ""}">\nWhat ${learnerName} said about these concepts before the course began, with no teaching. Follow the mastery-assessment skill's "Before and after" section.\n${lines.join("\n")}\n</starting_points>`;
+}
+
+export async function assessSession(args: { session: Session; learner: Learner; course: Course; lesson: Lesson; knowledge?: CourseKnowledge }): Promise<MasteryReport> {
   const { session, learner, course, lesson } = args;
   const { concepts, material, wholeCourse } = assessmentMaterial(session, course, lesson);
   const transcript = session.transcript
@@ -125,6 +142,7 @@ export async function assessSession(args: { session: Session; learner: Learner; 
             ? `This session opened with ${learner.name} telling back the material unprompted, before the tutor had asked anything. That first exchange is independent evidence: weigh it like any unhinted answer.\n\n`
             : "") +
           `<material>\n${material}\n</material>\n\n<tutor_observations>\n${observations}\n</tutor_observations>` +
+          startingPointsBlock(args.knowledge, concepts, learner.name) +
           outsideClaimsBlock(session, learner.name) +
           `\n\n<transcript>\n${transcript}\n</transcript>`,
       },

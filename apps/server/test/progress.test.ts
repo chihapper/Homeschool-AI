@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildProgress, wasAssessed } from "../src/domain/progress.js";
-import type { ConceptMastery, Course, MasteryReport } from "../src/domain/types.js";
+import type { ConceptMastery, Course, CourseKnowledge, MasteryReport } from "../src/domain/types.js";
 
 const course: Course = {
   id: "c1", title: "Rome", subject: "History", level: "7", description: "", chunks: [], sourceFiles: [], createdAt: "",
@@ -72,5 +72,27 @@ describe("progress: where the learner stands across sessions", () => {
   it("still shows a concept the course no longer lists, by id, after the ones it does", () => {
     const p = buildProgress([report("2026-09-01", [mastery("ghost", 2), mastery("senate", 1)])], course, "maya", "c1")!;
     expect(p.concepts.map((c) => [c.conceptId, c.name])).toEqual([["senate", "The Senate"], ["ghost", "ghost"]]);
+  });
+
+  it("puts each concept's starting point beside where the student stands now, and lists the ones still to come", () => {
+    const knowledge: CourseKnowledge = {
+      id: "maya__c1", learnerId: "maya", courseId: "c1", priorKnowledge: [], observedGaps: [], guidance: [], createdAt: "", updatedAt: "", intakeAt: "2026-08-30T09:00:00Z",
+      baselineSummary: "Before starting Rome, Maya knew there was a senate.",
+      starts: [
+        { conceptId: "senate", estimate: "some", said: "old men who voted", confidence: 6, from: "probe" },
+        { conceptId: "consuls", estimate: "none", said: "", from: "probe" },
+      ],
+    };
+    const p = buildProgress([report("2026-09-01", [mastery("senate", 3)])], course, "maya", "c1", knowledge)!;
+    expect(p.concepts).toHaveLength(1);
+    expect(p.concepts[0]).toMatchObject({ conceptId: "senate", level: 3, start: { estimate: "some", said: "old men who voted", confidence: 6 } });
+    // Asked about before the course, not yet reached by any session.
+    expect(p.startsNotYetTaught).toEqual([{ conceptId: "consuls", name: "Two consuls", estimate: "none", said: "", from: "probe" }]);
+    expect(p.baselineSummary).toBe("Before starting Rome, Maya knew there was a senate.");
+    // Without a record there is nothing to show, and nothing breaks.
+    const bare = buildProgress([report("2026-09-01", [mastery("senate", 3)])], course, "maya", "c1")!;
+    expect(bare.concepts[0].start).toBeUndefined();
+    expect(bare.startsNotYetTaught).toEqual([]);
+    expect(bare.baselineSummary).toBeUndefined();
   });
 });

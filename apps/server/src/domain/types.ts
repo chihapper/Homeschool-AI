@@ -112,35 +112,29 @@ export type CurriculumExtraction = z.infer<typeof CurriculumExtractionSchema>;
 export const DepthSchema = z.enum(["simple", "some-nuance", "full"]);
 export type Depth = z.infer<typeof DepthSchema>;
 
+/**
+ * How to work with this student, across every course: written once by the general intake and kept current by
+ * the profile pass after each report. What the student knows about a particular course is not here: that is the
+ * course-knowledge record (CourseKnowledgeSchema), one per student per course.
+ *
+ * Until 2026-10-05 this also held `intakePreferences` (dropped: matching teaching to a stated preference has no
+ * evidence behind it, docs/INTAKE.md §1; the entry point follows prior knowledge instead) and `priorKnowledge` /
+ * `observedGaps` (moved to the course record). Records from before are migrated when the store opens
+ * (store/migrate.ts).
+ */
 export const LearnerProfileSchema = z.object({
-  /** How the learner best takes in new ideas. Not "learning styles" pseudoscience: concrete, observed preferences. */
-  intakePreferences: z.array(
-    z.enum([
-      "worked-examples",
-      "analogies",
-      "definitions-first",
-      "exploration-first",
-      "visual-descriptions",
-      "step-by-step",
-      "big-picture-first",
-    ]),
-  ),
   /** How the learner demonstrates understanding most reliably. */
   demonstrationPreferences: z.array(
     z.enum(["explain-in-own-words", "solve-a-problem", "teach-it-back", "compare-and-contrast", "predict-an-outcome", "apply-to-new-case"]),
   ),
-  /** Observed tolerance for being questioned without being given the answer. */
+  /** What they do when stuck, as observed (shown to parents as "when stuck"): low = goes quiet or guesses and needs support early; high = reasons aloud and stays with it. */
   challengeTolerance: z.enum(["low", "medium", "high"]),
-  /** Observed pacing need. */
+  /** Observed pacing need. An intake cannot measure it: it starts at "moderate" and the profile pass revises it. */
   pace: z.enum(["slow", "moderate", "fast"]),
-  /** Reading / verbal level, as observed, e.g. "reads at grade level, strong verbal reasoning". */
+  /** The register they speak or write in, as observed ("short plain sentences; explains with 'because'"). Not a reading level: typed or spoken answers cannot give one. */
   verbalLevel: z.string(),
-  /** Interests to hook analogies onto. */
+  /** Interests to hook analogies onto, specific enough to build on ("builds redstone machines in Minecraft", not "games"). */
   interests: z.array(z.string()),
-  /** What the learner already knows about the subject, as evidenced in the intake conversation. */
-  priorKnowledge: z.array(z.string()),
-  /** Gaps or misconceptions observed during intake. */
-  observedGaps: z.array(z.string()),
   /** Short plain-language note for the parent. */
   parentSummary: z.string(),
   /** Concrete instructions the Tutor should follow for this learner. */
@@ -152,6 +146,75 @@ export type LearnerProfile = z.infer<typeof LearnerProfileSchema>;
 
 /** What the intake and the profile pass produce: every field filled, depth included. Persisted records may lack depth. */
 export const LearnerProfileExtractionSchema = LearnerProfileSchema.extend({ depth: DepthSchema });
+
+// ---------------------------------------------------------------------------
+// Course knowledge (one record per student per course; written by the course intake, kept current by the profile pass)
+// ---------------------------------------------------------------------------
+
+/** Where a student starts on a concept, from one first-step question: nothing, something, or can already explain it. */
+export const StartingEstimateSchema = z.enum(["none", "some", "can-explain"]);
+export type StartingEstimate = z.infer<typeof StartingEstimateSchema>;
+
+/** One concept's starting point, in the student's own words. It is a baseline and is never rewritten: reports say where the student stands now. */
+export const ConceptStartSchema = z.object({
+  conceptId: z.string(),
+  estimate: StartingEstimateSchema,
+  /** The student's first answer, quoted. Empty when they said they did not know. */
+  said: z.string(),
+  /** How sure they said they were, 0 to 10. Absent when they gave no number (it is not asked after "I don't know"). */
+  confidence: z.number().int().optional(),
+  /** Where the answer contradicts the family's material: what the material says instead. */
+  materialSays: z.string().optional(),
+  /** A probe question, or the opening "tell me everything you know" narration. */
+  from: z.enum(["probe", "narration"]),
+});
+export type ConceptStart = z.infer<typeof ConceptStartSchema>;
+
+/** The part of a course record the profile pass keeps current after each session on the course. */
+export const CourseNotesSchema = z.object({
+  /** What the student has shown they know about this course, one entry per fact, quoted. */
+  priorKnowledge: z.array(z.string()),
+  /** What they got wrong or could not do when asked, in their words. */
+  observedGaps: z.array(z.string()),
+  /** Instructions for the tutor that hold on this course only. */
+  guidance: z.array(z.string()),
+});
+export type CourseNotes = z.infer<typeof CourseNotesSchema>;
+
+export const CourseKnowledgeSchema = CourseNotesSchema.extend({
+  /** `<learnerId>__<courseId>` (store/index.ts, knowledgeId). */
+  id: z.string(),
+  learnerId: z.string(),
+  courseId: z.string(),
+  /** Starting points from the course intake, one per concept it reached. Empty when no intake has run. */
+  starts: z.array(ConceptStartSchema),
+  /** For the parent: what the student could do before starting the course. Written once, by the course intake. */
+  baselineSummary: z.string().optional(),
+  /** A course intake has finished and its starting points are being written in the background (or that failed, with the reason). Cleared when they land. */
+  pending: z.object({ sessionId: z.string(), since: z.string(), error: z.string().optional() }).optional(),
+  /** The course-intake session that wrote the starting points. Absent on a record made by migration or by the profile pass alone. */
+  intakeSessionId: z.string().optional(),
+  intakeAt: z.string().optional(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type CourseKnowledge = z.infer<typeof CourseKnowledgeSchema>;
+
+/** What the course-intake extraction returns. Every field is required (structured outputs): confidence is -1 when no number was given, materialSays is empty when nothing contradicts. */
+export const CourseIntakeExtractionSchema = CourseNotesSchema.extend({
+  starts: z.array(
+    z.object({
+      conceptId: z.string(),
+      estimate: StartingEstimateSchema,
+      said: z.string().describe("The student's own words, quoted. Empty if they said they did not know."),
+      confidence: z.number().int().describe("0 to 10 as the student said it; -1 if they gave no number."),
+      materialSays: z.string().describe("What the family's material says instead, when the answer contradicts it; empty otherwise."),
+      from: z.enum(["probe", "narration"]),
+    }),
+  ),
+  baselineSummary: z.string().describe("Three to five plain sentences for the parent: what the student could do before starting this course."),
+});
+export type CourseIntakeExtraction = z.infer<typeof CourseIntakeExtractionSchema>;
 
 /** One difference between two versions of a profile. A list field gets one entry per item added (from "") or removed (to ""). */
 export const ProfileChangeSchema = z.object({
@@ -177,12 +240,17 @@ export const ProfileUpdateSchema = z.object({
   summary: z.string(),
   changes: z.array(ProfileChangeSchema),
   /**
-   * Changes to the slow fields (pace, challenge tolerance, verbal level, depth, intake preferences) that this
-   * session proposed but one session cannot make: held until the next session's pass proposes the same.
+   * Changes to the slow fields (pace, challenge tolerance, verbal level, depth) that this session proposed but
+   * one session cannot make: held until the next session's pass proposes the same.
    */
   held: z.array(ProfileChangeSchema),
   /** The profile before this update, so it can be undone. */
   previous: LearnerProfileSchema,
+  /**
+   * The course record's notes before this update, when the update changed them (`changes` entries for
+   * priorKnowledge, observedGaps and courseGuidance belong to the record of `courseId`). Undo restores them too.
+   */
+  previousCourse: CourseNotesSchema.optional(),
 });
 export type ProfileUpdate = z.infer<typeof ProfileUpdateSchema>;
 
@@ -191,7 +259,15 @@ export const LearnerSchema = z.object({
   name: z.string(),
   age: z.number().int().optional(),
   gradeLevel: z.string().optional(),
+  /** The parent's own words about their child, followed by the tutor as written and never rewritten by any pass. */
+  parentNotes: z.string().optional(),
   profile: LearnerProfileSchema.optional(),
+  /**
+   * The general intake has finished and its profile is being written in the background (or failed, with the
+   * reason). While this is set the intake conversation is not run again: the transcript is kept, and the
+   * write is retried. Cleared when the profile lands.
+   */
+  profilePending: z.object({ sessionId: z.string(), since: z.string(), error: z.string().optional() }).optional(),
   /** Revisions of the profile after sessions, oldest first (domain/profile.ts keeps the tail). */
   profileHistory: z.array(ProfileUpdateSchema).optional(),
   /** When the profile pass last ran, whether or not it changed anything. */
@@ -204,8 +280,16 @@ export type Learner = z.infer<typeof LearnerSchema>;
 // Session (managed by the Orchestrator; the Tutor Agent runs inside it)
 // ---------------------------------------------------------------------------
 
+/**
+ * What a session is for. A sitting can be a chain of them: a new student's first session on a course is the
+ * general intake, then the course intake, then the lesson, each its own session with its own transcript.
+ * Absent on sessions from before 2026-10-05: a lesson (or, with phase "intake", the old combined intake).
+ */
+export const SessionKindSchema = z.enum(["general-intake", "course-intake", "lesson"]);
+export type SessionKind = z.infer<typeof SessionKindSchema>;
+
 export const SessionPhaseSchema = z.enum([
-  "intake", // Profiler Agent is running the initial assessment
+  "intake", // An intake agent is running: the general intake or the course intake (see Session.kind)
   "teach", // Tutor introduces / elicits the concept
   "inquire", // Tutor probes with Socratic questions
   "assess", // Tutor asks the learner to demonstrate mastery
@@ -321,6 +405,19 @@ export const SessionSchema = z.object({
   learnerId: z.string(),
   courseId: z.string().optional(),
   lessonId: z.string().optional(),
+  kind: SessionKindSchema.optional(),
+  /** An intake only: what the sitting goes on to when it finishes (the course intake, then the lesson). Absent: it ends there. */
+  then: z.object({ courseId: z.string().optional(), lessonId: z.string().optional(), narrationFirst: z.boolean().optional() }).optional(),
+  /** The session that took over when this intake finished. A message sent to this one is answered there. */
+  continuedIn: z.string().optional(),
+  /** The intake this session carried on from, in the same sitting. */
+  continuedFrom: z.string().optional(),
+  /** Course intake: the concepts it asks about, in order, chosen once at creation (domain/intake.ts). */
+  probeConceptIds: z.array(z.string()).optional(),
+  /** General intake: the age band whose questions it starts with (domain/intake.ts), from the grade at creation. */
+  intakeBand: z.enum(["A", "B", "C"]).optional(),
+  /** An intake that has finished: its record is written in the background, and this says how that went. */
+  extraction: z.object({ status: z.enum(["writing", "done", "failed"]), at: z.string(), error: z.string().optional() }).optional(),
   /** Index into the session's concept walk (conceptIds below) of the concept currently being worked. */
   conceptIndex: z.number().int(),
   /**

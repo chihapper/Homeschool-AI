@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, type Course, type Health, type Learner, type Report, type Session } from "./api";
+import { api, type Course, type CourseKnowledge, type Health, type Learner, type Report, type Session } from "./api";
 import { CoursesPage } from "./pages/CoursesPage";
 import { LearnersPage } from "./pages/LearnersPage";
 import { SessionPage } from "./pages/SessionPage";
@@ -19,6 +19,7 @@ export function App() {
   const [tab, setTab] = useState<Tab>("session");
   const [courses, setCourses] = useState<Course[]>([]);
   const [learners, setLearners] = useState<Learner[]>([]);
+  const [knowledge, setKnowledge] = useState<CourseKnowledge[]>([]);
   const [health, setHealth] = useState<Health | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [report, setReport] = useState<Report | null>(null);
@@ -26,9 +27,10 @@ export function App() {
 
   const refresh = useCallback(async () => {
     try {
-      const [c, l, h] = await Promise.all([api.courses(), api.learners(), api.health()]);
+      const [c, l, h, k] = await Promise.all([api.courses(), api.learners(), api.health(), api.knowledge()]);
       setCourses(c);
       setLearners(l);
+      setKnowledge(k);
       setHealth(h);
       setError(null);
     } catch (e) {
@@ -45,7 +47,7 @@ export function App() {
         <h1>Homeschool AI</h1>
         <nav>
           {TABS.map(([t, label]) => (
-            <button key={t} className={tab === t ? "active" : ""} onClick={() => { setTab(t); if (t === "students") void refresh(); }} title={t === "students" ? "Profiles are revised in the background after each report" : undefined}>
+            <button key={t} className={tab === t ? "active" : ""} onClick={() => { setTab(t); if (t === "students" || t === "courses" || t === "session") void refresh(); }} title={t === "students" ? "Profiles are revised in the background after each report" : undefined}>
               {label}
               {t === "session" && session && session.phase !== "complete" ? <span className="dot" title="A session is open" /> : null}
             </button>
@@ -61,12 +63,24 @@ export function App() {
       </header>
       <main>
         {error && <div className="card error">{error}</div>}
-        {tab === "courses" && <CoursesPage courses={courses} onChange={refresh} />}
-        {tab === "students" && <LearnersPage learners={learners} onChange={refresh} />}
+        {tab === "courses" && (
+          <CoursesPage
+            courses={courses}
+            onChange={refresh}
+            learners={learners}
+            knowledge={knowledge}
+            onStartSession={(s) => {
+              setSession(s);
+              setTab("session");
+            }}
+          />
+        )}
+        {tab === "students" && <LearnersPage learners={learners} courses={courses} knowledge={knowledge} onChange={refresh} />}
         {tab === "session" && (
           <SessionPage
             courses={courses}
             learners={learners}
+            knowledge={knowledge}
             health={health}
             session={session}
             onSession={setSession}

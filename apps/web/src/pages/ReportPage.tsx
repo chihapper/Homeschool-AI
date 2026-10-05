@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, fmtDate, type ConceptProgress, type Course, type Learner, type OutsideClaim, type ProgressSummary, type Report } from "../api";
+import { api, fmtDate, type ConceptProgress, type ConceptStart, type Course, type Learner, type OutsideClaim, type ProgressSummary, type Report } from "../api";
 
 const LEVELS = ["No evidence", "Recalls", "Explains", "Applies", "Extends"];
 
@@ -17,6 +17,13 @@ function checkLabel(c: OutsideClaim): { label: string; tone: string } {
 }
 
 const STANCE: Record<OutsideClaim["tutorStance"], string> = { confirmed: "agreed", corrected: "corrected it", unsure: "said it wasn't sure", deferred: "pointed back to the reading" };
+
+const START_LABEL: Record<ConceptStart["estimate"], string> = { none: "nothing yet", some: "some knowledge", "can-explain": "could already explain it" };
+
+/** A starting point as a parent reads it: the estimate, the child's own words, and how sure they said they were. */
+function startText(s: ConceptStart): string {
+  return `${START_LABEL[s.estimate]}${s.said ? `: “${s.said}”` : ""}${s.confidence !== undefined ? ` (sure ${s.confidence}/10)` : ""}`;
+}
 
 /** What changed since the previous time this concept was assessed, in words a parent reads at a glance. */
 function trend(c: ConceptProgress): string {
@@ -98,13 +105,14 @@ export function ReportPage({ report, courses, learners }: { report: Report | nul
               <span className="stat"><strong>{plural(progress.latest.answerSeekingTurns, "turn")}</strong> asking for the answer last session · {progress.totals.answerSeekingTurns} in all</span>
             </div>
             <h3>Mastery by concept</h3>
-            <p className="muted small">Levels: 1 recalls · 2 explains · 3 applies to a new case · 4 extends or teaches back. "Since last time" compares with the previous session that assessed that concept; "new" means this is the first. Concepts a session did not reach are not listed.</p>
+            <p className="muted small">Levels: 1 recalls · 2 explains · 3 applies to a new case · 4 extends or teaches back. "Since last time" compares with the previous session that assessed that concept; "new" means this is the first. "Before the course" is what they said when asked before any teaching. Concepts a session did not reach are not listed.</p>
             <table className="table">
-              <thead><tr><th>Concept</th><th>Level</th><th>Since last time</th><th>Still confuses</th><th>Assessed</th></tr></thead>
+              <thead><tr><th>Concept</th><th>Before the course</th><th>Level</th><th>Since last time</th><th>Still confuses</th><th>Assessed</th></tr></thead>
               <tbody>
                 {progress.concepts.map((c) => (
                   <tr key={c.conceptId}>
                     <td><strong>{c.name}</strong></td>
+                    <td className="small">{c.start ? startText(c.start) : <span className="muted">not asked</span>}</td>
                     <td><span className={`level l${c.level}`}>{c.level}/4 · {LEVELS[c.level]}</span></td>
                     <td>{trend(c)}</td>
                     <td className={c.misconceptions.length ? "warn" : "muted"}>{c.misconceptions.join(" · ") || "nothing listed"}</td>
@@ -113,6 +121,13 @@ export function ReportPage({ report, courses, learners }: { report: Report | nul
                 ))}
               </tbody>
             </table>
+            {progress.baselineSummary && <p className="small"><strong>Before the course:</strong> {progress.baselineSummary}</p>}
+            {progress.startsNotYetTaught.length > 0 && (
+              <>
+                <h3>Asked before the course, not taught yet</h3>
+                <ul className="small">{progress.startsNotYetTaught.map((s) => <li key={s.conceptId}><strong>{s.name}</strong>: {startText(s)}</li>)}</ul>
+              </>
+            )}
             {progress.misconceptionsAtLatestSession.length > 0 && (
               <>
                 <h3>Worth revisiting this week</h3>

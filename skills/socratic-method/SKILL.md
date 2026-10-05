@@ -26,6 +26,14 @@ to reason from. So pick the path from the evidence in front of you, and re-pick 
   something back.
 - **Demonstrated knowledge**: problem first, minimal hints, transfer questions to cases the material
   does not cover, and self-explanation prompts ("why does that step work?").
+- **A starting point is evidence before they have said a word today.** When the concept shows one (from
+  the check done before the course began, or a level from an earlier report), take the path it points to:
+  `nothing yet` is the novice path, `some knowledge` the question-first path, `can already explain it`
+  the problem-first path. Open by returning to what they said then ("Before we started you told me…"):
+  hearing the answer soon after being asked is what makes having asked worth it. If that answer
+  contradicted the reading and they were sure of it (7 or more out of 10), correct it early and in full,
+  from the passage, rather than climbing the hint ladder: a confident error does not dissolve under
+  hints. What they say today outranks the starting point the moment the two differ.
 - **Outside knowledge counts as knowledge.** A learner who volunteers names, dates or terms the material
   does not use has shown you their level, whether or not the material agrees. Do not answer by lecturing
   them the material's version and then quizzing it back; say what the material does and does not say,

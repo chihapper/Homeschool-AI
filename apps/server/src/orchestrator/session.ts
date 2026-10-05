@@ -7,21 +7,24 @@
  * The LLM agents *request* transitions via the `advance` tool; the orchestrator validates them
  * (e.g. no next-concept without recorded evidence) and owns all persistence.
  */
-import { ObservationSchema, type Course, type Learner, type Lesson, type MasteryReport, type Observation, type ProfileUpdate, type Session, type TranscriptTurn } from "../domain/types.js";
+import { ObservationSchema, type Concept, type Course, type Learner, type Lesson, type MasteryReport, type Observation, type ProfileUpdate, type Session, type SessionKind, type TranscriptTurn } from "../domain/types.js";
+import { gradeBand, planSitting, selectProbeConcepts, toCourseKnowledge } from "../domain/intake.js";
 import { applyRevision, normalizeProfile, studentLevel } from "../domain/profile.js";
 import { proposeRevision } from "../agents/profile-agent.js";
 import type { TurnLatency } from "../llm/client.js";
 import type { TurnResult } from "../agents/base.js";
 import { ChunkIndex } from "../ingest/retrieval.js";
 import { effectiveConceptIds, effectiveLessons, isConceptKept, walkedConceptIds } from "../domain/focus.js";
-import { courses, learners, reports, sessions } from "../store/index.js";
+import { courseKnowledge, courses, knowledgeFor, knowledgeId, learners, putCourseNotes, reports, sessions } from "../store/index.js";
+import { buildProgress } from "../domain/progress.js";
 import { openThread, setOpenThread } from "./notes.js";
-import { finalizeProfile, profilerTurn } from "../agents/profiler-agent.js";
+import { finalizeProfile, passageReading, profilerTurn, type NextStep } from "../agents/profiler-agent.js";
+import { courseIntakeTurn, extractCourseKnowledge } from "../agents/course-intake-agent.js";
 import { prewarmTutor, reflectTurn, tutorTurn, type AdvanceTarget, type TutorContext } from "../agents/tutor-agent.js";
 import { config } from "../config.js";
 import { assessSession } from "../agents/assessor-agent.js";
 import { checkOutsideClaim } from "../agents/reference-agent.js";
-import { mergeFinishedChecks, recordOutsideClaim, SAY_FIRST, settleChecks, spokenFollowUps, startCheck } from "./outside.js";
+import { aboutFaith, mergeFinishedChecks, recordOutsideClaim, SAY_FIRST, settleChecks, spokenFollowUps, startCheck } from "./outside.js";
 import { isEvidence } from "../domain/told.js";
 
 const indexCache = new Map<string, ChunkIndex>();
@@ -38,10 +41,12 @@ export interface CreateSessionArgs {
   learnerId: string;
   courseId?: string;
   lessonId?: string;
-  /** Skip the intake even if the learner has no profile yet. */
+  /** Go straight to the lesson: neither intake runs, even for a student with no profile or no record for the course. */
   skipIntake?: boolean;
   /** The student has already read the material: open by asking them to tell it back, then question from that. */
   narrationFirst?: boolean;
+  /** Run one intake on its own, with nothing after it (the Courses tab's button for the course intake). */
+  only?: "general-intake" | "course-intake";
 }
 
 /**
@@ -54,6 +59,30 @@ export const NARRATION_DIRECTIVE =
   "no corrections and no questions mid-narration; if they pause, at most \"take your time, what else?\". Once they stop, work from what they said and what they " +
   "left out, as the socratic-method skill describes under \"Narration first\". Do this before anything else queued here.";
 
+/** A concept the course intake does not ask about: a child is not quizzed on faith before the family's material has spoken. */
+const notAskedAbout = (c: Concept): boolean => aboutFaith(`${c.name}. ${c.summary}`);
+
+/** The concepts a course intake would ask this student about; empty when there is nothing it may ask. */
+function probeConcepts(course: Course): string[] {
+  return selectProbeConcepts(course, notAskedAbout);
+}
+
+/** What a sitting for this student consists of, as things stand: see planSitting. A course with nothing to ask about has no course intake. */
+function sittingPlan(learner: Learner, course: Course | undefined, skipIntake?: boolean): SessionKind[] {
+  return planSitting({
+    // A profile being written counts: the conversation happened, and is not held again.
+    hasProfile: Boolean(learner.profile || learner.profilePending),
+    hasCourse: Boolean(course),
+    hasCourseRecord: course ? Boolean(knowledgeFor(learner.id, course.id)) : false,
+    skipIntake,
+  }).filter((kind) => kind !== "course-intake" || (course !== undefined && probeConcepts(course).length > 0));
+}
+
+/**
+ * Start a sitting: the first session of whatever it consists of. A new student's first session on a course is
+ * the general intake; when that finishes the sitting carries on by itself into the course intake and then the
+ * lesson (continueSitting), each its own session with its own transcript.
+ */
 export function createSession(args: CreateSessionArgs): Session {
   const learner = learners.require(args.learnerId);
   let course: Course | undefined;
@@ -61,44 +90,111 @@ export function createSession(args: CreateSessionArgs): Session {
   if (args.courseId) {
     course = courses.require(args.courseId);
     lesson = args.lessonId ? course.lessons.find((l) => l.id === args.lessonId) : effectiveLessons(course)[0];
-    if (!lesson) {
+    if (!lesson && args.only !== "course-intake") {
       throw new Error(args.lessonId ? `Lesson ${args.lessonId} not found in course ${course.id}` : `Course ${course.id} has no lesson left to teach: every lesson is skipped in its focus.`);
     }
   }
-  const needsIntake = !learner.profile && !args.skipIntake;
-  if (!needsIntake && !course) throw new Error("A course is required unless the session is an intake.");
+  // An intake whose record was never written (the server stopped, or the write failed) is picked up again here.
+  resumePendingRecords(learner);
+  if (args.only === "course-intake") {
+    if (!course) throw new Error("Choose the course to ask about.");
+    if (!probeConcepts(course).length) throw new Error(`"${course.title}" has nothing the course intake may ask about: every concept is skipped in its focus, or is about faith.`);
+    return startSession("course-intake", learner, { course });
+  }
+  if (args.only === "general-intake") return startSession("general-intake", learner, {});
+  const plan = sittingPlan(learner, course, args.skipIntake);
+  if (!plan.length) throw new Error(`Choose a course: ${learner.name} already has a profile, so there is no intake to run without one.`);
+  const destination = course ? { courseId: course.id, lessonId: args.lessonId, narrationFirst: args.narrationFirst || undefined } : undefined;
+  return startSession(plan[0], learner, { course, lesson, narrationFirst: args.narrationFirst, then: plan.length > 1 ? destination : undefined });
+}
+
+interface StartOptions {
+  course?: Course;
+  lesson?: Lesson;
+  narrationFirst?: boolean;
+  /** An intake: where the sitting goes when it finishes. */
+  then?: Session["then"];
+  /** The intake this session carries on from, in the same sitting. */
+  continuedFrom?: string;
+}
+
+function startSession(kind: SessionKind, learner: Learner, o: StartOptions): Session {
+  const base = { id: sessions.newId(), learnerId: learner.id, kind, conceptIndex: 0, transcript: [], observations: [], startedAt: new Date().toISOString(), continuedFrom: o.continuedFrom };
+  if (kind === "general-intake") {
+    return sessions.put({ ...base, phase: "intake", intakeBand: gradeBand(learner.gradeLevel, learner.age), then: o.then, pendingDirectives: [] });
+  }
+  const course = o.course;
+  if (!course) throw new Error("A course is required for this session.");
+  if (kind === "course-intake") {
+    return sessions.put({ ...base, phase: "intake", courseId: course.id, probeConceptIds: probeConcepts(course), then: o.then, pendingDirectives: [] });
+  }
+  const lesson = o.lesson;
+  if (!lesson) throw new Error(`Course ${course.id} has no lesson left to teach: every lesson is skipped in its focus.`);
   // The parent's focus is read here, once. The walk is frozen on the session so a later edit cannot change
   // what a running session teaches or the tutor's cached prompt prefix.
-  const conceptIds = course && lesson ? effectiveConceptIds(course, lesson) : undefined;
-  if (course && lesson && !conceptIds?.length) throw new Error(`Lesson "${lesson.title}" has no concepts left to teach: change the course's focus or pick another lesson.`);
+  const conceptIds = effectiveConceptIds(course, lesson);
+  if (!conceptIds.length) throw new Error(`Lesson "${lesson.title}" has no concepts left to teach: change the course's focus or pick another lesson.`);
   const opening: string[] = [];
   // A narration is itself retrieval, so a narration-first session does not also open with a spaced-retrieval question.
-  const retrieval = course && !needsIntake && !args.narrationFirst ? spacedRetrieval(learner, course) : undefined;
+  const retrieval = !o.narrationFirst ? spacedRetrieval(learner, course) : undefined;
   if (retrieval) opening.push(retrieval.directive);
-  if (course && args.narrationFirst) opening.push(NARRATION_DIRECTIVE);
-  const session: Session = {
-    id: sessions.newId(),
-    learnerId: learner.id,
-    courseId: course?.id,
-    lessonId: lesson?.id,
-    conceptIndex: 0,
+  if (o.narrationFirst) opening.push(NARRATION_DIRECTIVE);
+  const saved = sessions.put({
+    ...base,
+    courseId: course.id,
+    lessonId: lesson.id,
     conceptIds,
-    narrationFirst: course && args.narrationFirst ? true : undefined,
+    narrationFirst: o.narrationFirst ? true : undefined,
     retrievalConceptId: retrieval?.conceptId,
     // Read once, like the focus: the tutor's cached prompt states it, so a Settings change applies from the next session.
-    outsideKnowledge: course ? config.outsideKnowledge : undefined,
-    phase: needsIntake ? "intake" : "teach",
-    transcript: [],
-    observations: [],
+    outsideKnowledge: config.outsideKnowledge,
+    phase: "teach",
     pendingDirectives: opening,
-    startedAt: new Date().toISOString(),
-  };
-  const saved = sessions.put(session);
-  if (config.prewarmCache && course && lesson && !needsIntake) {
+  });
+  if (config.prewarmCache) {
     const ctx = tutorContextFor(saved, learner, course, lesson);
     if (ctx) void prewarmTutor(ctx);
   }
   return saved;
+}
+
+/** Where an intake's sitting goes next: its own `then`, or, for an intake session saved before 2026-10-05, the lesson it was created for. */
+function destinationOf(session: Session): Session["then"] {
+  return session.then ?? (session.kind ? undefined : { courseId: session.courseId, lessonId: session.lessonId, narrationFirst: session.narrationFirst });
+}
+
+/** After this intake, is the course intake next? Yes unless this was it, the student already has a record for the course, or there is nothing to ask. */
+function courseIntakeFollows(finished: Session, learner: Learner, course: Course): boolean {
+  return finished.kind !== "course-intake" && !knowledgeFor(learner.id, course.id) && probeConcepts(course).length > 0;
+}
+
+/** What the sitting goes on to after this intake, in words the intake can say: the course intake, the lesson, or nothing. */
+function nextStepAfter(session: Session, learner: Learner): NextStep | undefined {
+  const then = destinationOf(session);
+  const course = then?.courseId ? courses.get(then.courseId) : undefined;
+  if (!then || !course) return undefined;
+  if (courseIntakeFollows(session, learner, course)) return { kind: "course-intake", courseTitle: course.title };
+  const lesson = then.lessonId ? course.lessons.find((l) => l.id === then.lessonId) : effectiveLessons(course)[0];
+  return lesson ? { kind: "lesson", courseTitle: course.title, lessonTitle: lesson.title } : undefined;
+}
+
+/** An intake has finished: start whatever its sitting goes on to, and return it (nothing, when the sitting ends there). */
+function continueSitting(finished: Session, learner: Learner): Session | undefined {
+  const then = destinationOf(finished);
+  const course = then?.courseId ? courses.get(then.courseId) : undefined;
+  if (!then || !course) return undefined;
+  if (courseIntakeFollows(finished, learner, course)) return startSession("course-intake", learner, { course, then, continuedFrom: finished.id });
+  const lesson = then.lessonId ? course.lessons.find((l) => l.id === then.lessonId) : effectiveLessons(course)[0];
+  if (!lesson) return undefined;
+  return startSession("lesson", learner, { course, lesson, narrationFirst: then.narrationFirst, continuedFrom: finished.id });
+}
+
+/** The last thing the previous session of the sitting said, for a session that has not spoken yet: it carries on from those words. */
+function carriedOnWords(session: Session): string | undefined {
+  if (!session.continuedFrom || session.transcript.length) return undefined;
+  const last = [...(sessions.get(session.continuedFrom)?.transcript ?? [])].reverse().find((t) => t.role === "assistant");
+  // The closing turn is the hand-over; if a passage was read in it, only the words after it matter.
+  return last?.content.split(/\n\n/).at(-1)?.trim() || undefined;
 }
 
 /**
@@ -132,7 +228,24 @@ export function retrievalDirective(conceptName: string, learnedOn: string): stri
 function tutorContextFor(session: Session, learner: Learner, course: Course, lesson: Lesson): TutorContext | undefined {
   const concept = course.concepts.find((c) => c.id === walkedConceptIds(session, course, lesson)[session.conceptIndex]);
   if (!concept) return undefined;
-  return { session, learner, course, lesson, concept, index: indexFor(course), onObservation: () => "", onAdvance: () => "" };
+  return { session, learner, course, lesson, concept, index: indexFor(course), onObservation: () => "", onAdvance: () => "", ...whatIsKnown(session, learner, course) };
+}
+
+/** Where earlier reports put the student on each concept. Reports are written when a session ends, so one reading per session is enough. */
+const assessedCache = new Map<string, NonNullable<TutorContext["assessed"]>>();
+
+/** What the tutor is told about the student on this course: their record for it, and the levels earlier reports gave. */
+function whatIsKnown(session: Session, learner: Learner, course: Course): Pick<TutorContext, "knowledge" | "assessed" | "intakeJustNow"> {
+  let assessed = assessedCache.get(session.id);
+  if (!assessed) {
+    const progress = buildProgress(reports.list(), course, learner.id, course.id);
+    assessed = Object.fromEntries((progress?.concepts ?? []).map((c) => [c.conceptId, { level: c.level, asOf: c.asOf }]));
+    assessedCache.set(session.id, assessed);
+  }
+  // The record is read on every turn: a course intake's notes can land while the lesson that followed it is running,
+  // and until they do the tutor reads the intake's exchange itself.
+  const knowledge = knowledgeFor(learner.id, course.id);
+  return { knowledge, assessed, intakeJustNow: intakeJustNow(knowledge, learner.name) };
 }
 
 export function getSession(id: string): Session {
@@ -192,6 +305,11 @@ export interface RespondResult {
    * and the phase are current; the session on disk is updated when it settles.
    */
   reflection?: Promise<Session>;
+  /**
+   * An intake finished in this reply and the sitting went straight on: `session` is the one that took over (the
+   * course intake, or the lesson), and its opening words are part of `text`. Later messages belong to it.
+   */
+  handover?: { from: string; to: string; kind: SessionKind };
 }
 
 /** In-flight reflect passes, so a caller that did not keep the promise can still wait before the next turn. */
@@ -236,7 +354,12 @@ async function* respondTurn(
 ): AsyncGenerator<string, RespondResult, void> {
   // The previous turn's notes and phase change must land before this turn is composed.
   await settleReflection(sessionId);
-  const session = sessions.require(sessionId);
+  let session = sessions.require(sessionId);
+  // An intake that has finished handed its sitting on: a message addressed to it belongs to the session that took over.
+  while (session.continuedIn) {
+    await settleReflection(session.continuedIn);
+    session = sessions.require(session.continuedIn);
+  }
   if (session.phase === "complete") {
     const bye = "This session is finished. Start a new one when you're ready.";
     yield bye;
@@ -277,8 +400,19 @@ async function* respondTurn(
     }
   }
 
-  if (session.phase === "intake") {
-    result = yield* drain(profilerTurn({ session, learner, course, onFinish: (reason) => (intakeFinished = reason) }, signal));
+  if (session.phase === "intake" && session.kind === "course-intake") {
+    if (!course) throw new Error("The course intake has no course.");
+    const concepts = (session.probeConceptIds ?? []).map((id) => course.concepts.find((c) => c.id === id)).filter((c): c is Concept => Boolean(c));
+    result = yield* drain(courseIntakeTurn({ session, learner, course, concepts, next: nextStepAfter(session, learner), carriedOn: carriedOnWords(session), onFinish: (reason) => (intakeFinished = reason) }, signal));
+  } else if (session.phase === "intake") {
+    // The general intake. The agent asks for the passage and the orchestrator reads it, so every student hears the same words.
+    let passageAsked = false;
+    result = yield* drain(profilerTurn({ session, learner, next: nextStepAfter(session, learner), onFinish: (reason) => (intakeFinished = reason), onReadPassage: () => (passageAsked = true) }, signal));
+    if (passageAsked && !result.latency.interrupted) {
+      const reading = passageReading();
+      yield `${result.text ? "\n\n" : ""}${reading}`;
+      result = { ...result, text: `${result.text}${result.text ? "\n\n" : ""}${reading}` };
+    }
   } else {
     if (!course || !lesson) throw new Error("Session has no course/lesson.");
     const concept = course.concepts.find((c) => c.id === walkedConceptIds(session, course, lesson)[session.conceptIndex]);
@@ -295,6 +429,8 @@ async function* respondTurn(
     const ctx: TutorContext = {
       session: { ...session, pendingDirectives: directives.filter((d) => !d.startsWith(SAY_FIRST)) },
       saidFirst: saidFirst || undefined,
+      carriedOn: carriedOnWords(session),
+      ...whatIsKnown(session, learner, course),
       learner,
       course,
       lesson,
@@ -361,21 +497,27 @@ async function* respondTurn(
   }
 
   if (intakeFinished) {
-    // Normalised like every later revision: no repeats, and at most six guidance items (an intake once wrote eleven).
-    const profile = normalizeProfile(await finalizeProfile({ session, learner, course }));
-    learners.put({ ...learner, profile });
-    if (course && lesson) {
-      session.phase = "teach";
-      session.pendingDirectives.push(`Intake is complete. Begin the lesson "${lesson.title}" with the first concept.`);
-      // The tutor prompt (with the new profile) is about to be used for the first time: warm its cache now.
-      if (config.prewarmCache) {
-        const ctx = tutorContextFor(session, { ...learner, profile }, course, lesson);
-        if (ctx) void prewarmTutor(ctx);
-      }
-    } else {
-      session.phase = "complete";
-      session.endedAt = new Date().toISOString();
+    // The conversation is over. Its record (the profile, or the course's starting points) is written from the
+    // transcript in the background: the old intake wrote it before answering, which was half a minute of
+    // silence followed by a goodbye, and then the lesson started ("wait are we done already?", 2026-09-15).
+    const at = new Date().toISOString();
+    session.phase = "complete";
+    session.endedAt = at;
+    session.extraction = { status: "writing", at };
+    markRecordPending(session, at);
+    // Read again: the pending mark has just been written on the learner.
+    const next = signal?.aborted ? undefined : continueSitting(session, learners.require(learner.id));
+    if (next) session.continuedIn = next.id;
+    sessions.put(session);
+    void writeIntakeRecord(session.id);
+    if (next) {
+      // The sitting goes straight on: the next session's opening is part of this same reply, so there is no dead
+      // air and nothing for the browser to trigger. The words land in the next session's own transcript.
+      yield " ";
+      const follow = yield* respondTurn(next.id, "", undefined, signal);
+      return { ...follow, text: `${result.text} ${follow.text}`.trim(), handover: { from: session.id, to: follow.session.id, kind: follow.session.kind ?? "lesson" } };
     }
+    return { text: result.text, session };
   }
 
   sessions.put(session);
@@ -440,6 +582,8 @@ export function sameEvidence(a: string, b: string): boolean {
  * left in phase "assess" and offered for resumption).
  */
 export async function endSession(sessionId: string): Promise<{ session: Session; report?: MasteryReport; profileUpdate?: Promise<ProfileUpdate | undefined> }> {
+  // A sitting that began with an intake is ended where it is now: the session that took over.
+  for (let next = sessions.require(sessionId).continuedIn; next; next = sessions.require(next).continuedIn) sessionId = next;
   await settleReflection(sessionId);
   // Give reference checks still running a moment, so the report can show their verdicts.
   await settleChecks(sessionId);
@@ -455,7 +599,7 @@ export async function endSession(sessionId: string): Promise<{ session: Session;
   mergeFinishedChecks(session);
   sessions.put(session);
   if (!course || !lesson || session.transcript.length < 2) return { session };
-  const report = await assessSession({ session, learner, course, lesson });
+  const report = await assessSession({ session, learner, course, lesson, knowledge: knowledgeFor(learner.id, course.id) });
   reports.put({ ...report, id: session.id });
   // The profile pass runs after the report is saved, in the background: the parent is waiting on the report,
   // and the revision lands on the record when it is done. Never rejects; a failure is logged.
@@ -463,8 +607,121 @@ export async function endSession(sessionId: string): Promise<{ session: Session;
   return { session, report, profileUpdate };
 }
 
-/** One profile pass at a time per learner, each reading what the previous one wrote: two sessions ending together cannot overwrite each other. */
-const profilePasses = new Map<string, Promise<unknown>>();
+
+
+// ---------------------------------------------------------------------------
+// An intake's record, written in the background
+// ---------------------------------------------------------------------------
+
+/** One write at a time per learner (a profile pass, an intake's record), each reading what the previous one wrote. */
+const learnerWrites = new Map<string, Promise<unknown>>();
+function queued<T>(learnerId: string, job: () => Promise<T>): Promise<T> {
+  const run = (learnerWrites.get(learnerId) ?? Promise.resolve()).then(job);
+  learnerWrites.set(learnerId, run.catch(() => undefined));
+  return run;
+}
+
+/** Intake sessions whose record is being written in this process, so a second request does not start a second write. */
+const writing = new Set<string>();
+
+/**
+ * Say on the student's records that an intake has happened and its record is on the way: the general intake is
+ * not held again while the profile is being written, the course intake is not due again, and the Students tab
+ * can say what is going on.
+ */
+function markRecordPending(session: Session, since: string): void {
+  const pending = { sessionId: session.id, since };
+  if (session.kind === "course-intake") {
+    if (!session.courseId) return;
+    const existing = knowledgeFor(session.learnerId, session.courseId);
+    courseKnowledge.put({
+      ...(existing ?? { id: knowledgeId(session.learnerId, session.courseId), learnerId: session.learnerId, courseId: session.courseId, starts: [], priorKnowledge: [], observedGaps: [], guidance: [], createdAt: since }),
+      pending,
+      updatedAt: since,
+    });
+  } else {
+    learners.put({ ...learners.require(session.learnerId), profilePending: pending });
+  }
+}
+
+/**
+ * Write the record an intake session leaves behind: the learner profile (general intake) or the course's
+ * starting points and first notes (course intake). Never rejects: a failure is recorded on the session and on
+ * the pending mark, where the Students tab shows it with a way to try again.
+ */
+export function writeIntakeRecord(sessionId: string): Promise<void> {
+  if (writing.has(sessionId)) return Promise.resolve();
+  writing.add(sessionId);
+  const learnerId = sessions.require(sessionId).learnerId;
+  return queued(learnerId, async () => {
+    const session = sessions.require(sessionId);
+    const learner = learners.require(learnerId);
+    const settle = (extraction: NonNullable<Session["extraction"]>): void => void sessions.put({ ...sessions.require(sessionId), extraction });
+    try {
+      if (session.kind === "course-intake") {
+        const course = courses.require(session.courseId ?? "");
+        const asked = session.probeConceptIds ?? [];
+        const concepts = asked.map((id) => course.concepts.find((c) => c.id === id)).filter((c): c is Concept => Boolean(c));
+        const extraction = await extractCourseKnowledge({ session, learner, course, concepts });
+        const at = new Date().toISOString();
+        // Read again: a profile pass may have added notes while this was being written.
+        courseKnowledge.put(toCourseKnowledge(extraction, { id: knowledgeId(learnerId, course.id), learnerId, courseId: course.id, probeConceptIds: asked, sessionId, at }, knowledgeFor(learnerId, course.id)));
+      } else {
+        // Normalised like every later revision: no repeats, and at most six guidance items (an intake once wrote eleven).
+        const profile = normalizeProfile(await finalizeProfile({ session, learner }));
+        const { profilePending: _written, ...fresh } = learners.require(learnerId);
+        learners.put({ ...fresh, profile });
+      }
+      settle({ status: "done", at: new Date().toISOString() });
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      console.warn(`[intake] writing the record of session ${sessionId} failed:`, error);
+      settle({ status: "failed", at: new Date().toISOString(), error });
+      if (session.kind === "course-intake" && session.courseId) {
+        const k = knowledgeFor(learnerId, session.courseId);
+        if (k?.pending?.sessionId === sessionId) courseKnowledge.put({ ...k, pending: { ...k.pending, error } });
+      } else {
+        const l = learners.require(learnerId);
+        if (l.profilePending?.sessionId === sessionId) learners.put({ ...l, profilePending: { ...l.profilePending, error } });
+      }
+    } finally {
+      writing.delete(sessionId);
+    }
+  });
+}
+
+/** Wait for whatever is being written for this learner (an intake's record, a profile pass). For a CLI about to exit, and for tests. */
+export async function settleLearnerWrites(learnerId: string): Promise<void> {
+  await learnerWrites.get(learnerId);
+}
+
+/** Try again to write a record that failed, or that a restart interrupted. Returns once the attempt has been queued. */
+export function retryIntakeRecord(sessionId: string): void {
+  const session = sessions.require(sessionId);
+  if (session.phase !== "complete" || (session.kind !== "general-intake" && session.kind !== "course-intake")) throw new Error("That session is not a finished intake.");
+  const at = new Date().toISOString();
+  sessions.put({ ...session, extraction: { status: "writing", at } });
+  markRecordPending(session, at);
+  void writeIntakeRecord(sessionId);
+}
+
+/** Records still marked as on the way for this learner that nothing in this process is writing: pick them up. */
+function resumePendingRecords(learner: Learner): void {
+  const stalled = [learner.profilePending?.sessionId, ...courseKnowledge.list().filter((k) => k.learnerId === learner.id).map((k) => k.pending?.sessionId)];
+  for (const id of stalled) {
+    if (!id || writing.has(id) || !sessions.get(id)) continue;
+    void writeIntakeRecord(id);
+  }
+}
+
+/** A finished intake's exchange, as the lesson that follows it reads it while the record is still being written. */
+function intakeJustNow(knowledge: ReturnType<typeof knowledgeFor>, learnerName: string): string | undefined {
+  if (!knowledge?.pending || knowledge.starts.length) return undefined;
+  const intake = sessions.get(knowledge.pending.sessionId);
+  if (!intake) return undefined;
+  const text = intake.transcript.map((t) => `${t.role === "user" ? learnerName : "Tutor"}: ${t.content}`).join("\n");
+  return text.length > 8000 ? `${text.slice(0, 8000)}\n(...)` : text;
+}
 
 /**
  * Keep the learner's profile current from this session (domain/profile.ts decides what lands; here it is
@@ -472,9 +729,8 @@ const profilePasses = new Map<string, Promise<unknown>>();
  * saving, so a change made meanwhile (an undo) is not overwritten.
  */
 function reviseProfile(learnerId: string, course: Course, session: Session, report: MasteryReport): Promise<ProfileUpdate | undefined> {
-  const run = (profilePasses.get(learnerId) ?? Promise.resolve()).then(() => revise(learnerId, course, session, report));
-  profilePasses.set(learnerId, run);
-  return run;
+  // One write at a time per learner, each reading what the previous one wrote: two sessions ending together cannot overwrite each other.
+  return queued(learnerId, () => revise(learnerId, course, session, report));
 }
 
 async function revise(learnerId: string, course: Course, session: Session, report: MasteryReport): Promise<ProfileUpdate | undefined> {
@@ -487,11 +743,13 @@ async function revise(learnerId: string, course: Course, session: Session, repor
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
       .slice(-3)
       .map((r) => ({ report: r, course: r.courseId ? courses.get(r.courseId) : undefined }));
-    const revision = await proposeRevision({ learner, course, session, report, priorReports });
+    const revision = await proposeRevision({ learner, course, session, report, knowledge: knowledgeFor(learnerId, course.id), priorReports });
+    // Read both records again: the pass took a minute or two, and an undo or a course intake may have landed meanwhile.
     const fresh = learners.require(learnerId);
     if (!fresh.profile) return undefined;
-    const { learner: revised, update } = applyRevision(fresh, revision, { sessionId: session.id, courseId: course.id, courseTitle: course.title, at: new Date().toISOString() });
+    const { learner: revised, course: notes, update } = applyRevision(fresh, revision, { sessionId: session.id, courseId: course.id, courseTitle: course.title, at: new Date().toISOString() }, knowledgeFor(learnerId, course.id));
     learners.put(revised);
+    if (notes) putCourseNotes(learnerId, course.id, notes);
     return update;
   } catch (err) {
     console.warn("[profile] revision failed:", err instanceof Error ? err.message : err);

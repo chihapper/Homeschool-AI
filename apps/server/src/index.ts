@@ -9,6 +9,7 @@ import { config, requireAnthropicKey, activeTtsProvider, ttsModelLabel, ttsVoice
 import { registerApiRoutes } from "./routes/api.js";
 import { registerClmRoutes } from "./voice/clm.js";
 import { registerLiveVoiceRoutes } from "./voice/live.js";
+import { ensureMigrated } from "./store/migrate.js";
 
 export async function buildServer() {
   const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? "info" } });
@@ -23,6 +24,8 @@ export async function buildServer() {
 
 async function main(): Promise<void> {
   requireAnthropicKey();
+  // Before anything reads or writes a learner: records from before the profile split are converted once.
+  ensureMigrated(config.dataDir);
   const app = await buildServer();
   await app.listen({ port: config.port, host: config.host });
   app.log.info(`Model: ${config.model} (tutor: ${config.tutorModel} @ ${config.tutorEffort})`);

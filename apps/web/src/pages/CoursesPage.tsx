@@ -1,7 +1,26 @@
 import { useEffect, useState } from "react";
-import { api, type Chunk, type Course, type CourseFocus } from "../api";
+import { api, fmtDate, type Chunk, type Course, type CourseFocus, type CourseKnowledge, type Learner, type Session } from "../api";
 
-export function CoursesPage({ courses, onChange }: { courses: Course[]; onChange: () => Promise<void> }) {
+/** What the course card needs to show where each student starts, and to ask them. */
+interface StartsProps {
+  learners: Learner[];
+  knowledge: CourseKnowledge[];
+  /** A course intake was started from here: show it on the Session tab. */
+  onStartSession: (s: Session) => void;
+}
+
+/** One student's starting point on a course, in a line. */
+function startLine(k: CourseKnowledge | undefined): string {
+  if (k?.pending) return k.pending.error ? `asked; writing the notes failed (${k.pending.error})` : "asked just now; the notes are being written";
+  if (k?.starts.length) {
+    const count = (e: string) => k.starts.filter((s) => s.estimate === e).length;
+    const parts = [count("can-explain") && `could already explain ${count("can-explain")}`, count("some") && `some knowledge of ${count("some")}`, count("none") && `nothing yet on ${count("none")}`].filter(Boolean);
+    return `asked ${k.intakeAt ? fmtDate(k.intakeAt) : ""}: ${parts.join(", ")} of the ${k.starts.length} ideas asked about`;
+  }
+  return k ? "not asked; there are notes from sessions" : "not asked yet; their first session on this course opens with it";
+}
+
+export function CoursesPage({ courses, onChange, ...starts }: { courses: Course[]; onChange: () => Promise<void> } & StartsProps) {
   const [samples, setSamples] = useState<Array<{ name: string; size: number }>>([]);
   const [files, setFiles] = useState<File[]>([]);
   const [title, setTitle] = useState("");
@@ -79,13 +98,36 @@ export function CoursesPage({ courses, onChange }: { courses: Course[]; onChange
         )}
         {msg && <p className="muted">{msg}</p>}
       </div>
-      {courses.map((c) => <CourseCard key={c.id} course={c} onDelete={() => remove(c)} onChange={onChange} />)}
+      {courses.map((c) => <CourseCard key={c.id} course={c} onDelete={() => remove(c)} onChange={onChange} {...starts} />)}
       {!courses.length && <p className="muted">No courses yet.</p>}
     </>
   );
 }
 
-function CourseCard({ course: c, onDelete, onChange }: { course: Course; onDelete: () => void; onChange: () => Promise<void> }) {
+function CourseCard({ course: c, onDelete, onChange, learners, knowledge, onStartSession }: { course: Course; onDelete: () => void; onChange: () => Promise<void> } & StartsProps) {
+  const [askErr, setAskErr] = useState<string | null>(null);
+  const [asking, setAsking] = useState(false);
+  // Ask one student what they already know about this course, now, as a session of its own.
+  const ask = async (l: Learner) => {
+    setAskErr(null);
+    setAsking(true);
+    try {
+      onStartSession(await api.createSession({ learnerId: l.id, courseId: c.id, only: "course-intake" }));
+    } catch (e) {
+      setAskErr((e as Error).message);
+    } finally {
+      setAsking(false);
+    }
+  };
+  const retry = async (l: Learner) => {
+    setAskErr(null);
+    try {
+      await api.retryKnowledge(l.id, c.id);
+      await onChange();
+    } catch (e) {
+      setAskErr((e as Error).message);
+    }
+  };
   const [chunks, setChunks] = useState<Chunk[] | null>(null);
   const [saving, setSaving] = useState(false);
   const [focusErr, setFocusErr] = useState<string | null>(null);
@@ -132,6 +174,27 @@ function CourseCard({ course: c, onDelete, onChange }: { course: Course; onDelet
         {saving && " Saving..."}
       </p>
       {keptLessons.length === 0 && <p className="warn small">Every lesson is skipped. Keep at least one concept somewhere, or no session can start on this course.</p>}
+      {learners.length > 0 && (
+        <div className="concept-row">
+          <strong>Where each student starts</strong>
+          <p className="muted small" style={{ margin: "4px 0" }}>
+            A student's first session on this course opens with a few questions about what they already know: one per central idea, how sure they are, and no teaching. Ideas you unticked are never asked about, and neither is anything about faith. The answers are on the Students tab.
+          </p>
+          {learners.map((l) => {
+            const k = knowledge.find((x) => x.learnerId === l.id && x.courseId === c.id);
+            return (
+              <div key={l.id} className="row small" style={{ justifyContent: "space-between" }}>
+                <span><strong>{l.name}</strong>: {startLine(k)}</span>
+                <span className="row">
+                  {k?.pending?.error && <button className="ghost small" onClick={() => retry(l)}>Write the notes again</button>}
+                  <button className="ghost small" disabled={asking || keptLessons.length === 0} onClick={() => ask(l)}>{k?.starts.length ? "Ask again" : "Ask now"}</button>
+                </span>
+              </div>
+            );
+          })}
+          {askErr && <p className="error small">{askErr}</p>}
+        </div>
+      )}
       {focusErr && <p className="error small">Could not save focus: {focusErr}</p>}
       {c.lessons.map((l) => (
         // The tick sits beside the expandable header, not inside it, so ticking never opens or closes the lesson.

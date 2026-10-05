@@ -36,6 +36,7 @@ import { openThread, THREAD_PATIENCE, THREAD_PREFIX } from "../orchestrator/note
 import { isFollowUp, SAY_FIRST, type FlagInput } from "../orchestrator/outside.js";
 import { walkedConceptIds } from "../domain/focus.js";
 import { DEPTH_LABEL, depthOf } from "../domain/profile.js";
+import type { CourseKnowledge, StartingEstimate } from "../domain/types.js";
 import { toldFigures } from "../domain/told.js";
 
 /**
@@ -103,6 +104,36 @@ export interface TutorContext {
   saidFirst?: string;
   /** The reply the learner has just heard, not yet in the transcript (reflect pass only), so what it told them is counted. */
   justSpoken?: string;
+  /** The last words of the intake this lesson carries on from, in the same sitting: the lesson opens without a second greeting. */
+  carriedOn?: string;
+  /** The student's record for this course: starting points from the course intake, and the notes kept since. */
+  knowledge?: CourseKnowledge;
+  /** Where earlier reports put the student on this course's concepts: the latest level each, and when. */
+  assessed?: Record<string, { level: number; asOf: string }>;
+  /**
+   * The course intake this lesson carried on from, word for word, while its record is still being written:
+   * the lesson starts the moment the intake ends, and the student's answers must not wait for the notes.
+   */
+  intakeJustNow?: string;
+}
+
+const ESTIMATE_LABEL: Record<StartingEstimate, string> = { none: "nothing yet", some: "some knowledge", "can-explain": "can already explain it" };
+
+/** A concept's starting point as the tutor reads it, or nothing when the concept was neither checked nor assessed. */
+export function startingPoint(conceptId: string, knowledge?: CourseKnowledge, assessed?: TutorContext["assessed"]): string {
+  const start = knowledge?.starts.find((s) => s.conceptId === conceptId);
+  const last = assessed?.[conceptId];
+  const lines: string[] = [];
+  if (start) {
+    lines.push(
+      `Starting point, from the check before the course began${knowledge?.intakeAt ? ` (${knowledge.intakeAt.slice(0, 10)})` : ""}: ${ESTIMATE_LABEL[start.estimate]}.` +
+        (start.said ? ` They said: "${start.said}"` : " They said they did not know.") +
+        (start.confidence !== undefined ? ` (sure ${start.confidence} out of 10)` : "") +
+        (start.materialSays ? ` The reading says: ${start.materialSays}` : ""),
+    );
+  }
+  if (last) lines.push(`Last assessed: level ${last.level} of 4 on ${last.asOf.slice(0, 10)}${start ? ", which is where they stand now; the starting point is where they began" : ""}.`);
+  return lines.join("\n");
 }
 
 /**
@@ -173,22 +204,36 @@ export function buildTutorContext(ctx: TutorContext, mode: "speak" | "reflect" =
       `<outside_the_material setting="${session.outsideKnowledge ?? "answer"}">${OUTSIDE_MODE[session.outsideKnowledge ?? "answer"]}</outside_the_material>`,
   );
 
+  // Who the learner is: the profile (how to work with them, any course), the parent's own notes, and what they
+  // have shown they know about this course. One block, stable for the session, so it is cached with the course.
+  const who = `name="${learner.name}"${learner.gradeLevel ? ` grade="${learner.gradeLevel}"` : ""}${learner.age ? ` age="${learner.age}"` : ""}`;
+  const items = (xs: string[]): string => xs.map((p) => `- ${p}`).join("\n");
+  const parentNotes = learner.parentNotes?.trim() ? `\n<parent_notes>\nThe parent's own words about ${learner.name}. Follow them as written, and never mention them to the learner.\n${learner.parentNotes.trim()}\n</parent_notes>` : "";
+  const k = ctx.knowledge;
+  const courseKnowledge =
+    k && (k.priorKnowledge.length || k.observedGaps.length || k.guidance.length)
+      ? `\n<course_knowledge course="${course.title}">\n` +
+        (k.priorKnowledge.length ? `What they have shown they know about this course:\n${items(k.priorKnowledge)}\n` : "") +
+        (k.observedGaps.length ? `Gaps and misconceptions seen so far:\n${items(k.observedGaps)}\n` : "") +
+        (k.guidance.length ? `Guidance for this course (follow literally):\n${items(k.guidance)}\n` : "") +
+        `</course_knowledge>`
+      : "";
   if (profile) {
     blocks.push(
-      `<learner_profile name="${learner.name}">\n` +
-        `Intake preferences: ${profile.intakePreferences.join(", ")}\n` +
+      `<learner_profile ${who}>\n` +
         `Demonstration preferences: ${profile.demonstrationPreferences.join(", ")}\n` +
-        `Challenge tolerance: ${profile.challengeTolerance}. Pace: ${profile.pace}. Depth: ${depthOf(profile)} (${DEPTH_LABEL[depthOf(profile)]}). Verbal level: ${profile.verbalLevel}\n` +
+        `When stuck (challenge tolerance): ${profile.challengeTolerance}. Pace: ${profile.pace}. Depth: ${depthOf(profile)} (${DEPTH_LABEL[depthOf(profile)]}). Register: ${profile.verbalLevel}\n` +
         `Interests: ${profile.interests.join(", ")}\n` +
-        `Prior knowledge: ${profile.priorKnowledge.map((p) => `- ${p}`).join("\n")}\n` +
-        `Observed gaps: ${profile.observedGaps.map((p) => `- ${p}`).join("\n")}\n` +
-        `Tutoring guidance (follow literally):\n${profile.tutoringGuidance.map((p) => `- ${p}`).join("\n")}\n</learner_profile>`,
+        `Tutoring guidance (follow literally):\n${items(profile.tutoringGuidance)}\n</learner_profile>` +
+        parentNotes +
+        courseKnowledge,
     );
   } else {
-    blocks.push(`<learner name="${learner.name}"${learner.gradeLevel ? ` grade="${learner.gradeLevel}"` : ""}>No profile yet: start with a concrete example, keep steps small, and watch how they respond.</learner>`);
+    blocks.push(`<learner ${who}>No profile yet: start with a concrete example, keep steps small, and watch how they respond.</learner>` + parentNotes + courseKnowledge);
   }
 
   // Current concept: the part that changes as the session advances.
+  const start = startingPoint(concept.id, ctx.knowledge, ctx.assessed);
   const sourceText = concept.sourceChunkIds
     .map((id) => course.chunks.find((c) => c.id === id))
     .filter((c): c is NonNullable<typeof c> => Boolean(c))
@@ -198,8 +243,17 @@ export function buildTutorContext(ctx: TutorContext, mode: "speak" | "reflect" =
   blocks.push(
     `<current_concept id="${concept.id}" name="${concept.name}">\n${concept.summary}\n\nKey facts the learner should be able to state:\n${concept.keyFacts.map((f) => `- ${f}`).join("\n")}\n\n` +
       `Common misconceptions to listen for:\n${concept.commonMisconceptions.map((f) => `- ${f}`).join("\n")}\n\n` +
+      (start ? `${start}\n\n` : "") +
       `Source passages:\n${sourceText || "(none linked; use lookup_source)"}\n</current_concept>`,
   );
+  // The course intake has only just ended and its notes are not written yet: the student's answers, as said.
+  if (ctx.intakeJustNow && !ctx.knowledge?.starts.length) {
+    blocks.push(
+      `<asked_just_now>\nMoments ago, in this sitting, the learner was asked what they already know about this course, with no teaching and no corrections. ` +
+        `Their answers are their starting point: when a concept they spoke about comes up, open by returning to what they said. The notes on it are still being written.\n` +
+        `${ctx.intakeJustNow}\n</asked_just_now>`,
+    );
+  }
 
   // Everything already on file for this concept (so the reflect pass does not file it again), plus a count
   // for the others. Measured 2026-09-24: with only the last six shown, one quote was recorded four times.
@@ -462,7 +516,16 @@ export function tutorTurn(ctx: TutorContext, signal?: AbortSignal): AsyncGenerat
   const fetched = passagesForLatestReply(ctx);
   if (fetched.length) ctx.onLookup?.(fetched.map((c) => c.id));
   let messages = transcriptToMessages(ctx.session.transcript);
-  if (!messages.length) messages = [{ role: "user", content: "(The student has just joined the lesson. Open with a warm one-line greeting and your first eliciting question.)" }];
+  if (!messages.length) {
+    messages = [
+      {
+        role: "user",
+        content: ctx.carriedOn
+          ? `(The learner is already with you: you have just asked what they already know about this course, and said to them: "${ctx.carriedOn}" Go straight into the lesson with your opening question, without greeting them again and without repeating that sentence.)`
+          : "(The student has just joined the lesson. Open with a warm one-line greeting and your first eliciting question.)",
+      },
+    ];
+  }
   // Thinking off regardless of the session setting: this call is the one the learner waits on.
   return streamTurn({ spec: { ...tutorAgent, thinking: "disabled" }, system, messages, tools: tutorTools(ctx, "speak"), maxTokens: SPEAK_MAX_TOKENS, signal });
 }

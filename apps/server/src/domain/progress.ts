@@ -5,7 +5,7 @@
  * whether it moved since the previous time, and what the child still gets wrong, in one place. This is a
  * pure read-model over reports that already exist: nothing new is stored.
  */
-import type { ConceptMastery, Course, MasteryReport } from "./types.js";
+import type { ConceptMastery, ConceptStart, Course, CourseKnowledge, MasteryReport } from "./types.js";
 
 export interface ConceptProgress {
   conceptId: string;
@@ -18,6 +18,8 @@ export interface ConceptProgress {
   asOf: string;
   /** Misconceptions listed at that latest assessment. */
   misconceptions: string[];
+  /** Where the student started on this concept, from the course intake, when it asked about it. */
+  start?: ConceptStart;
 }
 
 export interface Counts {
@@ -41,6 +43,10 @@ export interface ProgressSummary {
   totals: Counts;
   /** The latest report's counts alone. */
   latest: Counts;
+  /** Concepts the course intake asked about that no session has assessed yet: where the student starts on what is still to come. */
+  startsNotYetTaught: Array<ConceptStart & { name: string }>;
+  /** For the parent: what the student could do before starting the course, in the course intake's words. */
+  baselineSummary?: string;
 }
 
 /**
@@ -59,7 +65,7 @@ const counts = (r: MasteryReport): Counts => ({
 });
 
 /** Undefined when this learner has no completed session on this course yet. */
-export function buildProgress(reports: MasteryReport[], course: Course, learnerId: string, courseId: string): ProgressSummary | undefined {
+export function buildProgress(reports: MasteryReport[], course: Course, learnerId: string, courseId: string, knowledge?: CourseKnowledge): ProgressSummary | undefined {
   const mine = reports.filter((r) => r.learnerId === learnerId && r.courseId === courseId).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   if (!mine.length) return undefined;
   const nameOf = (id: string): string => course.concepts.find((c) => c.id === id)?.name ?? id;
@@ -73,7 +79,13 @@ export function buildProgress(reports: MasteryReport[], course: Course, learnerI
     }
   }
   const rank = new Map(course.concepts.map((c, i) => [c.id, i] as const));
-  const concepts = [...seen.values()].sort((a, b) => (rank.get(a.conceptId) ?? Infinity) - (rank.get(b.conceptId) ?? Infinity));
+  const starts = knowledge?.starts ?? [];
+  const concepts = [...seen.values()]
+    .map((c) => {
+      const start = starts.find((s) => s.conceptId === c.conceptId);
+      return start ? { ...c, start } : c;
+    })
+    .sort((a, b) => (rank.get(a.conceptId) ?? Infinity) - (rank.get(b.conceptId) ?? Infinity));
 
   const latest = mine[mine.length - 1];
   const totals = mine.map(counts).reduce(
@@ -93,5 +105,7 @@ export function buildProgress(reports: MasteryReport[], course: Course, learnerI
     latestParentSummary: latest.parentSummary,
     totals,
     latest: counts(latest),
+    startsNotYetTaught: starts.filter((s) => !seen.has(s.conceptId)).map((s) => ({ ...s, name: nameOf(s.conceptId) })),
+    ...(knowledge?.baselineSummary ? { baselineSummary: knowledge.baselineSummary } : {}),
   };
 }

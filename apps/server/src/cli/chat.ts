@@ -6,12 +6,14 @@
  */
 import readline from "node:readline/promises";
 import { stdin, stdout } from "node:process";
-import { createSession, endSession, latencySummary, respond } from "../orchestrator/session.js";
+import { createSession, endSession, latencySummary, respond, settleLearnerWrites } from "../orchestrator/session.js";
 import { learners, courses } from "../store/index.js";
-import { requireAnthropicKey } from "../config.js";
+import { config, requireAnthropicKey } from "../config.js";
+import { ensureMigrated } from "../store/migrate.js";
 
 async function main(): Promise<void> {
   requireAnthropicKey();
+  ensureMigrated(config.dataDir);
   const args = process.argv.slice(2);
   const opt = (name: string): string | undefined => {
     const i = args.indexOf(name);
@@ -38,6 +40,7 @@ async function main(): Promise<void> {
 
   const rl = readline.createInterface({ input: stdin, output: stdout });
   let userText = ""; // agent speaks first
+  let activeId = session.id; // a sitting that opens with an intake moves on to other sessions by itself
   for (;;) {
     stdout.write("Tutor: ");
     const gen = respond(session.id, userText);
@@ -47,6 +50,8 @@ async function main(): Promise<void> {
       r = await gen.next();
     }
     await r.value.reflection?.catch(() => {}); // the tutor's notes, taken after the words are out
+    if (r.value.handover) stdout.write(`\n   [the intake is finished; the sitting went on as a ${r.value.handover.kind} in session ${r.value.handover.to}]`);
+    activeId = r.value.session.id;
     const last = r.value.session.transcript.at(-1)?.latency;
     stdout.write(`\n   [phase=${r.value.session.phase} concept=${r.value.session.conceptIndex + 1} obs=${r.value.session.observations.length}${last ? ` ttft=${last.ttftMs}ms total=${last.totalMs}ms cache=${last.cacheReadTokens}/${last.cacheReadTokens + last.cacheWriteTokens + last.inputTokens}` : ""}]\n\n`);
     if (r.value.session.phase === "complete") break;
@@ -59,7 +64,7 @@ async function main(): Promise<void> {
     }
   }
   rl.close();
-  console.log("\nLatency:", JSON.stringify(latencySummary(session.id ? (await import("../store/index.js")).sessions.require(session.id) : session)));
+  console.log("\nLatency:", JSON.stringify(latencySummary((await import("../store/index.js")).sessions.require(activeId))));
   console.log("\nAssessing session...");
   const { report, profileUpdate } = await endSession(session.id);
   if (report) {
@@ -68,6 +73,8 @@ async function main(): Promise<void> {
     if (report.ungroundedClaims.length) console.log(`\nUngrounded tutor claims:\n${report.ungroundedClaims.map((u) => `  - ${u}`).join("\n")}`);
     console.log(`\nFull report saved for session ${session.id}.`);
   }
+  // An intake's record is written in the background; this process must wait for it or exit before it lands.
+  await settleLearnerWrites(learnerId);
   if (profileUpdate) {
     // The pass runs in the background on the server; this process must wait for it or exit before it lands.
     console.log("\nRevising the profile...");

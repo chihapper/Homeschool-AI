@@ -1,49 +1,51 @@
 /**
- * The learner profile over time: pure helpers for revising it after a session and undoing a revision.
+ * The learner's two records over time: pure helpers for revising them after a session and undoing a revision.
  *
- * The intake writes the profile once. After every report, the profile pass (agents/profile-agent.ts) proposes a
- * revised profile; this module decides what of it lands:
- *  - the fast fields (prior knowledge, gaps, interests, demonstration preferences, tutoring guidance) change
- *    whenever the session's evidence says so;
- *  - the slow fields (pace, challenge tolerance, verbal level, depth, intake preferences) describe the learner
- *    rather than what they know, and one session must not swing them: a change is held until the next session's
- *    pass proposes the same, and only then applied. A change made last time cannot be undone by the next pass
+ * Two records, since 2026-10-05 (docs/INTAKE.md):
+ *  - the learner profile, how to work with this student across every course, written once by the general intake;
+ *  - the course-knowledge record, what this student knows about one course, written by the course intake.
+ * After every report the profile pass (agents/profile-agent.ts) proposes a revised profile and revised course
+ * notes; this module decides what lands:
+ *  - the profile's fast fields (interests, demonstration preferences, tutoring guidance) and all of the course
+ *    notes (prior knowledge, gaps, course guidance) change whenever the session's evidence says so;
+ *  - the profile's slow fields (pace, challenge tolerance, verbal level, depth) describe the learner rather than
+ *    what they know, and one session must not swing them: a change is held until the next session's pass
+ *    proposes the same, and only then applied. A change made last time cannot be undone by the next pass
  *    either, for the same reason.
  * Every landed change and every held one is recorded with the session, so the parent sees them and can undo the
- * latest revision. Nothing here talks to the model or the store.
+ * latest revision, which puts both records back. Nothing here talks to the model or the store.
  */
-import type { Course, Depth, Learner, LearnerProfile, ProfileChange, ProfileUpdate } from "./types.js";
+import type { Course, CourseNotes, Depth, Learner, LearnerProfile, ProfileChange, ProfileUpdate } from "./types.js";
 
-export const PROFILE_FIELDS = [
-  "intakePreferences",
-  "demonstrationPreferences",
-  "challengeTolerance",
-  "pace",
-  "verbalLevel",
-  "interests",
-  "priorKnowledge",
-  "observedGaps",
-  "parentSummary",
-  "tutoringGuidance",
-  "depth",
-] as const;
+export const PROFILE_FIELDS = ["demonstrationPreferences", "challengeTolerance", "pace", "verbalLevel", "interests", "parentSummary", "tutoringGuidance", "depth"] as const;
 export type ProfileField = (typeof PROFILE_FIELDS)[number];
 
+/** The course record's notes as the pass and the parent name them. `courseGuidance` is the record's `guidance`. */
+export const COURSE_FIELDS = ["priorKnowledge", "observedGaps", "courseGuidance"] as const;
+export type CourseField = (typeof COURSE_FIELDS)[number];
+/** Every field a revision can give a reason for. */
+export const REVISION_FIELDS = [...PROFILE_FIELDS, ...COURSE_FIELDS] as const;
+
+const COURSE_KEY: Record<CourseField, keyof CourseNotes> = { priorKnowledge: "priorKnowledge", observedGaps: "observedGaps", courseGuidance: "guidance" };
+
 /** Fields that describe the learner rather than what they know. Two consecutive sessions must agree to move one. */
-export const SLOW_FIELDS: ReadonlySet<ProfileField> = new Set<ProfileField>(["pace", "challengeTolerance", "verbalLevel", "depth", "intakePreferences"]);
-const LIST_FIELDS: ReadonlySet<ProfileField> = new Set<ProfileField>(["intakePreferences", "demonstrationPreferences", "interests", "priorKnowledge", "observedGaps", "tutoringGuidance"]);
+export const SLOW_FIELDS: ReadonlySet<ProfileField> = new Set<ProfileField>(["pace", "challengeTolerance", "verbalLevel", "depth"]);
+const LIST_FIELDS: ReadonlySet<ProfileField> = new Set<ProfileField>(["demonstrationPreferences", "interests", "tutoringGuidance"]);
 /** The tutor follows every item literally, so the list stays short enough to follow. */
 export const MAX_GUIDANCE = 6;
 /**
  * Ceilings on the other lists, keeping the first entries (the skill puts the most useful first). Replaying nine
  * Rome sessions on 2026-09-27 grew prior knowledge to 40 entries, gaps to 27 and interests to 16, one per session
- * and never merged; the profile sits in the tutor's cached prompt, so it cannot grow without bound.
+ * and never merged; the records sit in the tutor's cached prompt, so they cannot grow without bound.
  */
 export const MAX_PRIOR_KNOWLEDGE = 15;
 export const MAX_GAPS = 12;
 export const MAX_INTERESTS = 10;
+export const MAX_COURSE_GUIDANCE = 4;
 /** Revisions kept on the record; older ones are dropped. Undo only needs the latest. */
 export const MAX_HISTORY = 40;
+
+export const EMPTY_NOTES: CourseNotes = { priorKnowledge: [], observedGaps: [], guidance: [] };
 
 export const DEPTH_LABEL: Record<Depth, string> = {
   simple: "the plain version",
@@ -62,29 +64,41 @@ export function studentLevel(learner: Learner, course: Course): string {
   return `${grade}; ready for ${DEPTH_LABEL[depthOf(learner.profile)]}`;
 }
 
-/** What the profile pass returns: the whole revised profile, a reason per field it changed, a note for the parent. */
+/** What the profile pass returns: the whole revised profile, the course notes as revised, a reason per field it changed, a note for the parent. */
 export interface ProfileRevision {
   profile: LearnerProfile;
+  /** The notes of the course the session was on. Absent when the pass had no course to revise. */
+  course?: CourseNotes;
   reasons: Array<{ field: string; why: string }>;
   summary: string;
 }
 
 const norm = (s: string): string => s.replace(/\s+/g, " ").trim();
+const list = (xs: string[] | undefined): string[] => [...new Set((xs ?? []).map(norm).filter(Boolean))];
 
-/** Trim, drop empty and repeated items, keep the guidance list short, fill a missing depth from the old profile. */
+/**
+ * Trim, drop empty and repeated items, keep the guidance list short, fill a missing depth from the old profile.
+ * Built field by field, so anything a record from before the split still carries is left behind.
+ */
 export function normalizeProfile(p: LearnerProfile, before?: LearnerProfile): LearnerProfile {
-  const list = (xs: string[]): string[] => [...new Set(xs.map(norm).filter(Boolean))];
   return {
-    ...p,
-    intakePreferences: [...new Set(p.intakePreferences)],
     demonstrationPreferences: [...new Set(p.demonstrationPreferences)],
+    challengeTolerance: p.challengeTolerance,
+    pace: p.pace,
     verbalLevel: norm(p.verbalLevel),
     interests: list(p.interests).slice(0, MAX_INTERESTS),
-    priorKnowledge: list(p.priorKnowledge).slice(0, MAX_PRIOR_KNOWLEDGE),
-    observedGaps: list(p.observedGaps).slice(0, MAX_GAPS),
     parentSummary: norm(p.parentSummary),
     tutoringGuidance: list(p.tutoringGuidance).slice(0, MAX_GUIDANCE),
     depth: p.depth ?? before?.depth ?? "simple",
+  };
+}
+
+/** The same for a course record's notes. */
+export function normalizeCourseNotes(n: CourseNotes): CourseNotes {
+  return {
+    priorKnowledge: list(n.priorKnowledge).slice(0, MAX_PRIOR_KNOWLEDGE),
+    observedGaps: list(n.observedGaps).slice(0, MAX_GAPS),
+    guidance: list(n.guidance).slice(0, MAX_COURSE_GUIDANCE),
   };
 }
 
@@ -105,6 +119,19 @@ export function diffProfile(before: LearnerProfile, after: LearnerProfile, reaso
       const b = field === "depth" ? depthOf(after) : String(after[field] ?? "");
       if (a !== b) out.push({ field, from: a, to: b, why: why(field) });
     }
+  }
+  return out;
+}
+
+/** Every difference between two versions of a course record's notes: one entry per item added or removed. */
+export function diffCourseNotes(before: CourseNotes, after: CourseNotes, reasons: ProfileRevision["reasons"] = []): ProfileChange[] {
+  const out: ProfileChange[] = [];
+  for (const field of COURSE_FIELDS) {
+    const why = norm(reasons.find((r) => r.field === field)?.why ?? "");
+    const a = before[COURSE_KEY[field]] ?? [];
+    const b = after[COURSE_KEY[field]] ?? [];
+    for (const item of a) if (!b.includes(item)) out.push({ field, from: item, to: "", why });
+    for (const item of b) if (!a.includes(item)) out.push({ field, from: "", to: item, why });
   }
   return out;
 }
@@ -139,10 +166,12 @@ export interface RevisionMeta {
 }
 
 /**
- * Land a proposed revision on the learner. Returns the learner as it should be saved, and the update recorded on it,
- * or no update when the session changed nothing (only `profileReviewedAt` moves).
+ * Land a proposed revision. Returns the learner as it should be saved, the course notes as they should be saved
+ * (only when the revision changed them), and the update recorded on the learner, or no update when the session
+ * changed nothing (only `profileReviewedAt` moves). `courseBefore` is the course record's notes as they stand;
+ * absent means the student has no record for the course yet, and the first notes create it.
  */
-export function applyRevision(learner: Learner, revision: ProfileRevision, meta: RevisionMeta): { learner: Learner; update?: ProfileUpdate } {
+export function applyRevision(learner: Learner, revision: ProfileRevision, meta: RevisionMeta, courseBefore?: CourseNotes): { learner: Learner; course?: CourseNotes; update?: ProfileUpdate } {
   const before = learner.profile;
   if (!before) throw new Error(`${learner.name} has no profile to revise; the intake writes the first one.`);
   const candidate = normalizeProfile(revision.profile, before);
@@ -158,6 +187,12 @@ export function applyRevision(learner: Learner, revision: ProfileRevision, meta:
       changes.push(c);
     }
   }
+  // The course notes are all fast: what a student knows about a course changes with every session on it.
+  const notesBefore = courseBefore ? normalizeCourseNotes(courseBefore) : EMPTY_NOTES;
+  const notesAfter = revision.course ? normalizeCourseNotes(revision.course) : undefined;
+  const courseChanges = notesAfter ? diffCourseNotes(notesBefore, notesAfter, revision.reasons) : [];
+  changes.push(...courseChanges);
+
   const reviewed = { ...learner, profileReviewedAt: meta.at };
   if (!changes.length && !held.length) return { learner: reviewed };
   const heldNote = held.length ? ` Held until another session agrees: ${held.map((h) => describeChange(h, 80)).join("; ")}.` : "";
@@ -170,9 +205,11 @@ export function applyRevision(learner: Learner, revision: ProfileRevision, meta:
     changes,
     held,
     previous: before,
+    ...(courseChanges.length ? { previousCourse: notesBefore } : {}),
   };
   return {
     learner: { ...reviewed, profile: candidate, profileHistory: [...(learner.profileHistory ?? []), update].slice(-MAX_HISTORY) },
+    ...(courseChanges.length ? { course: notesAfter } : {}),
     update,
   };
 }
@@ -185,10 +222,16 @@ export function describeChange(c: ProfileChange, max = 120): string {
   return c.to ? `${field}: + ${clip(c.to)}` : `${field}: − ${clip(c.from)}`;
 }
 
-/** Undo the latest revision: the profile goes back to what it was, and the revision leaves the history. */
-export function undoProfileUpdate(learner: Learner): Learner {
+/**
+ * Undo the latest revision: the profile goes back to what it was, the revision leaves the history, and when the
+ * revision changed a course record's notes, those are returned for the caller to put back as well.
+ */
+export function undoProfileUpdate(learner: Learner): { learner: Learner; course?: { courseId: string; notes: CourseNotes } } {
   const history = learner.profileHistory ?? [];
   const last = history.at(-1);
   if (!last) throw new Error(`${learner.name}'s profile has no revision to undo.`);
-  return { ...learner, profile: last.previous, profileHistory: history.slice(0, -1) };
+  return {
+    learner: { ...learner, profile: last.previous, profileHistory: history.slice(0, -1) },
+    ...(last.previousCourse && last.courseId ? { course: { courseId: last.courseId, notes: last.previousCourse } } : {}),
+  };
 }

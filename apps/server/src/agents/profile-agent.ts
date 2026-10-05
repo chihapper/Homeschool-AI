@@ -1,22 +1,25 @@
 /**
- * Profile pass: after a session's report, propose a revised learner profile from what the session showed.
+ * Profile pass: after a session's report, propose a revised learner profile and revised course notes from what
+ * the session showed.
  *
- * Runs offline, after the assessor, off everyone's clock. It returns the whole revised profile with a reason per
- * changed field; what of it lands is decided by domain/profile.ts (the slow fields need two consecutive sessions
- * to agree), and the orchestrator persists it. The parent sees every change and can undo the latest.
+ * Runs offline, after the assessor, off everyone's clock. It returns the whole revised profile (how to work with
+ * this student, across courses) and the whole revised notes of the course the session was on (what they know
+ * about it), with a reason per changed field; what of it lands is decided by domain/profile.ts (the profile's
+ * slow fields need two consecutive sessions to agree), and the orchestrator persists it. The parent sees every
+ * change and can undo the latest.
  */
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
 import { config } from "../config.js";
-import { LearnerProfileExtractionSchema, type Course, type Learner, type MasteryReport, type Session } from "../domain/types.js";
-import { describeChange, PROFILE_FIELDS, type ProfileRevision } from "../domain/profile.js";
+import { LearnerProfileExtractionSchema, type Course, type CourseKnowledge, type Learner, type MasteryReport, type Session } from "../domain/types.js";
+import { describeChange, REVISION_FIELDS, type ProfileRevision } from "../domain/profile.js";
 import { assertNotRefused, streamParsed } from "../llm/client.js";
 import { buildSystem, type AgentSpec } from "./base.js";
 
 export const profileAgent: AgentSpec = {
   name: "Profile Reviser",
   role:
-    "You keep a homeschool student's learner profile current after each tutoring session, from that session's evidence. " +
+    "You keep a homeschool student's records current after each tutoring session, from that session's evidence: the learner profile (how to work with this student) and the notes on the course the session was about (what they know about it). " +
     "You change what the evidence changed and nothing else, you give a reason for every change, and you write about a child: what they did, never what they are.",
   skills: ["profile-update"],
   get model() {
@@ -27,9 +30,17 @@ export const profileAgent: AgentSpec = {
   },
 };
 
+/** The course notes as the pass names them: the same three names it gives reasons under. */
+const RevisedCourseNotesSchema = z.object({
+  priorKnowledge: z.array(z.string()),
+  observedGaps: z.array(z.string()),
+  courseGuidance: z.array(z.string()),
+});
+
 export const ProfileRevisionSchema = z.object({
   profile: LearnerProfileExtractionSchema,
-  reasons: z.array(z.object({ field: z.enum(PROFILE_FIELDS), why: z.string().describe("One sentence quoting or naming the evidence.") })),
+  course: RevisedCourseNotesSchema,
+  reasons: z.array(z.object({ field: z.enum(REVISION_FIELDS), why: z.string().describe("One sentence quoting or naming the evidence.") })),
   summary: z.string().describe("One or two plain sentences for the parent on what this session showed about how the student learns."),
 });
 
@@ -38,6 +49,8 @@ export interface ReviseInput {
   course: Course;
   session: Session;
   report: MasteryReport;
+  /** The student's record for this course as it stands. Absent: there is none yet, and the notes returned start it. */
+  knowledge?: CourseKnowledge;
   /** Earlier reports for this learner, oldest first, each with its course when it is still on record. */
   priorReports: Array<{ report: MasteryReport; course?: Course }>;
 }
@@ -63,13 +76,25 @@ function renderReport(r: MasteryReport, course: Course | undefined, full: boolea
 
 /** What the pass reads. Pure, so a test can see it. */
 export function reviseContext(input: ReviseInput): string {
-  const { learner, course, session, report } = input;
+  const { learner, course, session, report, knowledge } = input;
   const p = learner.profile!;
   const list = (xs: string[]): string => (xs.length ? xs.map((x) => `  - ${x}`).join("\n") : "  (none)");
   const profile =
-    `<current_profile>\nintakePreferences: ${p.intakePreferences.join(", ")}\ndemonstrationPreferences: ${p.demonstrationPreferences.join(", ")}\n` +
+    `<current_profile>\ndemonstrationPreferences: ${p.demonstrationPreferences.join(", ")}\n` +
     `challengeTolerance: ${p.challengeTolerance}\npace: ${p.pace}\ndepth: ${p.depth ?? "simple"}\nverbalLevel: ${p.verbalLevel}\n` +
-    `interests:\n${list(p.interests)}\npriorKnowledge:\n${list(p.priorKnowledge)}\nobservedGaps:\n${list(p.observedGaps)}\ntutoringGuidance:\n${list(p.tutoringGuidance)}\nparentSummary: ${p.parentSummary}\n</current_profile>`;
+    `interests:\n${list(p.interests)}\ntutoringGuidance:\n${list(p.tutoringGuidance)}\nparentSummary: ${p.parentSummary}\n</current_profile>`;
+  const starts = (knowledge?.starts ?? [])
+    .map((s) => `  - ${conceptName(course, s.conceptId)}: ${s.estimate}${s.said ? `; said "${s.said}"` : ""}${s.confidence !== undefined ? ` (sure ${s.confidence}/10)` : ""}${s.materialSays ? `; the material says: ${s.materialSays}` : ""}`)
+    .join("\n");
+  const record =
+    `<course_record course="${course.title}">\n` +
+    (knowledge ? "" : "(no record yet for this course: the notes you return start it)\n") +
+    `priorKnowledge:\n${list(knowledge?.priorKnowledge ?? [])}\nobservedGaps:\n${list(knowledge?.observedGaps ?? [])}\ncourseGuidance:\n${list(knowledge?.guidance ?? [])}\n` +
+    (starts ? `startingPoints (from the course intake${knowledge?.intakeAt ? ` on ${knowledge.intakeAt.slice(0, 10)}` : ""}; a baseline, not yours to change):\n${starts}\n` : "") +
+    `</course_record>`;
+  const parentNotes = learner.parentNotes?.trim()
+    ? `<parent_notes>\nThe parent's own words about ${learner.name}. They are not yours to change, and nothing you write should contradict them.\n${learner.parentNotes.trim()}\n</parent_notes>`
+    : "";
   const history = (learner.profileHistory ?? []).slice(-3);
   const revisions = history.length
     ? `<recent_revisions>\n${history
@@ -91,6 +116,8 @@ export function reviseContext(input: ReviseInput): string {
   return [
     `<learner name="${learner.name}"${learner.age ? ` age="${learner.age}"` : ""}${learner.gradeLevel ? ` grade="${learner.gradeLevel}"` : ""}/>`,
     profile,
+    record,
+    ...(parentNotes ? [parentNotes] : []),
     revisions,
     `<this_session course="${course.title}" subject="${course.subject}"${session.narrationFirst ? ' opened="narration"' : ""}>\n${renderReport(report, course, true)}\n` +
       `<tutor_observations>\n${observations}\n</tutor_observations>\n` +
@@ -100,13 +127,13 @@ export function reviseContext(input: ReviseInput): string {
   ].join("\n\n");
 }
 
-/** One structured-output call: the revised profile, reasons, and the note for the parent. */
+/** One structured-output call: the revised profile, the revised course notes, reasons, and the note for the parent. */
 export async function proposeRevision(input: ReviseInput): Promise<ProfileRevision> {
   if (!input.learner.profile) throw new Error(`${input.learner.name} has no profile to revise; the intake writes the first one.`);
   const system = buildSystem(profileAgent, []);
-  const { message, parsed } = await streamParsed<ProfileRevision>({
+  const { message, parsed } = await streamParsed<z.infer<typeof ProfileRevisionSchema>>({
     model: profileAgent.model,
-    // The whole profile comes back (about 2k tokens), but the model's thinking at high effort counts against this
+    // Both records come back (about 2k tokens), but the model's thinking at high effort counts against this
     // too: 8,000 was cut off on the first live run (2026-09-27). Streamed, so a large ceiling costs nothing.
     max_tokens: 32_000,
     system: system.map((b) => ({ type: "text" as const, text: b.text, cache_control: b.cache_control })),
@@ -115,7 +142,7 @@ export async function proposeRevision(input: ReviseInput): Promise<ProfileRevisi
       {
         role: "user",
         content:
-          `Revise ${input.learner.name}'s profile from this session, following the profile-update skill. Return the whole profile: every field, unchanged where the evidence did not change it. ` +
+          `Revise ${input.learner.name}'s records from this session, following the profile-update skill. Return the whole profile and the whole course notes: every field, unchanged where the evidence did not change it. ` +
           "Give a reason for each field you changed, and the summary for the parent.\n\n" +
           reviseContext(input),
       },
@@ -124,5 +151,10 @@ export async function proposeRevision(input: ReviseInput): Promise<ProfileRevisi
   assertNotRefused(message);
   if (message.stop_reason === "max_tokens") throw new Error("The profile revision was cut off at its output limit.");
   if (!parsed) throw new Error("The profile revision returned no parsable output.");
-  return parsed;
+  return {
+    profile: parsed.profile,
+    course: { priorKnowledge: parsed.course.priorKnowledge, observedGaps: parsed.course.observedGaps, guidance: parsed.course.courseGuidance },
+    reasons: parsed.reasons,
+    summary: parsed.summary,
+  };
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { buildTutorContext, passagesForLatestReply, tutorTools, type TutorContext } from "../src/agents/tutor-agent.js";
+import { buildTutorContext, passagesForLatestReply, startingPoint, tutorTools, type TutorContext } from "../src/agents/tutor-agent.js";
 import { openThread, setOpenThread, THREAD_PATIENCE, THREAD_PREFIX } from "../src/orchestrator/notes.js";
-import type { Concept, Course, Learner, Lesson, Session, SourceChunk } from "../src/domain/types.js";
+import type { Concept, Course, CourseKnowledge, Learner, Lesson, Session, SourceChunk } from "../src/domain/types.js";
 
 const concept: Concept = { id: "photosynthesis-definition", name: "What photosynthesis is", summary: "Plants make their own food using light.", keyFacts: ["Plants cannot eat the way animals do."], commonMisconceptions: ["Plants eat soil."], sourceChunkIds: [], prerequisites: [] };
 const lesson: Lesson = { id: "l1", title: "Lesson 1", objectives: ["The student can explain photosynthesis."], conceptIds: [concept.id], guidingQuestions: [], practiceItems: [], order: 0 };
@@ -178,7 +178,7 @@ describe("the tutor's turn is split into speaking and reflecting", () => {
   });
 
   it("tells the tutor how much of an answer the learner is ready for, from the profile's depth", () => {
-    const profile = { intakePreferences: [], demonstrationPreferences: [], challengeTolerance: "medium" as const, pace: "moderate" as const, verbalLevel: "casual", interests: [], priorKnowledge: [], observedGaps: [], parentSummary: "", tutoringGuidance: [] };
+    const profile = { demonstrationPreferences: [], challengeTolerance: "medium" as const, pace: "moderate" as const, verbalLevel: "casual", interests: [], parentSummary: "", tutoringGuidance: [] };
     const plain = buildTutorContext({ ...ctx, learner: { ...learner, profile } }, "speak")[1];
     expect(plain).toContain("Depth: simple (the plain version)");
     const full = buildTutorContext({ ...ctx, learner: { ...learner, profile: { ...profile, depth: "full" as const } } }, "speak")[1];
@@ -250,5 +250,54 @@ describe("what the tutor has already told the learner", () => {
     expect(reflect).toMatch(/record it once as kind told/);
     expect(reflect).toMatch(/if you record either, the note says the fact had been told/);
     expect(reflect).toMatch(/never as a dispute still open/);
+  });
+});
+
+describe("what the tutor is told about the learner, from two records and the parent", () => {
+  const profile = { demonstrationPreferences: ["explain-in-own-words" as const], challengeTolerance: "low" as const, pace: "moderate" as const, verbalLevel: "short plain sentences", interests: ["builds redstone machines in Minecraft"], parentSummary: "", tutoringGuidance: ["Asks for an example before the term"] };
+  const knowledge: CourseKnowledge = {
+    id: "l__c1", learnerId: "l", courseId: "c1", createdAt: "", updatedAt: "", intakeAt: "2026-10-05T09:00:00Z",
+    priorKnowledge: ["Knows plants need sunlight"], observedGaps: ["Says plants eat soil"], guidance: ["Start from the garden at home"],
+    starts: [{ conceptId: concept.id, estimate: "some", said: "plants eat dirt through the roots", confidence: 8, materialSays: "Plants make their own food from light, water and air.", from: "probe" }],
+  };
+
+  it("puts the profile, the parent's notes and the course knowledge in the one cached learner block", () => {
+    const block = buildTutorContext({ ...ctx, learner: { ...learner, gradeLevel: "5", profile, parentNotes: "He shuts down if rushed." }, knowledge } as TutorContext, "speak")[1];
+    expect(block).toContain('<learner_profile name="Sam" grade="5">');
+    expect(block).toContain("When stuck (challenge tolerance): low.");
+    expect(block).toContain("Register: short plain sentences");
+    expect(block).not.toMatch(/Intake preferences|Prior knowledge:/);
+    expect(block).toContain("<parent_notes>");
+    expect(block).toContain("He shuts down if rushed.");
+    expect(block).toContain('<course_knowledge course="Unit 3">\nWhat they have shown they know about this course:\n- Knows plants need sunlight');
+    expect(block).toContain("Gaps and misconceptions seen so far:\n- Says plants eat soil");
+    expect(block).toContain("Guidance for this course (follow literally):\n- Start from the garden at home");
+    // Without a profile the parent's notes and the course knowledge still reach the tutor.
+    const bare = buildTutorContext({ ...ctx, learner: { ...learner, parentNotes: "He shuts down if rushed." }, knowledge } as TutorContext, "speak")[1];
+    expect(bare).toContain("No profile yet");
+    expect(bare).toContain("He shuts down if rushed.");
+    expect(bare).toContain("<course_knowledge");
+  });
+
+  it("gives the concept its starting point in the student's own words, and the level a report gave since", () => {
+    expect(startingPoint(concept.id, knowledge)).toBe(
+      'Starting point, from the check before the course began (2026-10-05): some knowledge. They said: "plants eat dirt through the roots" (sure 8 out of 10) The reading says: Plants make their own food from light, water and air.',
+    );
+    const both = startingPoint(concept.id, knowledge, { [concept.id]: { level: 2, asOf: "2026-10-07T10:00:00Z" } });
+    expect(both).toContain("Last assessed: level 2 of 4 on 2026-10-07, which is where they stand now; the starting point is where they began.");
+    expect(startingPoint(concept.id, { ...knowledge, starts: [{ conceptId: concept.id, estimate: "none", said: "", from: "probe" }] })).toContain("nothing yet. They said they did not know.");
+    expect(startingPoint("another-concept", knowledge)).toBe("");
+    expect(startingPoint(concept.id, undefined, { [concept.id]: { level: 3, asOf: "2026-10-07T10:00:00Z" } })).toBe("Last assessed: level 3 of 4 on 2026-10-07.");
+    const conceptBlock = buildTutorContext({ ...ctx, knowledge } as TutorContext, "speak").find((b) => b.startsWith("<current_concept")) ?? "";
+    expect(conceptBlock).toContain("Starting point, from the check before the course began");
+    expect(buildTutorContext(ctx, "speak").find((b) => b.startsWith("<current_concept"))).not.toContain("Starting point");
+  });
+
+  it("shows the answers of a course intake that has only just ended, until its notes are written", () => {
+    const justNow = "Tutor: What is the first thing you would say about how plants get food?\nSam: they eat dirt";
+    const pending = buildTutorContext({ ...ctx, intakeJustNow: justNow } as TutorContext, "speak");
+    expect(pending.find((b) => b.startsWith("<asked_just_now>"))).toContain("Sam: they eat dirt");
+    // Once the record has its starting points, the structured version replaces the raw exchange.
+    expect(buildTutorContext({ ...ctx, intakeJustNow: justNow, knowledge } as TutorContext, "speak").some((b) => b.startsWith("<asked_just_now>"))).toBe(false);
   });
 });
