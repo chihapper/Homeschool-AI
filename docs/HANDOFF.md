@@ -237,6 +237,14 @@ the product (#13, #18, #23, #26). Ordering and blockers only here.
    | Tutor asks for the date it gave | Sonnet 5 | 7 of 12 | 4 of 12 |
    | same | Sonnet 5.5 | 5 of 22 | 1 of 22 |
 
+   Those "after" figures were measured with the old session's notes. Measured again the same day with the
+   note the fixed reflect pass files when the tutor reads the date out (what a session run on the fixed code
+   holds): the tutor asked for the date in **0 of 80** replays of that turn on Sonnet 5.5, and every closing
+   question was read by hand (they ask for "the second thing you'd tell your friend", and steer to how sure
+   the story is, not to the date). It is still an instruction and a list, not a filter on what the tutor
+   says: a hard stop would be a check on the closing question before it is spoken, at the cost of a short
+   delay on those turns. Not built; the user asked on 2026-10-05 whether the issue persists and was told this.
+
    What was built: `domain/told.ts` (the key-fact figures the tutor was the first to say, across every
    concept of the walk, with its own words and how many replies ago); the speaking call gets them in its
    final instruction, the reflect call as an `<already_told>` block; observation kind `told` (the tutor's own
