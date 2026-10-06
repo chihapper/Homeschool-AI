@@ -1,5 +1,5 @@
 /**
- * Text-mode tutoring session in the terminal (no Hume needed). Good for tuning skills.
+ * Text-mode tutoring session in the terminal (no voice keys needed). Good for tuning skills.
  *
  *   npm run chat -- --learner "Maya" --course <courseId> [--lesson <lessonId>] [--skip-intake] [--narration-first]
  *   npm run chat -- --learner-id <id> --course <courseId>

@@ -43,6 +43,8 @@ export interface CreateSessionArgs {
   lessonId?: string;
   /** Go straight to the lesson: neither intake runs, even for a student with no profile or no record for the course. */
   skipIntake?: boolean;
+  /** Begin the lesson without the general intake (the parent runs it from the Students tab); the course intake still runs when the course is new to the student. */
+  skipGeneralIntake?: boolean;
   /** The student has already read the material: open by asking them to tell it back, then question from that. */
   narrationFirst?: boolean;
   /** Run one intake on its own, with nothing after it (the Courses tab's button for the course intake). */
@@ -68,13 +70,14 @@ function probeConcepts(course: Course): string[] {
 }
 
 /** What a sitting for this student consists of, as things stand: see planSitting. A course with nothing to ask about has no course intake. */
-function sittingPlan(learner: Learner, course: Course | undefined, skipIntake?: boolean): SessionKind[] {
+function sittingPlan(learner: Learner, course: Course | undefined, skipIntake?: boolean, skipGeneralIntake?: boolean): SessionKind[] {
   return planSitting({
     // A profile being written counts: the conversation happened, and is not held again.
     hasProfile: Boolean(learner.profile || learner.profilePending),
     hasCourse: Boolean(course),
     hasCourseRecord: course ? Boolean(knowledgeFor(learner.id, course.id)) : false,
     skipIntake,
+    skipGeneralIntake,
   }).filter((kind) => kind !== "course-intake" || (course !== undefined && probeConcepts(course).length > 0));
 }
 
@@ -102,8 +105,11 @@ export function createSession(args: CreateSessionArgs): Session {
     return startSession("course-intake", learner, { course });
   }
   if (args.only === "general-intake") return startSession("general-intake", learner, {});
-  const plan = sittingPlan(learner, course, args.skipIntake);
-  if (!plan.length) throw new Error(`Choose a course: ${learner.name} already has a profile, so there is no intake to run without one.`);
+  const plan = sittingPlan(learner, course, args.skipIntake, args.skipGeneralIntake);
+  if (!plan.length) {
+    const why = learner.profile || learner.profilePending ? `${learner.name} already has a profile` : "the general intake was left out";
+    throw new Error(`Choose a course: without one there is only the general intake to run, and ${why}.`);
+  }
   const destination = course ? { courseId: course.id, lessonId: args.lessonId, narrationFirst: args.narrationFirst || undefined } : undefined;
   return startSession(plan[0], learner, { course, lesson, narrationFirst: args.narrationFirst, then: plan.length > 1 ? destination : undefined });
 }

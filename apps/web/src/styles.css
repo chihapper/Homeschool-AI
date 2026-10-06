@@ -124,3 +124,9 @@ details summary { cursor: pointer; }
 .dot.ok { background: #3b9b5a; }
 .dot.warn { background: #d99a1e; }
 input[type="range"] { width: 100%; accent-color: var(--accent); }
+
+/* Notices in a setup form (the Lesson tab: an intake still to do, a first time on a course) and the intake area on Students. */
+.notice { background: #fff8ec; border: 1px solid #efdcae; border-radius: 10px; padding: 10px 14px; margin: 10px 0; font-size: 14px; line-height: 1.5; }
+.notice .row { margin-top: 8px; }
+.intake-area > .card:first-child { border-color: var(--accent); }
+.segmented button:disabled { opacity: .5; cursor: default; }

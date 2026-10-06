@@ -53,8 +53,7 @@ pages, plus column-aware text for the mostly-textual ones.
 ## 3. Voice narration
 
 When "Already read this" is on, the first student turn needs a longer end-of-turn silence so a narration
-is not cut off at a pause (`sttMaxSilenceMs` in `voice/live.ts`). Untestable until the Hume balance is
-topped up.
+is not cut off at a pause (`sttMaxSilenceMs` in `voice/live.ts`). Not yet tried by voice.
 
 ## 4. Per-learner focus
 

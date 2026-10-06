@@ -74,16 +74,16 @@ export interface ProgressSummary {
   startsNotYetTaught: Array<ConceptStart & { name: string }>;
   baselineSummary?: string;
 }
-export type TtsProvider = "hume" | "elevenlabs" | "inworld";
+export type TtsProvider = "elevenlabs" | "inworld";
 /** How a person would name the provider in a sentence. */
-export const PROVIDER_NAME: Record<TtsProvider, string> = { hume: "Hume", elevenlabs: "ElevenLabs", inworld: "Inworld" };
+export const PROVIDER_NAME: Record<TtsProvider, string> = { elevenlabs: "ElevenLabs", inworld: "Inworld" };
 /** The .env key each provider needs. */
-export const PROVIDER_KEY: Record<TtsProvider, string> = { hume: "HUME_API_KEY", elevenlabs: "ELEVENLABS_API_KEY", inworld: "INWORLD_API_KEY" };
+export const PROVIDER_KEY: Record<TtsProvider, string> = { elevenlabs: "ELEVENLABS_API_KEY", inworld: "INWORLD_API_KEY" };
 export interface RuntimeSettings {
   model: string; tutorModel: string; tutorEffort: string; analysisEffort: string; reflectEffort: string; tutorThinking: "adaptive" | "disabled"; prewarmCache: boolean; refusalFallbacks: boolean;
   outsideKnowledge: OutsideKnowledgeMode;
   ttsProvider: TtsProvider;
-  ttsVoice: string; ttsVersion: "1" | "2"; ttsInstant: boolean; ttsBatchSentences: boolean; sttMinSilenceMs: number; sttMaxSilenceMs: number;
+  ttsBatchSentences: boolean; sttMinSilenceMs: number; sttMaxSilenceMs: number;
   elevenVoiceId: string; elevenVoiceName: string; elevenModel: string; elevenStability: number; elevenSpeed: number;
   inworldVoiceId: string; inworldVoiceName: string; inworldModel: string; inworldSpeed: number; inworldPauseMs: number;
 }
@@ -95,7 +95,7 @@ export interface VoiceModelOption { id: string; name: string; note?: string }
 /** A spoken sample of the draft voice settings, ready to play, and how fast the first audio came back. */
 export interface VoicePreview { url: string; provider: string; firstAudioMs: number; totalMs: number; characters: number }
 export interface Readiness { rows: Array<{ status: "ok" | "warn" | "fail"; item: string; note: string; stage: 0 | 1 | 2 | 3 }>; blocking: number; optional: number; checkedAt: string }
-export interface Health { ok: boolean; model: string; tutorModel: string; tutorEffort: string; tutorThinking: string; hume: boolean; voice: { stt: "assemblyai" | "none"; tts: TtsProvider | "none"; ttsProvider: TtsProvider; ttsVoice: string; ttsVersion: string; ttsModel: string } }
+export interface Health { ok: boolean; model: string; tutorModel: string; tutorEffort: string; tutorThinking: string; voice: { stt: "assemblyai" | "none"; tts: TtsProvider | "none"; ttsProvider: TtsProvider; ttsVoice: string; ttsModel: string } }
 
 async function j<T>(res: Response): Promise<T> {
   if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error ?? `${res.status} ${res.statusText}`);
@@ -154,21 +154,22 @@ export const api = {
   deleteLearner: (id: string) => fetch(`/api/learners/${id}`, { method: "DELETE" }).then(j<{ ok: true }>),
 
   sessions: () => fetch("/api/sessions").then(j<SessionSummary[]>),
-  /** Starts a sitting and returns its first session: an intake when one is due, else the lesson. `only` runs one intake by itself. */
-  createSession: (body: { learnerId: string; courseId?: string; lessonId?: string; skipIntake?: boolean; narrationFirst?: boolean; only?: "general-intake" | "course-intake" }) => fetch("/api/sessions", json("POST", body)).then(j<Session>),
+  /**
+   * Starts a sitting and returns its first session: an intake when one is due, else the lesson. `skipGeneralIntake`
+   * leaves the general intake to the Students tab; `skipIntake` skips both; `only` runs one intake by itself.
+   */
+  createSession: (body: { learnerId: string; courseId?: string; lessonId?: string; skipIntake?: boolean; skipGeneralIntake?: boolean; narrationFirst?: boolean; only?: "general-intake" | "course-intake" }) => fetch("/api/sessions", json("POST", body)).then(j<Session>),
   session: (id: string) => fetch(`/api/sessions/${id}`).then(j<Session>),
   deleteSession: (id: string) => fetch(`/api/sessions/${id}`, { method: "DELETE" }).then(j<{ ok: true }>),
   latency: (sessionId: string) => fetch(`/api/sessions/${sessionId}/latency`).then(j<LatencySummary>),
   endSession: (id: string) => fetch(`/api/sessions/${id}/end`, { method: "POST" }).then(j<{ session: Session; report?: Report }>),
-  /** Attach browser-measured voice timings to the latest tutor turn (used by the Hume EVI path). */
+  /** Attach browser-measured voice timings to the latest tutor turn. */
   turnLatency: (id: string, body: { firstAudioMs?: number; transcriptMs?: number }) => fetch(`/api/sessions/${id}/turn-latency`, json("POST", body)).then(j<{ ok: true }>),
 
   reports: () => fetch("/api/reports").then(j<Report[]>),
   report: (sessionId: string) => fetch(`/api/reports/${sessionId}`).then(j<Report>),
   /** 404 (thrown as an Error with the server's message) until the student has a completed session on the course. */
   progress: (learnerId: string, courseId: string) => fetch(`/api/progress/${learnerId}/${courseId}`).then(j<ProgressSummary>),
-
-  humeToken: () => fetch("/api/hume/token").then(j<{ accessToken: string; configId: string | null; clmSecret: string | null }>),
 
   /**
    * Text-mode turn: streams deltas via SSE. The reply ends at `done`; the tutor's notes and any phase

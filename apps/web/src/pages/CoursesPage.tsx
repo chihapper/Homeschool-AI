@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
 import { api, fmtDate, type Chunk, type Course, type CourseFocus, type CourseKnowledge, type Learner, type Session } from "../api";
 
-/** What the course card needs to show where each student starts, and to ask them. */
+/** What the course card needs to show where each student starts, and to start them. */
 interface StartsProps {
   learners: Learner[];
   knowledge: CourseKnowledge[];
-  /** A course intake was started from here: show it on the Session tab. */
+  /** "Start X on this course" / "Continue with X": open the Lesson tab with this student and course chosen. */
+  onStartLesson: (courseId: string, learnerId: string) => void;
+  /** "Ask again": a course intake on its own, started here and shown on the Lesson tab. */
   onStartSession: (s: Session) => void;
 }
 
@@ -17,7 +19,7 @@ function startLine(k: CourseKnowledge | undefined): string {
     const parts = [count("can-explain") && `could already explain ${count("can-explain")}`, count("some") && `some knowledge of ${count("some")}`, count("none") && `nothing yet on ${count("none")}`].filter(Boolean);
     return `asked ${k.intakeAt ? fmtDate(k.intakeAt) : ""}: ${parts.join(", ")} of the ${k.starts.length} ideas asked about`;
   }
-  return k ? "not asked; there are notes from sessions" : "not asked yet; their first session on this course opens with it";
+  return k ? "not asked; there are notes from sessions" : "not asked yet; their first lesson on this course opens with it";
 }
 
 export function CoursesPage({ courses, onChange, ...starts }: { courses: Course[]; onChange: () => Promise<void> } & StartsProps) {
@@ -104,7 +106,7 @@ export function CoursesPage({ courses, onChange, ...starts }: { courses: Course[
   );
 }
 
-function CourseCard({ course: c, onDelete, onChange, learners, knowledge, onStartSession }: { course: Course; onDelete: () => void; onChange: () => Promise<void> } & StartsProps) {
+function CourseCard({ course: c, onDelete, onChange, learners, knowledge, onStartLesson, onStartSession }: { course: Course; onDelete: () => void; onChange: () => Promise<void> } & StartsProps) {
   const [askErr, setAskErr] = useState<string | null>(null);
   const [asking, setAsking] = useState(false);
   // Ask one student what they already know about this course, now, as a session of its own.
@@ -178,7 +180,7 @@ function CourseCard({ course: c, onDelete, onChange, learners, knowledge, onStar
         <div className="concept-row">
           <strong>Where each student starts</strong>
           <p className="muted small" style={{ margin: "4px 0" }}>
-            A student's first session on this course opens with a few questions about what they already know: one per central idea, how sure they are, and no teaching. Ideas you unticked are never asked about, and neither is anything about faith. The answers are on the Students tab.
+            A student's first lesson on this course opens with a few questions about what they already know: one per central idea, how sure they are, and no teaching. Ideas you unticked are never asked about, and neither is anything about faith. The answers are on the Students tab.
           </p>
           {learners.map((l) => {
             const k = knowledge.find((x) => x.learnerId === l.id && x.courseId === c.id);
@@ -187,7 +189,14 @@ function CourseCard({ course: c, onDelete, onChange, learners, knowledge, onStar
                 <span><strong>{l.name}</strong>: {startLine(k)}</span>
                 <span className="row">
                   {k?.pending?.error && <button className="ghost small" onClick={() => retry(l)}>Write the notes again</button>}
-                  <button className="ghost small" disabled={asking || keptLessons.length === 0} onClick={() => ask(l)}>{k?.starts.length ? "Ask again" : "Ask now"}</button>
+                  {k ? (
+                    <>
+                      <button className="ghost small" disabled={keptLessons.length === 0} onClick={() => onStartLesson(c.id, l.id)}>Continue with {l.name}</button>
+                      <button className="ghost small" disabled={asking || keptLessons.length === 0} onClick={() => ask(l)} title="Ask what they know about this course, as a conversation of its own with no lesson after it">{k.starts.length ? "Ask again" : "Ask now"}</button>
+                    </>
+                  ) : (
+                    <button className="primary small" disabled={keptLessons.length === 0} onClick={() => onStartLesson(c.id, l.id)}>Start {l.name} on this course</button>
+                  )}
                 </span>
               </div>
             );

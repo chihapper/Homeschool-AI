@@ -1,6 +1,5 @@
 /**
- * Tutor Agent: the live Socratic teacher. Runs behind the browser voice path, the text chat API and the
- * Hume voice bridge.
+ * Tutor Agent: the live Socratic teacher. Runs behind the browser voice path and the text chat API.
  *
  * A turn is TWO calls, because they have different deadlines:
  *

@@ -47,8 +47,6 @@ describe("runtime settings", () => {
     for (const bad of [{ ttsProvider: "cartesia" }, { elevenStability: 1.5 }, { elevenSpeed: 1.3 }, { elevenSpeed: 0.5 }, { elevenVoiceId: "" }]) {
       expect(() => updateSettings(bad)).toThrow();
     }
-    updateSettings({ ttsProvider: "hume" });
-    expect(ttsVoiceLabel()).toBe(config.ttsVoice);
     resetSettings();
   });
 
@@ -70,5 +68,15 @@ describe("runtime settings", () => {
     resetSettings();
     expect(getSettings().effective).toEqual(envDefaults);
     expect(fs.existsSync(file)).toBe(false);
+  });
+
+  it("keeps the saved settings that still apply when one no longer does", () => {
+    const stale = path.join(dir, "stale.json");
+    fs.writeFileSync(stale, JSON.stringify({ model: "claude-sonnet-5", ttsProvider: "a-provider-that-was-removed", ttsVoice: "Ava Song" }));
+    useSettingsFile(stale);
+    expect(config.model).toBe("claude-sonnet-5");
+    expect(config.ttsProvider).toBe(envDefaults.ttsProvider);
+    expect(getSettings().overrides).toEqual({ model: "claude-sonnet-5" });
+    useSettingsFile(file);
   });
 });

@@ -115,6 +115,11 @@ describe("what a sitting consists of", () => {
     expect(planSitting({ hasProfile: false, hasCourse: true, hasCourseRecord: false, skipIntake: true })).toEqual(["lesson"]);
     expect(planSitting({ hasProfile: false, hasCourse: false, hasCourseRecord: false, skipIntake: true })).toEqual([]);
   });
+  it("leaves only the general intake out when the parent will run it from the Students tab", () => {
+    expect(planSitting({ hasProfile: false, hasCourse: true, hasCourseRecord: false, skipGeneralIntake: true })).toEqual(["course-intake", "lesson"]);
+    expect(planSitting({ hasProfile: false, hasCourse: true, hasCourseRecord: true, skipGeneralIntake: true })).toEqual(["lesson"]);
+    expect(planSitting({ hasProfile: false, hasCourse: false, hasCourseRecord: false, skipGeneralIntake: true })).toEqual([]);
+  });
 });
 
 describe("the record a course intake leaves behind", () => {

@@ -18,13 +18,11 @@ import { activeTtsProvider, config, getSettings, MODEL_OPTIONS, REPO_ROOT, reset
 import { undoProfileUpdate } from "../domain/profile.js";
 import { anthropic, normalizeModelId } from "../llm/client.js";
 import { checkReadiness } from "../doctor.js";
-import { humeConfigured, mintAccessToken } from "../voice/hume.js";
 import { pcm16ToWav } from "../voice/pcm.js";
 import { ELEVEN_FALLBACK_MODELS, elevenKeyProblem, listElevenModels, listElevenVoices, speakElevenLabs } from "../voice/tts-elevenlabs.js";
 import { INWORLD_MODELS, inworldKeyProblem, inworldVoicePreview, listInworldVoices, speakInworldHttp } from "../voice/tts-inworld.js";
 import { inworldText } from "../voice/live.js";
 import { SentenceChunker, type Segment } from "../voice/sentence-chunker.js";
-import { listHumeVoices, speakHume } from "../voice/tts-hume.js";
 
 const LearnerBody = z.object({ name: z.string().min(1), age: z.number().int().optional(), gradeLevel: z.string().optional(), parentNotes: z.string().max(4000).optional() });
 const NotesBody = z.object({ parentNotes: z.string().max(4000) });
@@ -33,6 +31,7 @@ const SessionBody = z.object({
   courseId: z.string().optional(),
   lessonId: z.string().optional(),
   skipIntake: z.boolean().optional(),
+  skipGeneralIntake: z.boolean().optional(),
   narrationFirst: z.boolean().optional(),
   /** Run one intake on its own, with nothing after it. */
   only: z.enum(["general-intake", "course-intake"]).optional(),
@@ -51,7 +50,7 @@ const MessageBody = z.object({ text: z.string().default(""), expressions: z.arra
 /** "Test this voice" in Settings: the draft settings, unsaved, so a parent hears a choice before keeping it. */
 const PreviewBody = z.object({ settings: RuntimeSettingsSchema.partial().optional(), text: z.string().trim().min(1).max(400).optional() });
 const PREVIEW_TEXT = "Hi! I'm your tutor. Before I tell you anything, what do you already remember about how Rome began?";
-/** Voice timings the browser measured for the latest tutor turn (the Hume EVI path measures them client-side). */
+/** Voice timings the browser measured for the latest tutor turn. */
 const TurnLatencyBody = z.object({ firstAudioMs: z.number().int().min(0).max(120_000).optional(), transcriptMs: z.number().int().min(0).max(120_000).optional() });
 
 /** Bundled sample material lives in the repo, independent of DATA_DIR. */
@@ -71,7 +70,6 @@ function health() {
     tutorModel: s.tutorModel,
     tutorEffort: s.tutorEffort,
     tutorThinking: s.tutorThinking,
-    hume: humeConfigured(),
     voice: {
       stt: config.voice.sttProvider === "assemblyai" && config.voice.assemblyAiKey ? "assemblyai" : "none",
       /** The provider that will actually speak: the selected one if its key is present, else none (text only). */
@@ -79,7 +77,6 @@ function health() {
       /** The provider selected in Settings, whether or not its key is present. */
       ttsProvider: s.ttsProvider,
       ttsVoice: ttsVoiceLabel(),
-      ttsVersion: s.ttsVersion,
       ttsModel: ttsModelLabel(),
     },
   };
@@ -95,7 +92,6 @@ function settingsView() {
       efforts: RuntimeSettingsSchema.shape.tutorEffort.options,
       thinking: RuntimeSettingsSchema.shape.tutorThinking.options,
       ttsProviders: [
-        { id: "hume", label: "Hume Octave", ready: Boolean(config.hume.apiKey), problem: config.hume.apiKey ? undefined : "HUME_API_KEY is not set in .env." },
         { id: "elevenlabs", label: "ElevenLabs", ready: !elevenProblem, problem: elevenProblem },
         { id: "inworld", label: "Inworld", ready: !inworldProblem, problem: inworldProblem },
       ],
@@ -154,20 +150,17 @@ export function registerApiRoutes(app: FastifyInstance): void {
     return settingsView();
   });
   app.get("/api/doctor", async (req: FastifyRequest<{ Querystring: { ping?: string } }>) => checkReadiness({ ping: req.query.ping === "true" || req.query.ping === "1" }));
-  /** The voices a provider offers, for the voice picker in Settings (?provider=hume|elevenlabs|inworld; default the selected one). */
+  /** The voices a provider offers, for the voice picker in Settings (?provider=elevenlabs|inworld; default the selected one). */
   app.get("/api/voice/voices", async (req: FastifyRequest<{ Querystring: { provider?: string } }>, reply) => {
-    const provider = req.query.provider === "elevenlabs" || req.query.provider === "hume" || req.query.provider === "inworld" ? req.query.provider : config.ttsProvider;
+    const provider = req.query.provider === "elevenlabs" || req.query.provider === "inworld" ? req.query.provider : config.ttsProvider;
     try {
       if (provider === "elevenlabs") {
         if (!config.elevenlabs.apiKey) return reply.code(400).send({ error: elevenKeyProblem(undefined) });
         return await listElevenVoices();
       }
-      if (provider === "inworld") {
-        const problem = inworldKeyProblem(config.inworld.apiKey);
-        if (problem) return reply.code(400).send({ error: problem });
-        return await listInworldVoices();
-      }
-      return await listHumeVoices();
+      const problem = inworldKeyProblem(config.inworld.apiKey);
+      if (problem) return reply.code(400).send({ error: problem });
+      return await listInworldVoices();
     } catch (err) {
       return reply.code(502).send({ error: err instanceof Error ? err.message : String(err) });
     }
@@ -205,15 +198,13 @@ export function registerApiRoutes(app: FastifyInstance): void {
       const chunks: AsyncIterable<{ pcm: Buffer }> =
         s.ttsProvider === "elevenlabs"
           ? speakElevenLabs(text, { voiceId: s.elevenVoiceId, model: s.elevenModel, stability: s.elevenStability, speed: s.elevenSpeed })
-          : s.ttsProvider === "inworld"
-            ? (async function* () {
-                // Sentence by sentence as the live tutor sends it, so the sample carries the pause setting.
-                const chunker = new SentenceChunker();
-                const segments = [...chunker.push(text), chunker.flush()].filter((x): x is Segment => Boolean(x));
-                const spoken = inworldText(segments, undefined, s.inworldPauseMs);
-                for await (const pcm of speakInworldHttp(spoken, { voiceId: s.inworldVoiceId, model: s.inworldModel, speed: s.inworldSpeed })) yield { pcm };
-              })()
-            : speakHume(text, { voice: s.ttsVoice, version: s.ttsVersion, instant: s.ttsInstant, trailingSilence: 0.3 });
+          : (async function* () {
+              // Sentence by sentence as the live tutor sends it, so the sample carries the pause setting.
+              const chunker = new SentenceChunker();
+              const segments = [...chunker.push(text), chunker.flush()].filter((x): x is Segment => Boolean(x));
+              const spoken = inworldText(segments, undefined, s.inworldPauseMs);
+              for await (const pcm of speakInworldHttp(spoken, { voiceId: s.inworldVoiceId, model: s.inworldModel, speed: s.inworldSpeed })) yield { pcm };
+            })();
       for await (const c of chunks) {
         firstMs ??= Math.round(performance.now() - t0);
         parts.push(c.pcm);
@@ -489,14 +480,6 @@ export function registerApiRoutes(app: FastifyInstance): void {
     learners.require(req.params.learnerId);
     const progress = buildProgress(reports.list(), course, req.params.learnerId, req.params.courseId, knowledgeFor(req.params.learnerId, req.params.courseId));
     return progress ?? reply.code(404).send({ error: "No completed sessions yet for this student and course." });
-  });
-
-  // ---- Hume ----------------------------------------------------------------
-  /** Browser calls this to get a short-lived EVI token plus the config id and CLM secret to pass as session settings. */
-  app.get("/api/hume/token", async (_req, reply) => {
-    if (!humeConfigured()) return reply.code(503).send({ error: "Hume is not configured on the server (HUME_API_KEY / HUME_SECRET_KEY)." });
-    const accessToken = await mintAccessToken();
-    return { accessToken, configId: config.hume.configId ?? null, clmSecret: config.hume.clmSecret ?? null };
   });
 }
 

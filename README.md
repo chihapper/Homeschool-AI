@@ -4,7 +4,8 @@ A Socratic AI tutor for homeschool families. Upload the material you already tea
 turns it into a course, learns how your student learns, tutors them **by questioning** over voice or
 text, and hands you a mastery report you can act on.
 
-Built as a small multi-agent system on the Claude API (Opus 5) with Hume EVI for the voice layer.
+Built as a small multi-agent system on the Claude API (Opus 5.5 and Sonnet 5.5). Voice runs in the browser:
+AssemblyAI listens, Inworld or ElevenLabs speaks, and the same tutor answers either way.
 
 ## What it does
 
@@ -62,26 +63,12 @@ local `whisper` CLI with `STT_PROVIDER=whisper-cli`). YouTube captions need only
 ## Voice mode in the browser
 
 The student talks into the web app, AssemblyAI turns it into text, and the tutor's reply is spoken by
-**ElevenLabs**, **Inworld** or **Hume Octave**. Pick the provider with the toggle at the top of **Settings, Voice**;
+**Inworld** or **ElevenLabs**. Pick the provider with the toggle at the top of **Settings, Voice**;
 the voice, model and sound fields below it change with the provider, and **Test this voice** speaks one
 line with the unsaved settings (about 100 characters of credits). Needs `ASSEMBLYAI_API_KEY` plus the
 chosen provider's key. The microphone works in Chrome at `http://localhost:5173`. Inworld voices each reply as
-one continuous stream over a connection opened while the student is talking; the other two voice it in
+one continuous stream over a connection opened while the student is talking; ElevenLabs voices it in
 sentence batches.
-
-## Voice mode (Hume EVI)
-
-1. Get a Hume API key and secret key; put them in `.env`.
-2. Expose the server publicly during development (e.g. `ngrok http 3001`) and set `PUBLIC_URL` and a random `CLM_SECRET`.
-3. Create the EVI config that points Hume at this server's custom-language-model endpoint:
-   ```bash
-   npm run setup:hume
-   ```
-   Put the printed id in `.env` as `HUME_CONFIG_ID` and restart the server.
-4. In the web app choose **Voice** when starting a session.
-
-Hume does speech-to-text, expression measurement, turn-taking, and text-to-speech; our server is the
-brain behind it, so voice and text sessions share the same tutor, state, and report.
 
 ## Configuration
 
@@ -94,14 +81,13 @@ brain behind it, so voice and text sessions share the same tutor, state, and rep
 | `CLAUDE_TUTOR_THINKING`, `CLAUDE_PREWARM_CACHE` | Latency knobs; see [docs/LATENCY.md](docs/LATENCY.md). |
 | `OUTSIDE_KNOWLEDGE`, `WIKIPEDIA_CONTACT` | Facts your student brings in from outside the material: `check` (answer, then check against Wikipedia in the background), `answer`, or `material-only`; Settings, Outside the reading overrides it. The checks need a contact (an email address or website) that Wikimedia's policy requires in every request. |
 | `ASSEMBLYAI_API_KEY` | Browser voice: the student's speech to text. |
-| `VOICE_TTS`, `ELEVENLABS_API_KEY`, `INWORLD_API_KEY`, `HUME_API_KEY` | Browser voice: who speaks the tutor's reply, ElevenLabs, Inworld or Hume Octave. `VOICE_TTS` is only the default; the toggle at the top of Settings, Voice switches it from the next reply. An ElevenLabs key starts with `sk_`; an Inworld key is the Portal's Base64 credential, pasted as-is. |
-| `HUME_API_KEY`, `HUME_SECRET_KEY`, `HUME_CONFIG_ID`, `PUBLIC_URL`, `CLM_SECRET` | Hume EVI voice mode (Hume runs the conversation loop). |
+| `VOICE_TTS`, `INWORLD_API_KEY`, `ELEVENLABS_API_KEY` | Browser voice: who speaks the tutor's reply, Inworld or ElevenLabs. `VOICE_TTS` is only the default; the toggle at the top of Settings, Voice switches it from the next reply. An ElevenLabs key starts with `sk_`; an Inworld key is the Portal's Base64 credential, pasted as-is. |
 | `YTDLP_BIN`, `STT_PROVIDER`, `DEEPGRAM_API_KEY`, `WHISPER_BIN` | Video and podcast ingestion. |
 
 ## Project layout
 
 ```
-apps/server   Fastify API, agents, orchestrator, Hume CLM bridge, CLIs, tests
+apps/server   Fastify API, agents, orchestrator, browser voice socket, CLIs, tests
 apps/web      Vite + React UI (text and voice)
 skills/       SKILL.md competencies loaded into agent prompts
 docs/         Architecture notes
@@ -121,7 +107,7 @@ dropping a folder in `skills/` and listing it in the agent's `skills` array in `
 ## Honest limits
 
 - **YouTube.** Fetching transcripts or audio from videos you do not own breaches YouTube's terms of service (a civil matter, and cloud IPs get blocked). Use the video path for your family's own or clearly licensed videos, run it from your own machine, or plug in a hosted transcript API. TED talks are CC BY-NC-ND: fine for personal educational use; a commercial product built on them needs a licence check. Podcast feeds and PowerPoint files carry no such issue.
-- **Voice latency.** Hume in custom-language-model mode is speech recognition, then Claude, then Hume's speech model voicing the text. It is not native speech-to-speech, and that is deliberate: it keeps the orchestrator, grounding, and assessor in charge. The cost is time-to-first-token, which is why the live tutor defaults to Sonnet 5 and every turn is measured. See [docs/LATENCY.md](docs/LATENCY.md).
+- **Voice latency.** Voice is speech recognition (AssemblyAI), then Claude, then a speech model voicing the text (Inworld or ElevenLabs). It is not native speech-to-speech, and that is deliberate: it keeps the orchestrator, grounding, and assessor in charge. The cost is time-to-first-token, which is why the live tutor defaults to Sonnet 5 and every turn is measured. See [docs/LATENCY.md](docs/LATENCY.md).
 
 - No model "can't make mistakes". The system reduces the risk by grounding the tutor in your material, giving it a retrieval tool, and having a second agent audit its claims. Read the grounding audit in each report.
 - Retrieval is lexical (BM25). Fine for a course; upgrade to embeddings for a whole library.

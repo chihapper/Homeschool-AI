@@ -16,9 +16,9 @@ export interface ReadyMessage {
   phase: Phase;
   conceptIndex: number;
   stt: "assemblyai" | "none";
-  tts: "hume" | "elevenlabs" | "inworld" | "none";
+  tts: "elevenlabs" | "inworld" | "none";
   voice: string;
-  /** "Octave 2" for Hume, the model id for ElevenLabs. */
+  /** The provider's model id. */
   ttsModel?: string;
   micSampleRate: number;
   playbackSampleRate: number;
@@ -79,10 +79,18 @@ export class VoiceClient {
   private capBuf = new Float32Array(0);
   private levelAt = 0;
 
-  constructor(private readonly sessionId: string) {}
+  /** The last `ready` message, for a listener that attaches after it arrived. */
+  private _ready: ReadyMessage | null = null;
+  private connecting: Promise<void> | null = null;
+
+  constructor(readonly sessionId: string) {}
 
   get state(): VoiceState {
     return this._state;
+  }
+
+  get ready(): ReadyMessage | null {
+    return this._ready;
   }
 
   on<K extends keyof VoiceEvents>(event: K, handler: VoiceEvents[K]): () => void {
@@ -103,8 +111,26 @@ export class VoiceClient {
     this.emit("state", s);
   }
 
-  /** Open the socket and the speaker. Call from a click handler so the browser allows audio. */
-  async connect(): Promise<void> {
+  /**
+   * Create the speaker's audio context. Browsers only let a page start audio after the person has clicked, so
+   * the page calls this from its button handler; connect() can then run from wherever the conversation is shown.
+   */
+  prepare(): void {
+    if (this.audioCtx) return;
+    const Ctor = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    try {
+      this.audioCtx = new Ctor({ sampleRate: this.playbackRate });
+    } catch {
+      this.audioCtx = new Ctor(); // browser refused the rate; we resample
+    }
+  }
+
+  /** Open the socket and the speaker. A second call joins the first: React mounts a component twice in development. */
+  connect(): Promise<void> {
+    return (this.connecting ??= this.open());
+  }
+
+  private async open(): Promise<void> {
     await this.ensurePlayback();
     const proto = location.protocol === "https:" ? "wss" : "ws";
     const ws = new WebSocket(`${proto}://${location.host}/ws/voice?sessionId=${encodeURIComponent(this.sessionId)}`);
@@ -133,8 +159,9 @@ export class VoiceClient {
     switch (msg.type) {
       case "ready":
         this.playbackRate = Number(msg.playbackSampleRate) || 24_000;
+        this._ready = msg as unknown as ReadyMessage;
         this.setState("idle");
-        this.emit("ready", msg as unknown as ReadyMessage);
+        this.emit("ready", this._ready);
         break;
       case "listening":
         this.setState("listening");
@@ -188,21 +215,17 @@ export class VoiceClient {
 
   // ---------------------------------------------------------------- playback
   private async ensurePlayback(): Promise<void> {
-    if (!this.audioCtx) {
-      const Ctor = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      try {
-        this.audioCtx = new Ctor({ sampleRate: this.playbackRate });
-      } catch {
-        this.audioCtx = new Ctor(); // browser refused the rate; we resample
-      }
-      await this.audioCtx.audioWorklet.addModule("/pcm-player.js");
-      this.player = new AudioWorkletNode(this.audioCtx, "pcm-player");
+    this.prepare();
+    const ctx = this.audioCtx as AudioContext;
+    if (!this.player) {
+      await ctx.audioWorklet.addModule("/pcm-player.js");
+      this.player = new AudioWorkletNode(ctx, "pcm-player");
       this.player.port.onmessage = (e) => {
         if (e.data?.type === "drained" && this.audioEnded && this._state === "speaking") this.setState("idle");
       };
-      this.player.connect(this.audioCtx.destination);
+      this.player.connect(ctx.destination);
     }
-    if (this.audioCtx.state === "suspended") await this.audioCtx.resume();
+    if (ctx.state === "suspended") await ctx.resume();
   }
 
   private resetPlayback(): void {

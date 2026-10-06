@@ -1,6 +1,6 @@
 /**
- * Inworld text-to-speech: the third voice for browser voice mode, beside Hume Octave and ElevenLabs
- * (`ttsProvider`). Unlike those two, a tutor reply is voiced as ONE stream: `live.ts` opens a context for
+ * Inworld text-to-speech: the default voice for browser voice mode, beside ElevenLabs (`ttsProvider`).
+ * Unlike ElevenLabs, a tutor reply is voiced as ONE stream: `live.ts` opens a context for
  * the reply, feeds it each sentence batch the moment it is written, and the context keeps the voice's
  * delivery continuous across batches, which separate requests cannot do (docs/LATENCY.md, clips A to D).
  * The connection is opened while the student is still talking, so its handshake costs the reply nothing.

@@ -13,20 +13,19 @@ to first audio on a warm cache**, and we measure it on every turn.
 
 ```
 student stops talking
-  ├─ Hume end-of-turn detection + speech-to-text ........ Hume-side, ~200-400 ms
-  ├─ HTTPS hop Hume -> our server ...................... ~50-150 ms (keep the server near Hume's region)
+  ├─ AssemblyAI end-of-turn + transcript ............... ~0 after end of speech (streaming; the words are ready as they stop)
   ├─ Claude time-to-first-token ........................ the big one; depends on model, effort, thinking, cache
-  ├─ our SSE stream -> Hume, first sentence buffered .... ~0 (we stream every delta)
-  └─ Hume speech generation, first audio chunk ......... Hume-side, ~200-300 ms
+  ├─ first sentence to the voice ....................... ~0 (we stream every delta and send the first sentence alone)
+  └─ speech generation, first audio chunk .............. Inworld 0.2-0.3 s, ElevenLabs Flash ~0.25 s, from the first word
 ```
 
-We control the middle three. Everything below is about Claude time-to-first-token (TTFT).
+We control the middle two. Everything below is about Claude time-to-first-token (TTFT).
 
 ## What the build does
 
 | Lever | Where | Effect |
 |---|---|---|
-| **Stream every token to Hume** | `voice/clm.ts` writes each delta as an SSE chunk | Hume starts speaking on the first sentence, not the whole reply |
+| **Stream every token to the voice** | `voice/live.ts` cuts the stream into sentences (`sentence-chunker.ts`) and sends the first alone | The voice starts on the first sentence, not the whole reply |
 | **The reflect pass steers the next turn** | `open_thread` -> `orchestrator/notes.ts` | The speaking call cannot deliberate, so anything the reflect pass notices that should change the NEXT question (a dodged question, a contradiction, a lucky guess) is queued as one sentence and rides beside the phase guidance next turn. Costs no latency: it is written while the learner listens |
 | **Two calls per turn: speak, then reflect** | `tutorTurn` / `reflectTurn` in `tutor-agent.ts` | The speaking call has no bookkeeping tools and thinking disabled, so nothing can delay the first word; `record_observation` and `advance` run in a second call that starts once the reply is out, while the learner listens. `lookup_source` stays in the speaking call because reading a passage is part of answering. Measured 2026-09-22: the old single call spent 5-15 s thinking before speaking on decision turns (worst 16.4 s); after the split, time-to-first-token was 1.1-1.6 s on every turn and the notes took 4.5-6.4 s off the learner's clock |
 | **Low effort on the live tutor** | `CLAUDE_TUTOR_EFFORT=low` | Fewer thinking tokens before the first word. Offline agents stay at `high` |
@@ -34,7 +33,7 @@ We control the middle three. Everything below is about Claude time-to-first-toke
 | **Two prompt-cache breakpoints** | `buildSystem(..., STABLE_CONTEXT_BLOCKS)` | Role + skills is one cached prefix; course + lesson + learner profile is a second. Only the current concept and observations vary per turn |
 | **Cache pre-warm on session start** | `prewarmTutor()` fires when a session is created | A `max_tokens: 0` request writes the cache before the student says a word, so the first turn is a cache hit |
 | **Short replies by design** | `voice-conversation` skill, `SPEAK_MAX_TOKENS` (1200) / `REFLECT_MAX_TOKENS` (2000) in `tutor-agent.ts` | Two to four sentences then a question. The caps are room, not a target: `max_tokens` covers thinking too, and a spoken turn measures 60 to 200 output tokens on Sonnet 5 (2026-09-30) |
-| **Abort on interruption** | `req.raw.on("close")` -> `AbortController` | When Hume drops the request because the student barged in, we stop generating immediately |
+| **Abort on interruption** | `interrupt` in `voice/live.ts` -> `AbortController` | When the student barges in, the model and the voice stop at once; what was already said stays in the transcript |
 | **Model choice** | `CLAUDE_TUTOR_MODEL` | Default `claude-sonnet-5-5`, the tier that can speak with no thinking first. `claude-opus-5-5` is stronger but always thinks a little (low effort is the only control). If measured TTFT is too high, try `claude-haiku-4-5` (the code drops effort/thinking params automatically for Haiku). Note for the diagnostics: `thinkingChars` counts thinking *text*, which Sonnet 5, Sonnet 5.5 and Opus 5.5 omit from responses by default, so it reads 0 there even when the model thought; `outputTokens` still includes the thinking |
 
 ## Measuring
@@ -52,14 +51,14 @@ between turns (see `docs/ARCHITECTURE.md`, "Prompt caching").
 
 ## What we cannot fix from here
 
-Hume's own end-of-turn detection and speech generation are fixed costs. Two things help: run the
-server in the same cloud region as Hume, and keep the tutor's first sentence short so the first audio
-chunk is ready sooner.
+The transcriber's end-of-turn window and the voice's generation time are fixed costs. Two things help:
+keep the end-of-turn silences in Settings as short as the student can bear, and keep the tutor's first
+sentence short so the first audio chunk is ready sooner.
 
 ## Ideas not yet built
 
-- **Backchannel filler**: emit "Hmm," or "Okay," immediately while Claude thinks. Cheap to add in `clm.ts`; risks sounding canned. Try only if measured TTFT stays above 1 s.
-- **Speculative reply**: start generating the most likely next tutor turn while the student is still speaking, using Hume's interim transcripts. Larger change; only worth it if the model is the bottleneck after everything above.
+- **Backchannel filler**: emit "Hmm," or "Okay," immediately while Claude thinks. Cheap to add in `live.ts`; risks sounding canned. Try only if measured TTFT stays above 1 s.
+- **Speculative reply**: start generating the most likely next tutor turn while the student is still speaking, using AssemblyAI's partial transcripts. Larger change; only worth it if the model is the bottleneck after everything above.
 
 ## The wait a fast talker sees
 
@@ -73,7 +72,7 @@ apply one turn later.
 
 ## Two voices for the tutor (2026-09-24)
 
-Browser voice mode can speak through ElevenLabs as well as Hume Octave (`ttsProvider`, the toggle at the
+Browser voice mode can speak through ElevenLabs as well as Inworld (`ttsProvider`, the toggle at the
 top of Settings, Voice). Both deliver 24 kHz PCM, so the switch applies from the next reply without
 reconnecting. Measured 2026-09-24 on this machine (Starter plan, voice George):
 
@@ -83,7 +82,8 @@ reconnecting. Measured 2026-09-24 on this machine (Starter plan, voice George):
 | v3 Conversational | 263 ms | 247 ms | refused: HTTP 400 `unsupported_model` |
 | Multilingual v2 | 1,328 ms | not measured | works |
 
-Direct numbers follow one warm-up request per model. Hume Octave 2 measured about 0.6 s here earlier.
+Direct numbers follow one warm-up request per model. (Hume Octave 2, the voice until 2026-10-06, measured
+about 0.6 s here earlier; Hume is sunsetting it and the adapter was removed.)
 In a live voice session over the app's WebSocket (Flash v2.5, Sonnet 5 at low effort, text input, so no
 transcription delay), first audio came 1.62 s and 1.79 s after the turn started, about 0.23 to 0.63 s
 after the model's first word: the voice is no longer the slow part, the model is. Between 20 and 54 of

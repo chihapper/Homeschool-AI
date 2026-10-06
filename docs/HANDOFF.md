@@ -1,6 +1,6 @@
 # Handoff
 
-Last updated: 2026-10-05
+Last updated: 2026-10-06
 
 Read this before anything else. It is written for a session that has seen nothing.
 
@@ -12,22 +12,25 @@ nothing outside that material, and the parent gets a mastery report per session 
 across sessions. Fastify server with four agents (curriculum, profiler, tutor, assessor) and a
 deterministic orchestrator; Vite/React front end; file-backed JSON in `data/` (gitignored).
 
-**State on 2026-10-05:** three branches are stacked on `main` (`807d069`), all pushed, none merged:
+**State on 2026-10-06:** four branches are stacked on `main` (`807d069`), all pushed, none merged:
 `feature/models-5-5` (`3ce1589`: Opus 5.5 and Sonnet 5.5, one table of what each model accepts),
-`fix/told-not-recalled` (`beb4e35`: the tutor keeps track of what it has already said), and
-`feature/intakes` on top (the profile split into two records, the general intake, the course intake, scripted
-personas). Merging `feature/intakes` into `main` brings all three as a fast-forward. **The merge is the
-user's call**: they approved the fix and the intake build on 2026-10-05 and have not said to merge.
-248 unit tests; typecheck clean in both workspaces. On this machine the runtime settings hold
-`claude-opus-5-5` / `claude-sonnet-5-5` (`data/settings.json`, which wins over `.env`; the user's `.env` still
-names the 5 models), and the two saved students (Test Student, Sam) were converted to the two-record shape
-when the server started (`store/migrate.ts`; originals in `data/backups/intake-split/`). The Rome unit
-(`data/courses/ancient-rome-muemem4s.json`, 31 lessons) has about fifteen lesson sessions on it. Text mode
-works with an Anthropic key alone; browser voice works through Inworld or ElevenLabs (Hume's balance is
-exhausted). **Next: the user tests the intakes themselves** (`docs/TESTING.md`, step 2), in text and then
-by voice; the intake hand-over has not been heard aloud yet, and the user's own microphone session in Chrome
-has still not happened. The user intends to pull the repo on a second laptop: git carries neither `.env` nor
-`data/` (see the verification loop), and until the merge the work is on the `feature/intakes` branch.
+`fix/told-not-recalled` (`beb4e35`: the tutor keeps track of what it has already said), `feature/intakes`
+(`c9ec5fa`: the profile split into two records, the general intake, the course intake, scripted personas), and
+`feature/ui-flow` on top (the tabs in the order a family meets them, the general intake held on the Students
+tab when a student is added, a first lesson on a course opening with the course intake, and Hume removed: EVI
+and Octave, which Hume is sunsetting). Merging `feature/ui-flow` into `main` brings all four as a fast-forward.
+**The merge is the user's call**: they asked for the UI change and the Hume removal on 2026-10-06 ("before I
+test") and have not said to merge. 242 unit tests; typecheck clean in both workspaces. On this machine the
+runtime settings hold `claude-opus-5-5` / `claude-sonnet-5-5` and Inworld (`data/settings.json`, which wins
+over `.env`; the user's `.env` still names the 5 models and Hume variables nothing reads any more). Saved
+students: Test Student and Sam (profiled, four course records between them) and John (grade 9, added by the
+user, no intake yet). The Rome unit (`data/courses/ancient-rome-muemem4s.json`, 31 lessons) has about fifteen
+lesson sessions on it. Text mode works with an Anthropic key alone; browser voice works through Inworld (the
+default) or ElevenLabs. **Next: the user tests the new flow themselves** (`docs/TESTING.md`): add a student on
+the Students tab and hold the intake there, then start that student on a course from the Courses or Lesson tab,
+in text and then by voice; the intake hand-over has not been heard aloud yet, and the user's own microphone
+session in Chrome has still not happened. The user intends to pull the repo on a second laptop: git carries
+neither `.env` nor `data/` (see the verification loop), and until the merge the work is on `feature/ui-flow`.
 
 **Goal and gate:** get the tool in front of homeschool families as an add-on study partner. The next
 gate is a repeatable pedagogy evaluation (issue #6) so skill edits stop being judged by hand, then a
@@ -98,14 +101,26 @@ decision on hosting (issue #13) before any pilot. No deadline has been set.
   tagged by course ("Rome: ..."), rather than a profile per course.
 - **Workbook and activity pages are a roadmap item, not an accepted limitation** (user, 2026-09-23:
   "many homeschool materials likely include that"). Issue #1, sized on a real sample.
+- **The general intake is held where a student is added; the course intake where the course is taught**
+  (user, 2026-10-06: "Student intake should exist in the students section as a separate area when adding a
+  student so that when someone is added, the intake happens when they are added. Then, when a student first
+  starts the course, then the intake for that course will occur within that course"). In the web app:
+  Students tab, "Add and begin the intake" opens an intake area for the new student (Type or Talk, Begin;
+  "Not now", and a card's "Start the intake" for later); the Lesson tab starts every sitting with
+  `skipGeneralIntake`, so a first lesson on a course opens with the course intake and the general intake
+  never runs from there (a student without one gets a notice and a button to the Students tab). The CLI and
+  the API still run all three in one sitting.
+- **Hume is gone** (user, 2026-10-06: Hume is sunsetting EVI and its text-to-speech). EVI mode, the Octave
+  adapter, `setup:hume`, the `/clm` endpoint and the `hume` packages were removed; the tutor's voice is
+  Inworld (default) or ElevenLabs. Decisions below that mention Hume are kept as history.
 - **The tutor turn is two calls** (speak fast with no bookkeeping and no thinking; reflect afterwards
   while the student listens), and the open thread rides with the phase guidance rather than outranking
   it. See CLAUDE.md; an earlier version that let the note outrank the phase was rejected by the user.
 - **Sessions start in text mode**; voice is a deliberate choice from the dropdown.
-- **The tutor's voice is switchable between Hume Octave and ElevenLabs** (user, 2026-09-24: they have
+- **The tutor's voice is switchable between providers** (user, 2026-09-24: they have
   ElevenLabs credits to use before they lapse, and want to hear the voice). The provider is the runtime
   setting `ttsProvider`, toggled at the top of Settings, Voice, with provider-specific fields below it.
-  Hume EVI mode stays Hume-only.
+  (Hume Octave was one of the choices until 2026-10-06.)
 - **The voice is streamed one reply at a time, over a socket opened while the student talks** (user,
   2026-09-24, after hearing one reply voiced four ways: clip D, ElevenLabs v3 Conversational over its
   Text to Dialogue socket, "definitely sounds more natural and conversational"). Which vendor is decided
@@ -115,7 +130,7 @@ decision on hosting (issue #13) before any pilot. No deadline has been set.
 - **Our own voice loop stays** (user, 2026-09-24): ElevenLabs Agents, which would run the conversation on
   ElevenLabs' side, is a roadmap item (#19), revisited only if echo or turn-taking fail in real sessions.
 - **Commit to ElevenLabs over Hume** for anything Hume Octave did (cheaper per character and rated far
-  higher, 2026-09-24). The Hume adapter stays in the code, unused; Hume EVI mode stays as it is.
+  higher, 2026-09-24). Overtaken on 2026-10-06: Hume was removed altogether.
 - **Reports and profiles use the learner's name** unless the transcript gives a pronoun. A report said
   "your son" from nothing; the user's records carry no gender.
 - **Research subagents run on Opus 5.5** for research the user will build on (user, 2026-09-27, for the
@@ -194,20 +209,50 @@ the product (#13, #18, #23, #26). Ordering and blockers only here.
 
 **User-side**
 
-1. Test in the web app (both servers up, `http://localhost:5173`): Focus ticks on the Courses tab, a
-   session with "Already read this", the Progress panel on the Reports tab.
+1. Test in the web app (both servers up, `http://localhost:5173`): add a student on the Students tab and hold
+   the intake there; start them on a course from the Courses tab (the lesson opens with the course's
+   questions); Focus ticks on the Courses tab; a lesson with "Already read this"; the Progress panel on the
+   Reports tab.
 2. Decide the hosting, copyright and children's-data line (issue #13) before anyone asks for a login page.
    Now: turn off AssemblyAI's model training in its dashboard, which needs a paid plan and also gives zero
    retention for streaming (#23), and send the two neutral vendor emails (#18 Inworld, #23 AssemblyAI).
 3. Add a real ElevenLabs key to `.env` (`ELEVENLABS_API_KEY=sk_...`), restart the server, flip the
    toggle in Settings, Voice to ElevenLabs, pick a voice and model, press **Test this voice**, then run a
    voice session in Chrome at `http://localhost:5173` (the app's browser pane cannot use the microphone).
-   Hume stays unusable until its balance is topped up.
 4. Read the README "What this is (and is not)" section and `docs/ROADMAP.md` in your own voice; they
    are the product statements a customer or an engineer will read.
 
 **Claude-side, in order**
 
+000000. Done 2026-10-06 on `feature/ui-flow` (the user, before testing anything: "we need to change around the
+   UI to make it more intuitive"; see the two standing decisions dated 2026-10-06). The tabs are Students,
+   Courses, Lesson, Reports, Settings. Students: "Add and begin the intake" creates the student and opens an
+   intake area under the form (Type or Talk, Begin, the passage and its questions; "Not now"; a card without a
+   profile has "Start the intake"); the conversation runs inline (`apps/web/src/components/Conversation.tsx`,
+   the one live view the intake and the lesson share) and, when it ends, the area says the profile is being
+   written and offers Close. Lesson (was Session): student, course, lesson, mode, "Already read this", Begin; a
+   student without a profile gets a notice and "Do the intake now (Students tab)", which opens the Students tab
+   on their intake area; a first time on a course gets a notice that the lesson opens with the course's
+   questions, with "Skip the questions this time"; every start passes `skipGeneralIntake` (new on
+   `CreateSessionArgs`, `planSitting` and `POST /api/sessions`). Courses: "Start X on this course" /
+   "Continue with X" open the Lesson tab preset; "Ask again" still runs the course intake alone. Hume removed:
+   EVI mode, the Octave adapter, `setup:hume`, `/clm`, `/api/hume/token`, the `hume` and `@humeai/voice-react`
+   packages, six files and their tests; `ttsProvider` is inworld (default) or elevenlabs; `ttsVoice`,
+   `ttsVersion`, `ttsInstant` and the HUME_* variables are gone (`HUME_TTS_BATCH` is `VOICE_TTS_BATCH`); saved
+   settings load field by field, so a provider that no longer exists is dropped alone and the model choices
+   beside it survive. The web voice client gained `prepare()` (the audio context is created inside the click,
+   where the browser allows audio) and an idempotent `connect()`, and the text opening is deferred a tick,
+   because React mounts a component twice in development. Verified in the app's browser pane 2026-10-06, in
+   text: the Lesson tab's two notices for John; "Do the intake now" landing on John's intake area ("Not now"
+   closed it); a throwaway student added and taken through the whole general intake inline (the opening line
+   once, no doubled turn; the passage read once; the hard question; "Thanks, that's everything for now";
+   "This conversation is finished", the profile written within seconds); then started on Ancient Rome from the
+   Lesson tab, where only the "First time on Ancient Rome" notice showed and Begin opened the course intake
+   within the course ("course intake · UI Check · Ancient Rome"); then deleted with its sessions. The Courses
+   tab read "Start John on this course" / "Continue with Sam", and Settings showed ElevenLabs and Inworld and
+   no Hume. Not heard by
+   voice (the pane has no microphone). 242 tests, typecheck clean in both workspaces. The user's own `.env`
+   still carries the Hume variables, which nothing reads; they can delete them.
 00000. Done 2026-09-30 on `feature/models-5-5`: Opus 5.5 and Sonnet 5.5. Per Anthropic's migration guides
    (`/claude-api migrate`): Sonnet 5.5 rejects `thinking: {type: "disabled"}` and takes `between_tools` at
    effort high or below; Opus 5.5 never turns thinking off (low effort is the control) and its own default
@@ -356,8 +401,8 @@ the product (#13, #18, #23, #26). Ordering and blockers only here.
    from the tutor's first word, Flash 223 ms, no gaps; voice Duncan); a live two-turn session through the
    app spoke both turns; `speaking_rate` accepted; numbers in `docs/LATENCY.md`. Next: the user compares E
    with D by ear and picks the vendor, model and voice; the user sends the #18 email to Inworld (rewritten
-   2026-09-25 to say nothing about the product: the user is keeping the idea close). Settings still has Hume
-   selected. Added 2026-09-25 at the user's request: an Inworld pause slider (`inworldPauseMs`, default 220 ms
+   2026-09-25 to say nothing about the product: the user is keeping the idea close). Settings has Inworld
+   selected since 2026-10-05. Added 2026-09-25 at the user's request: an Inworld pause slider (`inworldPauseMs`, default 220 ms
    after a full stop) that inserts SSML `<break>` tags scaled by punctuation, between sentences and at a
    sentence's own commas, dashes and colons; verified live (a 500 ms setting added about 0.5 s after a full
    stop, more after a question, less at a comma). Model trials (#22) will get their own branch.
@@ -451,3 +496,15 @@ the product (#13, #18, #23, #26). Ordering and blockers only here.
 - **`lookup_source` searches the learner's latest words as well as the tutor's query.** Dropping that
   brings back the case where the tutor tells the learner the material does not mention a word that
   appears in one chunk.
+- **The general intake's prompt cache turns over once, after the passage.** `read_passage` is dropped from the
+  tool list once the transcript holds the passage, and the tools are part of the cached prefix, so the next turn
+  is a cache write (seen 2026-10-06: 0% hit on the turn after the reading, hits again from then on). One write
+  per intake; do not "fix" it by offering the tool again.
+- **React mounts every component twice in development** (StrictMode in `apps/web/src/main.tsx`). Anything a
+  conversation does on mount must survive that: the text opening is deferred a tick and cancelled by the first
+  run's cleanup (`components/Conversation.tsx`), and `VoiceClient.connect()` joins an earlier call instead of
+  opening a second socket. The server opens a fresh session the moment a voice socket connects, so a second
+  socket would mean a second opening line.
+- **The browser allows audio only after a click.** The page creates the `VoiceClient` and calls `prepare()`
+  inside the button handler; `Conversation` attaches its listeners and calls `connect()` when it mounts. A
+  connection made from an effect alone starts with a suspended audio context and the tutor is never heard.

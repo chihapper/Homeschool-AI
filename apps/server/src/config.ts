@@ -3,7 +3,7 @@
  *
  * Two layers:
  *  1. Environment (.env or the shell), read once at startup. Only ANTHROPIC_API_KEY is required to run
- *     the text-mode tutor, ingestion, and assessment. Hume keys are needed only for the voice layer.
+ *     the text-mode tutor, ingestion, and assessment. Voice keys are needed only for the voice layer.
  *  2. Runtime overrides for the model settings (which model, effort, thinking, caching), changed from the
  *     web app's Settings tab and persisted to <DATA_DIR>/settings.json so they survive a restart.
  *     `config.tutorModel` etc. are getters, so every read sees the current value.
@@ -50,8 +50,8 @@ const dataDir = path.resolve(REPO_ROOT, env("DATA_DIR", "data")!);
 export const EffortSchema = z.enum(["low", "medium", "high", "xhigh", "max"]);
 export type Effort = z.infer<typeof EffortSchema>;
 
-/** Who voices the tutor in browser voice mode. Hume EVI mode is separate and always Hume. */
-export const TTS_PROVIDERS = ["hume", "elevenlabs", "inworld"] as const;
+/** Who voices the tutor in browser voice mode. */
+export const TTS_PROVIDERS = ["elevenlabs", "inworld"] as const;
 export type TtsProvider = (typeof TTS_PROVIDERS)[number];
 
 /** A number from the environment, or the fallback when it is missing or outside [min, max]. */
@@ -81,12 +81,6 @@ export const RuntimeSettingsSchema = z.object({
   outsideKnowledge: OutsideKnowledgeModeSchema,
   /** Who voices the tutor in browser voice mode. Read at the start of every turn, so a switch applies to the next reply. */
   ttsProvider: z.enum(TTS_PROVIDERS),
-  /** Hume voice for the tutor: a Voice Library name ("Ava Song"), or "CUSTOM_VOICE:<id>" for a saved voice. */
-  ttsVoice: z.string().min(1),
-  /** Octave model version. "2" is faster; "1" honours per-utterance acting descriptions. */
-  ttsVersion: z.enum(["1", "2"]),
-  /** Octave instant mode: lower first-audio latency at some cost in expressiveness. */
-  ttsInstant: z.boolean(),
   /** Send the sentences already waiting as one request so the voice keeps its cadence across them. Off = one request per sentence. */
   ttsBatchSentences: z.boolean(),
   /** ElevenLabs voice id, picked from the account's voice list in Settings. */
@@ -127,11 +121,8 @@ export const envDefaults: RuntimeSettings = {
   prewarmCache: env("CLAUDE_PREWARM_CACHE", "true") !== "false",
   refusalFallbacks: env("CLAUDE_REFUSAL_FALLBACKS", "true") !== "false",
   outsideKnowledge: OutsideKnowledgeModeSchema.catch("check").parse(env("OUTSIDE_KNOWLEDGE", "check")),
-  ttsProvider: (TTS_PROVIDERS as readonly string[]).includes(env("VOICE_TTS", "hume")!) ? (env("VOICE_TTS", "hume") as TtsProvider) : "hume",
-  ttsVoice: env("HUME_TTS_VOICE", "Ava Song")!,
-  ttsVersion: env("HUME_TTS_VERSION", "2") === "1" ? "1" : "2",
-  ttsInstant: env("HUME_TTS_INSTANT", "true") !== "false",
-  ttsBatchSentences: env("HUME_TTS_BATCH", "true") !== "false",
+  ttsProvider: (TTS_PROVIDERS as readonly string[]).includes(env("VOICE_TTS", "inworld")!) ? (env("VOICE_TTS", "inworld") as TtsProvider) : "inworld",
+  ttsBatchSentences: env("VOICE_TTS_BATCH", "true") !== "false",
   // George, a premade voice used in ElevenLabs' own quickstart. Any voice from the account's list works.
   elevenVoiceId: env("ELEVENLABS_VOICE_ID", "JBFqnCBsd6RMkjVDRZzb")!,
   elevenVoiceName: env("ELEVENLABS_VOICE_NAME", env("ELEVENLABS_VOICE_ID") ? "" : "George")!,
@@ -158,7 +149,18 @@ let overrides: Partial<RuntimeSettings> = loadOverrides(settingsFile);
 function loadOverrides(file: string): Partial<RuntimeSettings> {
   try {
     if (!fs.existsSync(file)) return {};
-    return RuntimeSettingsSchema.partial().parse(JSON.parse(fs.readFileSync(file, "utf8")));
+    const saved = JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, unknown>;
+    // Field by field: a setting that no longer exists, or no longer takes its saved value (a voice provider
+    // that was removed), is dropped on its own, so the model choices saved beside it survive.
+    const kept: Record<string, unknown> = {};
+    const dropped: string[] = [];
+    for (const [key, value] of Object.entries(saved)) {
+      const field = (RuntimeSettingsSchema.shape as Record<string, z.ZodTypeAny | undefined>)[key];
+      if (field?.safeParse(value).success) kept[key] = value;
+      else dropped.push(key);
+    }
+    if (dropped.length) console.warn(`[config] ignoring saved settings that no longer apply (${file}): ${dropped.join(", ")}`);
+    return RuntimeSettingsSchema.partial().parse(kept);
   } catch (err) {
     console.warn(`[config] ignoring unreadable ${file}:`, err instanceof Error ? err.message : err);
     return {};
@@ -245,9 +247,6 @@ export const config = {
   get ttsProvider(): TtsProvider {
     return effective().ttsProvider;
   },
-  get ttsVoice(): string {
-    return effective().ttsVoice;
-  },
   get elevenVoiceId(): string {
     return effective().elevenVoiceId;
   },
@@ -278,12 +277,6 @@ export const config = {
   get inworldPauseMs(): number {
     return effective().inworldPauseMs;
   },
-  get ttsVersion(): "1" | "2" {
-    return effective().ttsVersion;
-  },
-  get ttsInstant(): boolean {
-    return effective().ttsInstant;
-  },
   get ttsBatchSentences(): boolean {
     return effective().ttsBatchSentences;
   },
@@ -296,16 +289,15 @@ export const config = {
 
   /**
    * Browser voice: the student talks into the web app; the server streams the audio to a transcriber and
-   * speaks the tutor's reply back. No tunnel needed (unlike Hume EVI, which must call us from outside).
+   * speaks the tutor's reply back.
    */
   voice: {
     /** Speech-to-text for the live student: assemblyai (streaming, end-of-turn detection) or none. */
     sttProvider: env("VOICE_STT", "assemblyai") as "assemblyai" | "none",
     assemblyAiKey: env("ASSEMBLYAI_API_KEY"),
     assemblyAiModel: env("ASSEMBLYAI_SPEECH_MODEL", "universal-3-5-pro")!,
-    /** Sample rates: what the browser sends, what Hume returns, what we send back to the browser. */
+    /** Sample rates: what the browser sends, and what we send back to it (every voice provider delivers 24 kHz). */
     micSampleRate: 16_000,
-    humeSampleRate: Number(env("HUME_TTS_SAMPLE_RATE", "48000")),
     playbackSampleRate: 24_000,
   },
 
@@ -320,13 +312,13 @@ export const config = {
   /** yt-dlp binary used for YouTube / TED / other video and audio URLs. */
   ytDlpBin: env("YTDLP_BIN", "yt-dlp")!,
 
-  /** ElevenLabs text-to-speech, the alternative to Hume Octave in browser voice mode. */
+  /** ElevenLabs text-to-speech, one of the two voices for browser voice mode. */
   elevenlabs: {
     /** The key itself (starts with "sk_"), not the key ID that the dashboard lists beside it. */
     apiKey: env("ELEVENLABS_API_KEY"),
   },
 
-  /** Inworld text-to-speech, the third voice for browser voice mode. */
+  /** Inworld text-to-speech, the other voice for browser voice mode, and the default. */
   inworld: {
     /** The Base64 credential copied from the Inworld Portal as-is (base64 of key_id:secret), without "Basic ". */
     apiKey: env("INWORLD_API_KEY"),
@@ -339,16 +331,6 @@ export const config = {
      * requires. Without one the checks are off: an anonymous program is limited to 10 requests a minute.
      */
     contact: env("WIKIPEDIA_CONTACT"),
-  },
-
-  hume: {
-    apiKey: env("HUME_API_KEY"),
-    secretKey: env("HUME_SECRET_KEY"),
-    configId: env("HUME_CONFIG_ID"),
-    /** Public base URL of this server, as reachable by Hume (e.g. an ngrok URL). */
-    publicUrl: env("PUBLIC_URL"),
-    /** Bearer token Hume must present when calling the CLM endpoint. */
-    clmSecret: env("CLM_SECRET"),
   },
 
   /** Origins allowed to call the HTTP API (the Vite dev server by default). */
@@ -371,21 +353,19 @@ export function activeTtsProvider(): TtsProvider | "none" {
 
 /** The key a provider needs, if it is set. */
 export function ttsKey(provider: TtsProvider): string | undefined {
-  return provider === "elevenlabs" ? config.elevenlabs.apiKey : provider === "inworld" ? config.inworld.apiKey : config.hume.apiKey;
+  return provider === "elevenlabs" ? config.elevenlabs.apiKey : config.inworld.apiKey;
 }
 
 /** The selected provider's voice, as a person would name it. */
 export function ttsVoiceLabel(): string {
   if (config.ttsProvider === "elevenlabs") return config.elevenVoiceName || config.elevenVoiceId;
-  if (config.ttsProvider === "inworld") return config.inworldVoiceName || config.inworldVoiceId;
-  return config.ttsVoice;
+  return config.inworldVoiceName || config.inworldVoiceId;
 }
 
 /** The selected provider's model, as the status line shows it. */
 export function ttsModelLabel(): string {
   if (config.ttsProvider === "elevenlabs") return config.elevenModel;
-  if (config.ttsProvider === "inworld") return config.inworldModel;
-  return `Octave ${config.ttsVersion}`;
+  return config.inworldModel;
 }
 
 export function requireAnthropicKey(): void {

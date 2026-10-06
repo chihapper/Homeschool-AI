@@ -81,7 +81,7 @@ A student with a profile skips the first box; a student with a record for the co
 two records are the learner profile (how to work with this student, on the learner) and the course-knowledge
 record (what they know about one course: starting points from the course intake, and notes kept since;
 `data/course-knowledge/<learner>__<course>.json`). A message sent to a finished intake is answered by the
-session that took over (`Session.continuedIn`), so a browser, a voice socket or Hume can keep one session id.
+session that took over (`Session.continuedIn`), so a browser or a voice socket can keep one session id.
 
 Phase transitions are requested by the tutor through the `advance` tool and validated in
 `orchestrator/session.ts`. For example, the tutor cannot move to the next concept until it has recorded
@@ -89,21 +89,16 @@ at least two observations of what the learner showed for the current one (engage
 tutor itself told them do not count). That is the "assess via conversation"
 requirement enforced in code rather than left to the prompt.
 
-## Voice path (Hume EVI)
+## Voice path (browser)
 
-Hume handles microphone capture, speech-to-text, expression measurement, turn-taking, interruption,
-and text-to-speech. We plug in as the **custom language model**:
-
-```
-browser ──(WebSocket, access token, configId, customSessionId)──> Hume EVI
-Hume ──POST /clm/chat/completions?custom_session_id=<session>──> our server
-our server ──> orchestrator.respond() ──> Tutor Agent (streams text)
-our server ──SSE chat.completion.chunk ... data: [DONE]──> Hume ──> speech ──> browser
-```
-
-The server ignores Hume's copy of the history and uses its own session transcript, so text and voice
-sessions share one state and one assessment path. Prosody labels on the user turn are passed to the
-tutor as `[expressions: ...]` so it can adapt (the `voice-conversation` skill says how).
+One WebSocket per session (`voice/live.ts`). The browser streams microphone audio; AssemblyAI transcribes it
+as the student talks and signals the end of their turn; the orchestrator's `respond()` runs the tutor turn
+the instant they stop, and the reply is spoken sentence by sentence while the model is still writing the
+next one, by Inworld (one stream per reply, over a socket opened when the student starts talking) or
+ElevenLabs (sentence batches), chosen in Settings. Clicking Talk while the tutor speaks is a barge-in:
+playback stops and the server aborts the rest of the reply. The server opens a fresh session itself the
+moment the socket connects, so the tutor speaks first; after an intake's hand-over the same connection
+speaks for the session that took over. Text and voice sessions share one state and one assessment path.
 
 ## Grounding
 

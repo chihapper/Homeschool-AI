@@ -302,7 +302,7 @@ export const TranscriptTurnSchema = z.object({
   role: z.enum(["user", "assistant"]),
   content: z.string(),
   at: z.string(),
-  /** Top prosody / expression labels from Hume, if the turn came through voice. */
+  /** Prosody labels a voice provider attached to the turn. None does today; kept so saved sessions still read. */
   expressions: z.array(z.string()).optional(),
   /** Latency measurements for assistant turns (see TurnLatency). */
   latency: z

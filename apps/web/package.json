@@ -10,8 +10,6 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@humeai/voice-react": "^0.3.0-beta.6",
-    "hume": "^0.16.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },

@@ -13,9 +13,6 @@ const HELP: Record<keyof RuntimeSettings, string> = {
   refusalFallbacks: "If the safety classifier refuses a turn, retry it on a fallback model automatically instead of showing the canned fallback line.",
   outsideKnowledge: "What the tutor does with facts the student brings up that are not in your material. Applies from the next session.",
   ttsProvider: "Who voices the tutor in browser voice mode. A switch applies from the next reply, even in a session already running: every provider delivers the same audio format.",
-  ttsVoice: "The tutor's voice, from Hume's Voice Library. Pick a warm, clear adult voice; the list is fetched live from your Hume account.",
-  ttsVersion: "Octave 2 gets the first audio out in about 0.6 s; Octave 1 is slower but honours per-sentence acting notes (not used here yet).",
-  ttsInstant: "Instant mode trades a little expressiveness for lower first-audio latency. Leave it on for the live tutor.",
   ttsBatchSentences: "Sentences the model has already written are sent to the voice together, so its pace and pitch carry across them instead of restarting at every sentence. The first sentence still goes alone so the reply starts fast. Turn off to hear the difference.",
   elevenVoiceId: "Every voice on your ElevenLabs account: premade, cloned, designed, and any saved from the Voice Library. The play button next to the list plays ElevenLabs' own sample of the voice, which costs no credits.",
   elevenVoiceName: "",
@@ -78,7 +75,7 @@ export function SettingsPage({ onChange }: { onChange: () => Promise<void> }) {
       .voices(provider)
       .then((list) => live && setVoices({ provider, list }))
       .catch((e) => live && setVoices({ provider, list: [], error: (e as Error).message }));
-    if (provider !== "hume" && !models[provider]) {
+    if (!models[provider]) {
       api
         .voiceModels(provider)
         .then((m) => live && setModels((all) => ({ ...all, [provider]: { list: m.models, source: m.source, error: m.error } })))
@@ -186,37 +183,6 @@ export function SettingsPage({ onChange }: { onChange: () => Promise<void> }) {
       <span className="hint">.env: {view.defaults[k]}</span>
       <span className="hint">{HELP[k]}</span>
     </label>
-  );
-
-  // ---- Hume fields -------------------------------------------------------------
-  const humeFields = (
-    <div className="grid3">
-      <label>
-        Tutor voice {changed("ttsVoice") && <span className="pill">changed</span>}
-        {voiceList?.list.length ? (
-          <select value={voiceList.list.some((v) => v.name === draft.ttsVoice) ? draft.ttsVoice : "__custom"} onChange={(e) => { if (e.target.value !== "__custom") set("ttsVoice", e.target.value); }}>
-            {!voiceList.list.some((v) => v.name === draft.ttsVoice) && <option value="__custom">{draft.ttsVoice} (custom)</option>}
-            {voiceList.list.map((v) => <option key={v.id} value={v.name}>{v.name}</option>)}
-          </select>
-        ) : null}
-        <input value={draft.ttsVoice} onChange={(e) => set("ttsVoice", e.target.value)} placeholder="or type: Ava Song, HUME_AI:<name>, CUSTOM_VOICE:<id>" />
-        <span className="hint">.env: {view.defaults.ttsVoice}{!voiceList ? " · loading voices..." : voiceList.error ? ` · could not list voices: ${voiceList.error}` : ""}</span>
-        <span className="hint">{HELP.ttsVoice}</span>
-      </label>
-      <label>
-        Octave version {changed("ttsVersion") && <span className="pill">changed</span>}
-        <select value={draft.ttsVersion} onChange={(e) => set("ttsVersion", e.target.value as RuntimeSettings["ttsVersion"])}>
-          <option value="2">2 (fastest)</option>
-          <option value="1">1</option>
-        </select>
-        <span className="hint">.env: {view.defaults.ttsVersion}</span>
-        <span className="hint">{HELP.ttsVersion}</span>
-      </label>
-      <label className="check">
-        <span><input type="checkbox" checked={draft.ttsInstant} onChange={(e) => set("ttsInstant", e.target.checked)} /> Instant mode {changed("ttsInstant") && <span className="pill">changed</span>}</span>
-        <span className="hint">{HELP.ttsInstant}</span>
-      </label>
-    </div>
   );
 
   // ---- ElevenLabs fields -------------------------------------------------------
@@ -354,7 +320,7 @@ export function SettingsPage({ onChange }: { onChange: () => Promise<void> }) {
 
       <div className="card">
         <h2>Voice</h2>
-        <p className="muted">Browser voice mode: the student talks, AssemblyAI turns it into text, and the provider chosen here speaks the tutor's reply. Hume EVI mode (on the Session tab) is separate and always uses Hume.</p>
+        <p className="muted">Voice mode: the student talks, AssemblyAI turns it into text, and the provider chosen here speaks the tutor's reply.</p>
         <div className="row" style={{ alignItems: "center" }}>
           <div className="segmented" role="radiogroup" aria-label="Voice provider">
             {providers.map((p) => (
@@ -374,7 +340,7 @@ export function SettingsPage({ onChange }: { onChange: () => Promise<void> }) {
           )}
         </p>
         <h3>{selected.label}</h3>
-        {draft.ttsProvider === "elevenlabs" ? elevenFields : draft.ttsProvider === "inworld" ? inworldFields : humeFields}
+        {draft.ttsProvider === "elevenlabs" ? elevenFields : inworldFields}
         <div className="row" style={{ marginTop: 12, alignItems: "center" }}>
           <button type="button" className="ghost" disabled={previewBusy || !selected.ready} onClick={testVoice} title="Speaks one short tutor line with the settings above, saved or not">{previewBusy ? "Speaking..." : "▶ Test this voice"}</button>
           {preview && <audio ref={player} controls src={preview.url} style={{ height: 32 }} />}

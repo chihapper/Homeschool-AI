@@ -1,7 +1,7 @@
 /**
- * ElevenLabs text-to-speech, streamed per request: the alternative to Hume Octave in browser voice mode,
- * chosen in Settings (`ttsProvider`). Same role as `tts-hume.ts`: text in, 24 kHz PCM out; the turn loop
- * in `live.ts` decides what to send when. Modelled on the character engine's
+ * ElevenLabs text-to-speech, streamed per request: one of the two voices for browser voice mode, chosen in
+ * Settings (`ttsProvider`). Same role as `tts-inworld.ts`: text in, 24 kHz PCM out; the turn loop in
+ * `live.ts` decides what to send when. Modelled on the character engine's
  * `orchestrator/adapters/tts_elevenlabs.py`.
  *
  * Checked against elevenlabs.io/docs on 2026-09-24:

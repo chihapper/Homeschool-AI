@@ -1,5 +1,7 @@
-import { useEffect, useState } from "react";
-import { api, fmtDate, type Course, type CourseKnowledge, type Depth, type IntakePassage, type Learner, type ProfileChange, type StartingEstimate } from "../api";
+import { useEffect, useRef, useState } from "react";
+import { api, fmtDate, PROVIDER_NAME, type Course, type CourseKnowledge, type Depth, type Health, type IntakePassage, type Learner, type ProfileChange, type Session, type StartingEstimate } from "../api";
+import { Conversation, type Mode } from "../components/Conversation";
+import { VoiceClient } from "../voice";
 
 const FIELD_LABEL: Record<string, string> = {
   demonstrationPreferences: "How they show understanding",
@@ -68,7 +70,7 @@ function ParentNotes({ learner, onChange }: { learner: Learner; onChange: () => 
 function CourseRecord({ k, course, learner, onChange }: { k: CourseKnowledge; course?: Course; learner: Learner; onChange: () => Promise<void> }) {
   const name = (id: string): string => course?.concepts.find((c) => c.id === id)?.name ?? id;
   const forget = async () => {
-    if (!confirm(`Forget what ${learner.name} knows about ${course?.title ?? "this course"}? Their next session on it will open with the questions about what they already know.`)) return;
+    if (!confirm(`Forget what ${learner.name} knows about ${course?.title ?? "this course"}? Their next lesson on it will open with the questions about what they already know.`)) return;
     await api.forgetKnowledge(k.learnerId, k.courseId);
     await onChange();
   };
@@ -115,29 +117,156 @@ function CourseRecord({ k, course, learner, onChange }: { k: CourseKnowledge; co
   );
 }
 
-export function LearnersPage({ learners, courses, knowledge, onChange }: { learners: Learner[]; courses: Course[]; knowledge: CourseKnowledge[]; onChange: () => Promise<void> }) {
+/**
+ * The intake conversation, held right here when a student is added (or later, from their card): about eight
+ * exchanges on a passage built into the app, so the tutor learns how to work with the child before any course.
+ * It is a session of its own; the profile is written from it in the background once it ends.
+ */
+function IntakeArea({ learner, passage, courses, learners, health, onChange, onClose }: {
+  learner: Learner;
+  passage: IntakePassage | null;
+  courses: Course[];
+  learners: Learner[];
+  health: Health | null;
+  onChange: () => Promise<void>;
+  onClose: () => void;
+}) {
+  const voiceReady = Boolean(health?.voice.stt === "assemblyai" && health?.voice.tts && health.voice.tts !== "none");
+  const [mode, setMode] = useState<Mode>("text");
+  const [session, setSession] = useState<Session | null>(null);
+  /** The voice connection, created inside the click so the browser allows audio; null while typing. */
+  const [voice, setVoice] = useState<VoiceClient | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const voiceRef = useRef(voice);
+  voiceRef.current = voice;
+  useEffect(() => () => voiceRef.current?.close(), []);
+  const finished = session?.phase === "complete";
+
+  const begin = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      const s = await api.createSession({ learnerId: learner.id, only: "general-intake" });
+      if (mode === "voice") {
+        const c = new VoiceClient(s.id);
+        c.prepare();
+        setVoice(c);
+      }
+      setSession(s);
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const close = async () => {
+    voiceRef.current?.close();
+    setVoice(null);
+    setSession(null);
+    await onChange();
+    onClose();
+  };
+
+  return (
+    <div className="intake-area">
+      <div className="card">
+        <div className="row" style={{ justifyContent: "space-between" }}>
+          <h3 style={{ margin: 0 }}>Intake conversation: {learner.name}</h3>
+          {!session && <button className="ghost small" onClick={onClose}>Not now</button>}
+        </div>
+        {!session && (
+          <>
+            <p className="muted">
+              About eight exchanges, with {learner.name}. The tutor asks what they like doing, reads a short passage (“{passage?.title ?? "Why ice floats"}”) and asks them to tell it back, asks one question that applies it and one harder one, and asks how sure they are. Nothing from your courses is used, so it is the same for every child. Hand {learner.name} the keyboard or the microphone and press Begin.
+            </p>
+            <div className="row">
+              <div className="segmented" role="radiogroup" aria-label="How the student answers">
+                <button type="button" role="radio" aria-checked={mode === "text"} className={mode === "text" ? "on" : ""} onClick={() => setMode("text")}>Type</button>
+                <button type="button" role="radio" aria-checked={mode === "voice"} className={mode === "voice" ? "on" : ""} disabled={!voiceReady} onClick={() => setMode("voice")} title={voiceReady ? "" : "Voice needs the keys named in Settings, Voice"}>
+                  Talk{voiceReady && health ? ` (${PROVIDER_NAME[health.voice.ttsProvider]})` : ""}
+                </button>
+              </div>
+              <button className="primary" disabled={busy} onClick={begin}>{busy ? "Starting..." : "Begin"}</button>
+              {!voiceReady && <span className="muted small">Voice is not set up (Settings, Voice), so the intake is typed.</span>}
+            </div>
+            {passage && (
+              <details style={{ marginTop: 8 }}>
+                <summary className="small">The passage, and the two questions in three sets by grade</summary>
+                <p className="small"><strong>{passage.title}.</strong> {passage.text}</p>
+                <ul className="small">
+                  {passage.bands.map((b) => <li key={b.id}><strong>Grades {b.grades}:</strong> {b.apply} <span className="muted">Then:</span> {b.hard}</li>)}
+                </ul>
+                <p className="muted small">A strong, sure answer earns the next set's question, a shaky one the set below.</p>
+              </details>
+            )}
+            {err && <p className="error">{err}</p>}
+          </>
+        )}
+        {session && !finished && <p className="muted small">The conversation is {learner.name}'s. You can read every word afterwards on this card; the profile is written from it once it ends.</p>}
+        {session && finished && (
+          <p className="muted">The intake is finished. {learner.name}'s profile is being written from it in the background, usually within a minute or two, and appears on their card below. Lessons can start meanwhile.</p>
+        )}
+      </div>
+      {session && (
+        <Conversation
+          variant="intake"
+          session={session}
+          voice={voice}
+          courses={courses}
+          learners={learners}
+          health={health}
+          onSession={setSession}
+          onEnded={() => void close()}
+          onLeave={() => void close()}
+        />
+      )}
+    </div>
+  );
+}
+
+export function LearnersPage({ learners, courses, knowledge, health, onChange, openIntakeFor }: {
+  learners: Learner[];
+  courses: Course[];
+  knowledge: CourseKnowledge[];
+  health: Health | null;
+  onChange: () => Promise<void>;
+  /** Sent here from the Lesson tab: open the intake area on this student. */
+  openIntakeFor?: string | null;
+}) {
   const [name, setName] = useState("");
   const [grade, setGrade] = useState("");
   const [age, setAge] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [passage, setPassage] = useState<IntakePassage | null>(null);
+  /** The student whose intake area is open, if any. Adding a student opens it for them. */
+  const [intakeFor, setIntakeFor] = useState<string | null>(openIntakeFor ?? null);
+  const area = useRef<HTMLDivElement>(null);
   useEffect(() => {
     api.intakePassage().then(setPassage).catch(() => setPassage(null));
   }, []);
+  useEffect(() => {
+    if (openIntakeFor) setIntakeFor(openIntakeFor);
+  }, [openIntakeFor]);
+  useEffect(() => {
+    if (intakeFor) area.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [intakeFor]);
 
   const add = async () => {
+    setErr(null);
     try {
-      await api.createLearner({ name: name.trim(), gradeLevel: grade || undefined, age: age ? Number(age) : undefined });
+      const l = await api.createLearner({ name: name.trim(), gradeLevel: grade || undefined, age: age ? Number(age) : undefined });
       setName("");
       setGrade("");
       setAge("");
       await onChange();
+      setIntakeFor(l.id);
     } catch (e) {
       setErr((e as Error).message);
     }
   };
   const resetProfile = async (l: Learner) => {
-    if (!confirm(`Forget ${l.name}'s profile? Their next session will open with the intake conversation again. What they know about each course is kept.`)) return;
+    if (!confirm(`Forget ${l.name}'s profile? You can then hold the intake conversation again from this tab. What they know about each course is kept.`)) return;
     await api.resetProfile(l.id);
     await onChange();
   };
@@ -151,6 +280,7 @@ export function LearnersPage({ learners, courses, knowledge, onChange }: { learn
   };
   const remove = async (l: Learner) => {
     if (!confirm(`Delete ${l.name}? Their sessions and reports stay on disk but will show an id instead of a name.`)) return;
+    if (intakeFor === l.id) setIntakeFor(null);
     await api.deleteLearner(l.id);
     await onChange();
   };
@@ -166,21 +296,23 @@ export function LearnersPage({ learners, courses, knowledge, onChange }: { learn
     }
   };
 
+  const intakeLearner = learners.find((l) => l.id === intakeFor);
+
   return (
     <>
       <div className="card">
         <h2>Students</h2>
         <p className="muted small">
-          A student's first session opens with a short intake, about eight exchanges, to learn how to work with them. Their first session on each course then opens with a few questions about what they already know about it. Both are ordinary sessions: you can read every word afterwards.
+          Adding a student starts with the intake conversation, about eight exchanges, so the tutor learns how to work with them before any course. Their first lesson on each course then opens with a few questions about what they already know about it (on the Lesson tab, within the course). Both are ordinary sessions: you can read every word afterwards.
         </p>
         <div className="row">
-          <label>Name<input value={name} onChange={(e) => setName(e.target.value)} placeholder="Maya" /></label>
+          <label>Name<input value={name} onChange={(e) => setName(e.target.value)} placeholder="Maya" onKeyDown={(e) => e.key === "Enter" && name.trim() && add()} /></label>
           <label>Grade<input value={grade} onChange={(e) => setGrade(e.target.value)} placeholder="7" /></label>
           <label>Age<input value={age} onChange={(e) => setAge(e.target.value)} placeholder="12" /></label>
-          <button className="primary" disabled={!name.trim()} onClick={add}>Add</button>
+          <button className="primary" disabled={!name.trim()} onClick={add}>Add and begin the intake</button>
         </div>
         {err && <p className="error">{err}</p>}
-        {passage && (
+        {passage && !intakeLearner && (
           <details style={{ marginTop: 8 }}>
             <summary className="small">What the intake reads to every student: “{passage.title}”</summary>
             <p className="small"><strong>{passage.title}.</strong> {passage.text}</p>
@@ -195,9 +327,24 @@ export function LearnersPage({ learners, courses, knowledge, onChange }: { learn
           <a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC11270031/" target="_blank" rel="noreferrer">a 2024 review of 21 studies</a> found the pattern the idea needs in about a quarter of results). The tutor starts each idea from what your child already knows about it, and keeps what it sees them do when they are stuck. If your child needs something particular, put it in your notes: the tutor follows them as written.
         </p>
       </div>
+      <div ref={area}>
+        {intakeLearner && (
+          <IntakeArea
+            key={intakeLearner.id}
+            learner={intakeLearner}
+            passage={passage}
+            courses={courses}
+            learners={learners}
+            health={health}
+            onChange={onChange}
+            onClose={() => setIntakeFor(null)}
+          />
+        )}
+      </div>
       {learners.map((l) => {
         const records = knowledge.filter((k) => k.learnerId === l.id);
         const pending = !l.profile && l.profilePending;
+        const needsIntake = !l.profile && !pending;
         return (
           <div className="card" key={l.id}>
             <div className="row" style={{ justifyContent: "space-between" }}>
@@ -206,6 +353,7 @@ export function LearnersPage({ learners, courses, knowledge, onChange }: { learn
                 {l.profile ? <span className="pill">profiled</span> : pending ? <span className="pill">{pending.error ? "profile not written" : "intake done · profile being written"}</span> : <span className="pill">needs the intake</span>}
               </h3>
               <div className="row">
+                {needsIntake && <button className="primary small" disabled={intakeFor === l.id} onClick={() => setIntakeFor(l.id)}>Start the intake</button>}
                 {(l.profile || pending) && <button className="ghost small" onClick={() => resetProfile(l)}>Reset profile</button>}
                 <button className="ghost small" onClick={() => remove(l)}>Delete</button>
               </div>
@@ -214,7 +362,7 @@ export function LearnersPage({ learners, courses, knowledge, onChange }: { learn
               <p className={pending.error ? "warn small" : "muted small"}>
                 {pending.error
                   ? `The intake conversation is saved, but writing the profile from it failed: ${pending.error} `
-                  : `The intake finished ${fmtDate(pending.since)}. The profile is being written from it in the background, usually within a minute or two; sessions can go on meanwhile. `}
+                  : `The intake finished ${fmtDate(pending.since)}. The profile is being written from it in the background, usually within a minute or two; lessons can go on meanwhile. `}
                 {pending.error && <button className="ghost small" onClick={() => retryProfile(l)}>Try again</button>}
               </p>
             )}
@@ -243,11 +391,11 @@ export function LearnersPage({ learners, courses, knowledge, onChange }: { learn
                 </div>
               </div>
             ) : (
-              !pending && <p className="muted">{l.name}'s first session opens with the intake conversation. Tick “Skip the intakes” on the Session tab to go straight to a lesson.</p>
+              needsIntake && <p className="muted">{l.name} has not had the intake conversation yet, so the tutor does not know how they like to work. Start it here when {l.name} is with you. Lessons can begin without it; until then the tutor works from the course and your notes alone.</p>
             )}
             <ParentNotes key={`${l.id}-${l.parentNotes ?? ""}`} learner={l} onChange={onChange} />
             <h4>What {l.name} knows, by course</h4>
-            {records.length === 0 && <p className="muted small">Nothing yet. A course appears here after {l.name}'s first session on it.</p>}
+            {records.length === 0 && <p className="muted small">Nothing yet. A course appears here after {l.name}'s first lesson on it.</p>}
             {records.map((k) => <CourseRecord key={k.id} k={k} course={courses.find((c) => c.id === k.courseId)} learner={l} onChange={onChange} />)}
             {l.profile && (
               <>

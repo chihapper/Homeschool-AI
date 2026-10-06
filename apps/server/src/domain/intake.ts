@@ -180,6 +180,8 @@ export interface SittingFacts {
   hasCourseRecord: boolean;
   /** Go straight to the lesson (tests, personas, a parent in a hurry). */
   skipIntake?: boolean;
+  /** Leave the general intake out (the parent runs it from the Students tab); the course intake still runs on a new course. */
+  skipGeneralIntake?: boolean;
 }
 
 /**
@@ -190,7 +192,7 @@ export interface SittingFacts {
 export function planSitting(f: SittingFacts): SessionKind[] {
   if (f.skipIntake) return f.hasCourse ? ["lesson"] : [];
   const plan: SessionKind[] = [];
-  if (!f.hasProfile) plan.push("general-intake");
+  if (!f.hasProfile && !f.skipGeneralIntake) plan.push("general-intake");
   if (f.hasCourse && !f.hasCourseRecord) plan.push("course-intake");
   if (f.hasCourse) plan.push("lesson");
   return plan;

@@ -1,7 +1,7 @@
 /**
  * Browser voice: one WebSocket per session. The student talks into the web app; we transcribe as they
  * speak, run the tutor turn the instant they stop, and stream the spoken reply back sentence by
- * sentence while the model is still writing the next one. No public tunnel needed, unlike Hume EVI.
+ * sentence while the model is still writing the next one. No public tunnel needed.
  *
  * Protocol (mirrors the character engine's /ws):
  *   browser -> server  JSON  {type:"mic_start"} {type:"mic_stop"} {type:"force_end"} {type:"text", text} {type:"interrupt"}
@@ -20,7 +20,6 @@ import { gapAfter, scaledGapAfter, silencePcm16 } from "./pcm.js";
 import { SentenceChunker, type Segment } from "./sentence-chunker.js";
 import { AssemblyAIStream } from "./stt-assemblyai.js";
 import { ELEVEN_SAMPLE_RATE, freshRequestIds, rememberRequest, speakElevenLabs, type StitchedRequest } from "./tts-elevenlabs.js";
-import { speakHume, trailingSilenceFor, type Utterance } from "./tts-hume.js";
 import { InworldConnection, inworldBreak, speakableForInworld, speakInworldHttp, withInnerPauses, type InworldReply } from "./tts-inworld.js";
 
 /** A tiny async queue: the text producer pushes sentences, the speech consumer awaits them. */
@@ -102,8 +101,6 @@ interface Conn {
   turn: { abort: AbortController; speaking: Promise<void>; done: Promise<void> } | null;
   /** The learner has asked to talk: buffer their audio even before the transcriber is connected. */
   micWanted: boolean;
-  /** Hume generation id of the last sentence, so prosody carries across sentences and turns. */
-  lastGeneration: string | undefined;
   /** ElevenLabs requests that played to the end, for stitching; only valid for the voice and model they were made with. */
   eleven: { key: string; requests: StitchedRequest[] };
   /** Inworld's socket for this session, opened when the student starts talking; each reply is one context on it. */
@@ -161,7 +158,6 @@ export function registerLiveVoiceRoutes(app: FastifyInstance): void {
       pendingAudio: [],
       turn: null,
       micWanted: false,
-      lastGeneration: undefined,
       eleven: { key: "", requests: [] },
       inworld: null,
       closed: false,
@@ -319,18 +315,6 @@ export function registerLiveVoiceRoutes(app: FastifyInstance): void {
                   sendAudio(silencePcm16(gapAfter(last.text, last.paraBreak), ELEVEN_SAMPLE_RATE));
                 }
                 continue;
-              }
-              const utterances: Utterance[] = batch
-                .map((seg, i) => ({ text: cleanForSpeech(seg.text), trailingSilence: trailingSilenceFor(seg.text, i === batch.length - 1, seg.paraBreak) }))
-                .filter((u) => u.text);
-              if (!utterances.length) continue;
-              const opts = { voice: config.ttsVoice, version: config.ttsVersion, instant: config.ttsInstant, continuation: conn.lastGeneration, signal: abort.signal };
-              marks.tts_requests = (marks.tts_requests ?? 0) + 1;
-              log.debug({ sentences: utterances.length, chars: utterances.reduce((a, u) => a + u.text.length, 0) }, "tts request");
-              for await (const chunk of speakHume(utterances, opts)) {
-                if (chunk.generationId) conn.lastGeneration = chunk.generationId;
-                startAudio();
-                sendAudio(chunk.pcm);
               }
             } catch (err) {
               if (abort.signal.aborted) break;

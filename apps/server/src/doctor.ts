@@ -116,13 +116,12 @@ export async function checkReadiness(opts: { ping?: boolean } = {}): Promise<Rea
       add(2, "warn", "Speech-to-text", "STT_PROVIDER=none: podcasts and caption-less videos will be refused.");
   }
 
-  // --- Stage 3: voice in the browser (AssemblyAI in; Hume Octave, ElevenLabs or Inworld out, chosen in Settings) ---
+  // --- Stage 3: voice in the browser (AssemblyAI in; ElevenLabs or Inworld out, chosen in Settings) ---
   const stt = config.voice.sttProvider === "assemblyai" && Boolean(config.voice.assemblyAiKey);
   add(3, stt ? "ok" : "warn", "Speech-to-text: AssemblyAI (ASSEMBLYAI_API_KEY)", stt ? `model ${config.voice.assemblyAiModel}, end of turn after ${config.sttMinSilenceMs}-${config.sttMaxSilenceMs} ms of silence` : "Needed for the student to talk instead of type. Free key at assemblyai.com.");
   const elevenProblem = elevenKeyProblem(config.elevenlabs.apiKey);
   const inworldProblem = inworldKeyProblem(config.inworld.apiKey);
   const voices = [
-    { id: "hume", item: "Text-to-speech: Hume Octave (HUME_API_KEY)", ready: Boolean(config.hume.apiKey), problem: "HUME_API_KEY is not set.", detail: `Octave ${config.ttsVersion}, voice "${config.ttsVoice}"${config.ttsInstant ? ", instant mode" : ""}. The key's presence is checked, not the balance.` },
     { id: "elevenlabs", item: "Text-to-speech: ElevenLabs (ELEVENLABS_API_KEY)", ready: !elevenProblem, problem: elevenProblem, detail: `${config.elevenModel}, voice "${config.ttsProvider === "elevenlabs" ? ttsVoiceLabel() : config.elevenVoiceName || config.elevenVoiceId}"` },
     { id: "inworld", item: "Text-to-speech: Inworld (INWORLD_API_KEY)", ready: !inworldProblem, problem: inworldProblem, detail: `${config.inworldModel}, voice "${config.inworldVoiceName || config.inworldVoiceId}", one stream per reply` },
   ] as const;
@@ -154,17 +153,6 @@ export async function checkReadiness(opts: { ping?: boolean } = {}): Promise<Rea
     } catch (err) {
       add(3, config.ttsProvider === "inworld" ? "fail" : "warn", "Inworld key", err instanceof Error ? err.message : String(err));
     }
-  }
-
-  // --- Stage 3 (alternative): Hume EVI speech-to-speech, which calls us through a public URL ----
-  const hume = Boolean(config.hume.apiKey && config.hume.secretKey);
-  add(3, hume ? "ok" : "warn", "Hume EVI: HUME_API_KEY + HUME_SECRET_KEY", hume ? "Alternative voice path (needs a public URL)." : "Optional alternative voice path. Browser voice above does not need it.");
-  if (hume) {
-    add(3, config.hume.publicUrl ? "ok" : "warn", "PUBLIC_URL", config.hume.publicUrl ?? "Set to the public HTTPS URL of this server (e.g. ngrok) before `npm run setup:hume`.");
-    add(3, config.hume.configId ? "ok" : "warn", "HUME_CONFIG_ID", config.hume.configId ?? "Run `npm run setup:hume` once PUBLIC_URL is set, then paste the id here.");
-    add(3, config.hume.clmSecret ? "ok" : "warn", "CLM_SECRET", config.hume.clmSecret ? "set" : "Recommended: any long random string; protects the CLM endpoint.");
-    const ngrok = await bin("ngrok", ["version"]);
-    add(3, ngrok ? "ok" : "warn", "ngrok", ngrok ?? "Optional: `ngrok http 3001` is the quickest way to get a PUBLIC_URL during development.");
   }
 
   return {
