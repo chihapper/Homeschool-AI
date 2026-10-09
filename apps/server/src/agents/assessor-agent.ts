@@ -117,7 +117,10 @@ export function startingPointsBlock(knowledge: CourseKnowledge | undefined, conc
   );
 }
 
-export async function assessSession(args: { session: Session; learner: Learner; course: Course; lesson: Lesson; knowledge?: CourseKnowledge }): Promise<MasteryReport> {
+/** Token usage of one assessor run, for a cost line in the log or an experiment. */
+export interface AssessUsage { input_tokens: number; output_tokens: number; cache_read_input_tokens?: number | null; cache_creation_input_tokens?: number | null }
+
+export async function assessSession(args: { session: Session; learner: Learner; course: Course; lesson: Lesson; knowledge?: CourseKnowledge; onUsage?: (u: AssessUsage) => void }): Promise<MasteryReport> {
   const { session, learner, course, lesson } = args;
   const { concepts, material, wholeCourse } = assessmentMaterial(session, course, lesson);
   const transcript = session.transcript
@@ -156,6 +159,7 @@ export async function assessSession(args: { session: Session; learner: Learner; 
       },
     ],
   });
+  args.onUsage?.(message.usage as AssessUsage);
   assertNotRefused(message);
   if (message.stop_reason === "max_tokens") throw new Error("Assessment was cut off at the output limit; the report is incomplete and was not saved.");
   if (!out) throw new Error("Assessment returned no parsable output.");

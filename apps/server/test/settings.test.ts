@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { config, envDefaults, getSettings, resetSettings, ttsModelLabel, ttsVoiceLabel, updateSettings, useSettingsFile } from "../src/config.js";
-import { tutorAgent } from "../src/agents/tutor-agent.js";
+import { reflectAgent, tutorAgent } from "../src/agents/tutor-agent.js";
 import { assessorAgent } from "../src/agents/assessor-agent.js";
 
 describe("runtime settings", () => {
@@ -68,6 +68,19 @@ describe("runtime settings", () => {
     resetSettings();
     expect(getSettings().effective).toEqual(envDefaults);
     expect(fs.existsSync(file)).toBe(false);
+  });
+
+  it("lets the reflect pass run on its own model, and follows the tutor's otherwise", () => {
+    expect(config.reflectModel).toBe(config.tutorModel);
+    expect(reflectAgent.model).toBe(tutorAgent.model);
+    updateSettings({ tutorModel: "claude-haiku-5-5", reflectModel: "claude-sonnet-5-5" });
+    expect(tutorAgent.model).toBe("claude-haiku-5-5");
+    expect(reflectAgent.model).toBe("claude-sonnet-5-5");
+    expect(reflectAgent.effort).toBe(config.reflectEffort);
+    updateSettings({ reflectModel: "" }); // back to the tutor's model, and no override is kept for the default
+    expect(reflectAgent.model).toBe("claude-haiku-5-5");
+    expect(getSettings().overrides).not.toHaveProperty("reflectModel");
+    resetSettings();
   });
 
   it("keeps the saved settings that still apply when one no longer does", () => {

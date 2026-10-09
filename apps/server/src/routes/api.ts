@@ -68,6 +68,8 @@ function health() {
     ok: true,
     model: s.model,
     tutorModel: s.tutorModel,
+    /** The model that takes the tutor's notes, resolved: the tutor's own unless Settings names another. */
+    reflectModel: config.reflectModel,
     tutorEffort: s.tutorEffort,
     tutorThinking: s.tutorThinking,
     voice: {
@@ -115,17 +117,18 @@ function sampleFile(name: string): string {
 async function checkModelIds(body: unknown): Promise<void> {
   if (!body || typeof body !== "object") return;
   const patch = body as Record<string, unknown>;
-  for (const key of ["model", "tutorModel"] as const) {
+  for (const key of ["model", "tutorModel", "reflectModel"] as const) {
     const raw = patch[key];
     if (typeof raw !== "string") continue;
     const id = normalizeModelId(raw);
     patch[key] = id;
+    if (key === "reflectModel" && !id) continue; // empty: the tutor's model
     try {
       await anthropic.models.retrieve(id);
     } catch (err) {
       const e = err as { error?: { error?: { message?: string } }; message?: string };
       const detail = e.error?.error?.message ?? e.message ?? String(err);
-      throw new Error(`${key === "model" ? "Offline model" : "Tutor model"} "${raw}": ${detail}`);
+      throw new Error(`${key === "model" ? "Offline model" : key === "reflectModel" ? "Notes model" : "Tutor model"} "${raw}": ${detail}`);
     }
   }
 }

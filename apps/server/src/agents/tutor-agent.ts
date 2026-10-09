@@ -67,13 +67,14 @@ export const tutorAgent: AgentSpec = {
 };
 
 /**
- * The same tutor, reflecting after the fact. Same prompt and skills (so the cached prefix is shared), but
- * it may think: the learner is listening to the reply while this runs.
+ * The same tutor, reflecting after the fact. Same prompt and skills (so the cached prefix is shared when the
+ * model is the same), but it may think: the learner is listening to the reply while this runs. It may run on
+ * its own model (`reflectModel`): a cheap speaker with a careful note-taker.
  */
 export const reflectAgent: AgentSpec = {
   ...tutorAgent,
   get model() {
-    return config.tutorModel;
+    return config.reflectModel;
   },
   get effort() {
     return config.reflectEffort;

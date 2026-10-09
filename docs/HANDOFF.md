@@ -26,8 +26,9 @@ over `.env`; the user's `.env` still names the 5 models and Hume variables nothi
 students: Test Student and Sam (profiled, four course records between them) and John (grade 9, added by the
 user, no intake yet). The Rome unit (`data/courses/ancient-rome-muemem4s.json`, 31 lessons) has about fifteen
 lesson sessions on it. Text mode works with an Anthropic key alone; browser voice works through Inworld (the
-default) or ElevenLabs. On 2026-10-08 the runtime tutor model was switched to `claude-haiku-5-5` for the
-user's trial (`data/settings.json`); the code default stays Sonnet 5.5, and Settings switches between them. **Next: the user tests the new flow themselves** (`docs/TESTING.md`): add a student on
+default) or ElevenLabs. On 2026-10-08 the runtime settings became Haiku 5.5 speaking and Sonnet 5.5 taking the notes
+(`tutorModel` / `reflectModel` in `data/settings.json`); the code defaults stay Sonnet 5.5 for both, and Settings
+switches them. The user is weighing the assessor on Sonnet 5.5 (`docs/COST.md`). **Next: the user tests the new flow themselves** (`docs/TESTING.md`): add a student on
 the Students tab and hold the intake there, then start that student on a course from the Courses or Lesson tab,
 in text and then by voice; the intake hand-over has not been heard aloud yet, and the user's own microphone
 session in Chrome has still not happened. The user intends to pull the repo on a second laptop: git carries
@@ -114,6 +115,14 @@ decision on hosting (issue #13) before any pilot. No deadline has been set.
 - **Hume is gone** (user, 2026-10-06: Hume is sunsetting EVI and its text-to-speech). EVI mode, the Octave
   adapter, `setup:hume`, the `/clm` endpoint and the `hume` packages were removed; the tutor's voice is
   Inworld (default) or ElevenLabs. Decisions below that mention Hume are kept as history.
+- **A cheap speaker, a careful note-taker** (user, 2026-10-08: "I think we'll keep Sonnet for the notes as Haiku
+  could miss a lot"). The reflect pass runs on its own model, `reflectModel` (Settings "Notes model", empty means
+  the tutor's); the live setting is Haiku 5.5 speaking, Sonnet 5.5 taking notes. Each model keeps its own prompt
+  cache, one extra write per session, off the clock.
+- **Cost is now a product constraint** (user, 2026-10-08: "this is increasingly getting pricey"; thinking about
+  other vendors and open models, gut says only Gemini, GPT or Anthropic would do). `docs/COST.md` holds the
+  measurements and the levers; the assessor on Sonnet 5.5 is the next decision. Harness runs are quoted before
+  they run.
 - **The tutor turn is two calls** (speak fast with no bookkeeping and no thinking; reflect afterwards
   while the student listens), and the open thread rides with the phase guidance rather than outranking
   it. See CLAUDE.md; an earlier version that let the note outrank the phase was rejected by the user.
@@ -210,21 +219,34 @@ the product (#13, #18, #23, #26). Ordering and blockers only here.
 
 **User-side**
 
-1. Test in the web app (both servers up, `http://localhost:5173`): add a student on the Students tab and hold
+1. Decide the assessor's model: Sonnet 5.5 at high effort halves the largest line of a session and agreed with
+   Opus on every level of the one session compared (`docs/COST.md`); say so and the default changes. One more
+   comparison on a science session would make it a safer call (about $0.50).
+2. Test in the web app (both servers up, `http://localhost:5173`): add a student on the Students tab and hold
    the intake there; start them on a course from the Courses tab (the lesson opens with the course's
    questions); Focus ticks on the Courses tab; a lesson with "Already read this"; the Progress panel on the
    Reports tab.
-2. Decide the hosting, copyright and children's-data line (issue #13) before anyone asks for a login page.
+3. Decide the hosting, copyright and children's-data line (issue #13) before anyone asks for a login page.
    Now: turn off AssemblyAI's model training in its dashboard, which needs a paid plan and also gives zero
    retention for streaming (#23), and send the two neutral vendor emails (#18 Inworld, #23 AssemblyAI).
-3. Add a real ElevenLabs key to `.env` (`ELEVENLABS_API_KEY=sk_...`), restart the server, flip the
+4. Add a real ElevenLabs key to `.env` (`ELEVENLABS_API_KEY=sk_...`), restart the server, flip the
    toggle in Settings, Voice to ElevenLabs, pick a voice and model, press **Test this voice**, then run a
    voice session in Chrome at `http://localhost:5173` (the app's browser pane cannot use the microphone).
-4. Read the README "What this is (and is not)" section and `docs/ROADMAP.md` in your own voice; they
+5. Read the README "What this is (and is not)" section and `docs/ROADMAP.md` in your own voice; they
    are the product statements a customer or an engineer will read.
 
 **Claude-side, in order**
 
+000002. Done 2026-10-08 on `feature/ui-flow` (the user: "Build the reflect-model setting ... keep Sonnet for the
+   notes"; "test the output of the assessor in opus 5.5 medium effort and Sonnet 5.5 using the raw output from a
+   previous session"): `reflectModel` runtime setting (config, `reflectAgent.model`, `PUT /api/settings` checks it
+   with the API, health reports it resolved, Settings "Notes model" dropdown, header shows it when it differs), a
+   settings test, `assessSession` gained `onUsage` for a cost line. Verified live: a five-turn scripted lesson
+   with Haiku 5.5 speaking (TTFT median 1.3 s) and Sonnet 5.5 taking notes (three understanding, one partial,
+   three told, phase moved to inquire: Sonnet's judgement, Haiku's price). The assessor comparison on the user's
+   2026-09-30 session (`7e285a2c`), three runs, nothing saved, about $0.87 in all: numbers and the verdict in
+   `docs/COST.md`; the side-by-side with the full summaries was sent to the user. The live settings are Haiku 5.5
+   speaking, Sonnet 5.5 notes, Opus 5.5 offline. 243 tests, typecheck clean.
 000001. Done 2026-10-08 on `feature/ui-flow` (the user: Haiku 5.5 "just came out", "significantly cheaper",
    "could be sufficient"): `claude-haiku-5-5` added to the model table and the Settings list, with its rules
    checked against the API the same day (effort low to max, default medium; `{type: "disabled"}` accepted at

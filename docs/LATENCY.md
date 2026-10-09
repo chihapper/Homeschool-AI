@@ -134,4 +134,6 @@ The first word comes as fast, and the replies read as a tutor's, with no reasoni
 (the Haiku 5.5 prompting guide warns of that with thinking off at low effort). The reflect pass was blunter:
 every student answer filed as "partial", no gap for the dodged question, no phase change in five turns. One
 run each, so a direction, not a verdict; the questions themselves are the user's to judge by ear. Settings
-switches the tutor between them at runtime; the code default stays Sonnet 5.5.
+switches the tutor between them at runtime; the code default stays Sonnet 5.5. Since 2026-10-08 the reflect
+pass can run on its own model (`reflectModel`, Settings "Notes model"): the user's choice is Haiku 5.5 speaking
+and Sonnet 5.5 taking the notes, about $0.0044 per turn for the two calls.

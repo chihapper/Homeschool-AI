@@ -65,6 +65,12 @@ export const RuntimeSettingsSchema = z.object({
   model: z.string().min(1).transform(normalizeModelId),
   /** The live tutor and intake conversation are latency-sensitive; they can use a different model. */
   tutorModel: z.string().min(1).transform(normalizeModelId),
+  /**
+   * The tutor's reflect pass (notes, phase changes, the open thread) may run on a different model from the one
+   * that speaks: a cheap speaker and a careful note-taker. Empty means the tutor's model. Each model keeps its
+   * own prompt cache, so a split costs one extra cache write per session, off the clock.
+   */
+  reflectModel: z.string().transform(normalizeModelId),
   /** Effort for the live tutor. Lower effort = faster first token. */
   tutorEffort: EffortSchema,
   /** Effort for the offline agents. */
@@ -114,6 +120,7 @@ export type RuntimeSettings = z.infer<typeof RuntimeSettingsSchema>;
 export const envDefaults: RuntimeSettings = {
   model: normalizeModelId(env("CLAUDE_MODEL", DEFAULT_MODEL)!),
   tutorModel: normalizeModelId(env("CLAUDE_TUTOR_MODEL", DEFAULT_TUTOR_MODEL)!),
+  reflectModel: normalizeModelId(env("CLAUDE_REFLECT_MODEL", "") ?? ""),
   tutorEffort: EffortSchema.catch("low").parse(env("CLAUDE_TUTOR_EFFORT", "low")),
   analysisEffort: EffortSchema.catch("high").parse(env("CLAUDE_ANALYSIS_EFFORT", "high")),
   reflectEffort: EffortSchema.catch("medium").parse(env("CLAUDE_REFLECT_EFFORT", "medium")),
@@ -222,6 +229,10 @@ export const config = {
   },
   get tutorModel(): string {
     return effective().tutorModel;
+  },
+  /** The model that takes the tutor's notes: `reflectModel` when set, else the tutor's own. */
+  get reflectModel(): string {
+    return effective().reflectModel || effective().tutorModel;
   },
   get tutorEffort(): Effort {
     return effective().tutorEffort;

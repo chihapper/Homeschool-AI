@@ -80,7 +80,7 @@ export const PROVIDER_NAME: Record<TtsProvider, string> = { elevenlabs: "ElevenL
 /** The .env key each provider needs. */
 export const PROVIDER_KEY: Record<TtsProvider, string> = { elevenlabs: "ELEVENLABS_API_KEY", inworld: "INWORLD_API_KEY" };
 export interface RuntimeSettings {
-  model: string; tutorModel: string; tutorEffort: string; analysisEffort: string; reflectEffort: string; tutorThinking: "adaptive" | "disabled"; prewarmCache: boolean; refusalFallbacks: boolean;
+  model: string; tutorModel: string; reflectModel: string; tutorEffort: string; analysisEffort: string; reflectEffort: string; tutorThinking: "adaptive" | "disabled"; prewarmCache: boolean; refusalFallbacks: boolean;
   outsideKnowledge: OutsideKnowledgeMode;
   ttsProvider: TtsProvider;
   ttsBatchSentences: boolean; sttMinSilenceMs: number; sttMaxSilenceMs: number;
@@ -95,7 +95,7 @@ export interface VoiceModelOption { id: string; name: string; note?: string }
 /** A spoken sample of the draft voice settings, ready to play, and how fast the first audio came back. */
 export interface VoicePreview { url: string; provider: string; firstAudioMs: number; totalMs: number; characters: number }
 export interface Readiness { rows: Array<{ status: "ok" | "warn" | "fail"; item: string; note: string; stage: 0 | 1 | 2 | 3 }>; blocking: number; optional: number; checkedAt: string }
-export interface Health { ok: boolean; model: string; tutorModel: string; tutorEffort: string; tutorThinking: string; voice: { stt: "assemblyai" | "none"; tts: TtsProvider | "none"; ttsProvider: TtsProvider; ttsVoice: string; ttsModel: string } }
+export interface Health { ok: boolean; model: string; tutorModel: string; reflectModel: string; tutorEffort: string; tutorThinking: string; voice: { stt: "assemblyai" | "none"; tts: TtsProvider | "none"; ttsProvider: TtsProvider; ttsVoice: string; ttsModel: string } }
 
 async function j<T>(res: Response): Promise<T> {
   if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error ?? `${res.status} ${res.statusText}`);
