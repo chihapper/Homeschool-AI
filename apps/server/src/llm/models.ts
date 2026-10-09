@@ -2,24 +2,29 @@
  * What each Claude model accepts, in one place, so a new model is one row here and one entry in MODEL_OPTIONS.
  *
  * Source: Anthropic's migration guides (platform.claude.com/docs/en/models/<model>/migration-guide) and the
- * bundled `claude-api` skill (`/claude-api migrate`). The rules that matter to this app, as of 2026-09-30:
+ * bundled `claude-api` skill (`/claude-api migrate`). The rules that matter to this app, as of 2026-10-08:
  *  - Model IDs have no date suffix and use hyphens: `claude-sonnet-5-5`, never `claude-sonnet-5.5` (a 404 with
  *    "Did you mean claude-sonnet-5-5?" is what the user hit on 2026-09-30).
- *  - `output_config.effort` exists on Opus and Sonnet 4.6 and later and on the Fable and Mythos models; Haiku 4.5
- *    and older models reject it, and get no `thinking` field either.
+ *  - `output_config.effort` exists on Opus and Sonnet 4.6 and later, on Haiku 5.5 (the first Haiku with it), and
+ *    on the Fable and Mythos models; Haiku 4.5 and older models reject it, and get no `thinking` field either.
  *  - Turning thinking off differs by generation: Opus 5 and Sonnet 5 (and the 4.6 to 4.8 family) accept
- *    `{type: "disabled"}` (Opus 5 only at effort high or below); Sonnet 5.5 rejects it and takes
+ *    `{type: "disabled"}` (Opus 5 only at effort high or below); Haiku 5.5 accepts it at high or below and
+ *    rejects `between_tools` (checked against the API 2026-10-08); Sonnet 5.5 rejects `disabled` and takes
  *    `{type: "between_tools"}` at high or below, with no other field; Opus 5.5, Fable and Mythos cannot turn
  *    thinking off at all, and low effort is the control. `budget_tokens`, `temperature`, `top_p`, `top_k`
  *    and forced `tool_choice` are never sent.
- *  - Opus 5.5's default effort is medium, one below Opus 5's, so effort is always set explicitly.
+ *  - Opus 5.5's and Haiku 5.5's default effort is medium, so effort is always set explicitly.
+ *  - Haiku 5.5 has no server-side refusal fallback (the beta flag is accepted and ignored): a refusal comes back
+ *    as `stop_reason: "refusal"` and the client handles it (agents/base.ts). Its prompting guide warns that
+ *    reasoning-like text can leak into the reply with thinking off at low effort, which is how the speaking call
+ *    runs; watch for it.
  * When a model ships: add its ID to MODEL_OPTIONS, add or adjust its row in `modelRules`, run the tests, and
  * check the guide for anything new (thinking, tool_choice, betas). Nothing else in the app names a model.
  */
 import type { Effort } from "../config.js";
 
 /** Models offered in the Settings tab. Any model ID can still be typed in; it is normalised and checked on save. */
-export const MODEL_OPTIONS = ["claude-opus-5-5", "claude-sonnet-5-5", "claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5"] as const;
+export const MODEL_OPTIONS = ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5"] as const;
 
 /** Code defaults when the environment sets nothing: the offline agents on Opus 5.5, the live tutor on Sonnet 5.5 (its lowest thinking setting keeps the first word fast). */
 export const DEFAULT_MODEL = "claude-opus-5-5";
@@ -59,7 +64,11 @@ export function modelRules(model: string): ModelRules {
   const parsed = parseModelId(model);
   if (!parsed) return { effort: true, thinkingOff: "never", thinkingOffMaxEffort: "max" };
   const { family, version } = parsed;
-  if (family === "haiku") return { effort: false, thinkingOff: "disabled", thinkingOffMaxEffort: "max" };
+  if (family === "haiku") {
+    // Haiku 5.5 (2026-10-07) is the first Haiku with effort; thinking off is allowed up to high, like Opus 5.
+    if (version >= 5.5) return { effort: true, thinkingOff: "disabled", thinkingOffMaxEffort: "high" };
+    return { effort: false, thinkingOff: "disabled", thinkingOffMaxEffort: "max" };
+  }
   if (family === "fable" || family === "mythos") return { effort: true, thinkingOff: "never", thinkingOffMaxEffort: "max" };
   if (version < 4.6) return { effort: false, thinkingOff: "disabled", thinkingOffMaxEffort: "max" };
   if (family === "sonnet") {

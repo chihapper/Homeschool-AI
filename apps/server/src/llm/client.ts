@@ -36,7 +36,7 @@ export function supportsEffort(model: string): boolean {
  */
 export function reasoningParams(model: string, effort: Effort, thinking: "adaptive" | "disabled" = "adaptive"): Record<string, unknown> {
   const rules = modelRules(model);
-  if (!rules.effort) return {}; // Haiku 4.5 and older: no thinking (fastest), no effort param.
+  if (!rules.effort) return {}; // Haiku 4.5 and older: no thinking (fastest), no effort param. Haiku 5.5 has both.
   const params: Record<string, unknown> = { output_config: { effort } };
   if (thinking === "disabled" && thinkingOffAllowed(rules, effort)) {
     params.thinking = { type: rules.thinkingOff };

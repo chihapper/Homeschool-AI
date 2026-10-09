@@ -34,7 +34,7 @@ We control the middle two. Everything below is about Claude time-to-first-token 
 | **Cache pre-warm on session start** | `prewarmTutor()` fires when a session is created | A `max_tokens: 0` request writes the cache before the student says a word, so the first turn is a cache hit |
 | **Short replies by design** | `voice-conversation` skill, `SPEAK_MAX_TOKENS` (1200) / `REFLECT_MAX_TOKENS` (2000) in `tutor-agent.ts` | Two to four sentences then a question. The caps are room, not a target: `max_tokens` covers thinking too, and a spoken turn measures 60 to 200 output tokens on Sonnet 5 (2026-09-30) |
 | **Abort on interruption** | `interrupt` in `voice/live.ts` -> `AbortController` | When the student barges in, the model and the voice stop at once; what was already said stays in the transcript |
-| **Model choice** | `CLAUDE_TUTOR_MODEL` | Default `claude-sonnet-5-5`, the tier that can speak with no thinking first. `claude-opus-5-5` is stronger but always thinks a little (low effort is the only control). If measured TTFT is too high, try `claude-haiku-4-5` (the code drops effort/thinking params automatically for Haiku). Note for the diagnostics: `thinkingChars` counts thinking *text*, which Sonnet 5, Sonnet 5.5 and Opus 5.5 omit from responses by default, so it reads 0 there even when the model thought; `outputTokens` still includes the thinking |
+| **Model choice** | `CLAUDE_TUTOR_MODEL` | Default `claude-sonnet-5-5`, the tier that can speak with no thinking first; `claude-haiku-5-5` (2026-10-07) can too, at about a tenth of the price (measured below). `claude-opus-5-5` is stronger but always thinks a little (low effort is the only control). If measured TTFT is too high, try `claude-haiku-4-5` (the code drops effort/thinking params automatically for Haiku). Note for the diagnostics: `thinkingChars` counts thinking *text*, which Sonnet 5, Sonnet 5.5 and Opus 5.5 omit from responses by default, so it reads 0 there even when the model thought; `outputTokens` still includes the thinking |
 
 ## Measuring
 
@@ -113,3 +113,25 @@ against George). Every chunk from both sockets was whole samples. Through the ap
 (Inworld TTS-2, Sonnet 5 at low effort, typed input), first audio came 0.55 to 0.57 s after the model's first
 word, most of it spent finishing the first sentence. "Test this voice" over HTTP: first audio 100 to 250 ms.
 `speaking_rate` is accepted on both routes.
+
+## Haiku 5.5 as the tutor (2026-10-08)
+
+Claude Haiku 5.5 (released 2026-10-07) is the first Haiku with effort, speaks with thinking off at effort
+high or below, and costs about a tenth of Sonnet 5.5 ($0.10 in / $0.50 out per million tokens, cache reads
+$0.01, for prompts under 100k tokens). The same five-turn scripted lesson on each model (Test Student, the
+plants unit, text, low effort, thinking off on the speaking call, one run each):
+
+| | Haiku 5.5 | Sonnet 5.5 |
+|---|---|---|
+| Time to first token, warm turns | 1.06 to 1.43 s (median 1.36) | 1.03 to 1.53 s (median 1.47) |
+| First turn, cold (12k-token cache write) | 2.7 s | 1.5 s |
+| Reflect pass, median | 6.4 s | 4.2 s |
+| Observations in five turns | 6: four partial, two told; phase stayed teach | 7: three understanding, one partial, one told, one gap, one engagement; phase moved to inquire |
+| Tutor tokens per turn, about | 12.4k cached in and 100 out, twice (speak, reflect) | the same |
+| The two tutor calls per turn, about | $0.0005 | $0.0065 |
+
+The first word comes as fast, and the replies read as a tutor's, with no reasoning leaking into the text
+(the Haiku 5.5 prompting guide warns of that with thinking off at low effort). The reflect pass was blunter:
+every student answer filed as "partial", no gap for the dodged question, no phase change in five turns. One
+run each, so a direction, not a verdict; the questions themselves are the user's to judge by ear. Settings
+switches the tutor between them at runtime; the code default stays Sonnet 5.5.

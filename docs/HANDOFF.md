@@ -1,6 +1,6 @@
 # Handoff
 
-Last updated: 2026-10-06
+Last updated: 2026-10-08
 
 Read this before anything else. It is written for a session that has seen nothing.
 
@@ -26,7 +26,8 @@ over `.env`; the user's `.env` still names the 5 models and Hume variables nothi
 students: Test Student and Sam (profiled, four course records between them) and John (grade 9, added by the
 user, no intake yet). The Rome unit (`data/courses/ancient-rome-muemem4s.json`, 31 lessons) has about fifteen
 lesson sessions on it. Text mode works with an Anthropic key alone; browser voice works through Inworld (the
-default) or ElevenLabs. **Next: the user tests the new flow themselves** (`docs/TESTING.md`): add a student on
+default) or ElevenLabs. On 2026-10-08 the runtime tutor model was switched to `claude-haiku-5-5` for the
+user's trial (`data/settings.json`); the code default stays Sonnet 5.5, and Settings switches between them. **Next: the user tests the new flow themselves** (`docs/TESTING.md`): add a student on
 the Students tab and hold the intake there, then start that student on a course from the Courses or Lesson tab,
 in text and then by voice; the intake hand-over has not been heard aloud yet, and the user's own microphone
 session in Chrome has still not happened. The user intends to pull the repo on a second laptop: git carries
@@ -224,6 +225,18 @@ the product (#13, #18, #23, #26). Ordering and blockers only here.
 
 **Claude-side, in order**
 
+000001. Done 2026-10-08 on `feature/ui-flow` (the user: Haiku 5.5 "just came out", "significantly cheaper",
+   "could be sufficient"): `claude-haiku-5-5` added to the model table and the Settings list, with its rules
+   checked against the API the same day (effort low to max, default medium; `{type: "disabled"}` accepted at
+   high or below and a 400 above; `between_tools` refused; the refusal-fallback beta accepted and ignored, so
+   the client's own handling of `stop_reason: "refusal"` is what applies). Same tokenizer as Sonnet 5.5. A
+   five-turn scripted lesson on each model, numbers in `docs/LATENCY.md`: the first word as fast (median 1.4 s
+   on both), no reasoning leaking into the replies, the reflect pass blunter on Haiku (every answer "partial",
+   no gap for a dodged question, no phase change in five turns, where Sonnet filed understanding and a gap and
+   moved to inquire). The runtime tutor model is now Haiku 5.5 for the user's trial; the code default stays
+   Sonnet 5.5. Seen in passing, on Sonnet: a reflect note said "he answered" about Test Student, whose records
+   state no gender. The pronoun check covers the intake extractions (`agents/pronouns.ts`), not observation
+   notes, which the assessor reads. Open.
 000000. Done 2026-10-06 on `feature/ui-flow` (the user, before testing anything: "we need to change around the
    UI to make it more intuitive"; see the two standing decisions dated 2026-10-06). The tabs are Students,
    Courses, Lesson, Reports, Settings. Students: "Add and begin the intake" creates the student and opens an

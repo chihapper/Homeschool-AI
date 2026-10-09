@@ -20,7 +20,7 @@ describe("model IDs", () => {
   });
 
   it("offers the 5.5 models first and defaults to them", () => {
-    expect(MODEL_OPTIONS.slice(0, 2)).toEqual(["claude-opus-5-5", "claude-sonnet-5-5"]);
+    expect(MODEL_OPTIONS.slice(0, 3)).toEqual(["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"]);
     expect(DEFAULT_MODEL).toBe("claude-opus-5-5");
     expect(DEFAULT_TUTOR_MODEL).toBe("claude-sonnet-5-5");
     for (const id of MODEL_OPTIONS) expect(normalizeModelId(id)).toBe(id);
@@ -35,6 +35,7 @@ describe("model rules", () => {
     expect(modelRules("claude-sonnet-5")).toEqual({ effort: true, thinkingOff: "disabled", thinkingOffMaxEffort: "max" });
     expect(modelRules("claude-opus-4-6")).toEqual({ effort: true, thinkingOff: "disabled", thinkingOffMaxEffort: "max" });
     expect(modelRules("claude-fable-5-1").thinkingOff).toBe("never");
+    expect(modelRules("claude-haiku-5-5")).toEqual({ effort: true, thinkingOff: "disabled", thinkingOffMaxEffort: "high" }); // checked against the API 2026-10-08
     expect(modelRules("claude-haiku-4-5")).toEqual({ effort: false, thinkingOff: "disabled", thinkingOffMaxEffort: "max" });
     expect(modelRules("claude-sonnet-4-5").effort).toBe(false);
   });
@@ -49,6 +50,8 @@ describe("model rules", () => {
     expect(thinkingOffAllowed(sonnet55, "high")).toBe(true);
     expect(thinkingOffAllowed(sonnet55, "xhigh")).toBe(false);
     expect(thinkingOffAllowed(modelRules("claude-opus-5-5"), "low")).toBe(false);
+    expect(thinkingOffAllowed(modelRules("claude-haiku-5-5"), "high")).toBe(true);
+    expect(thinkingOffAllowed(modelRules("claude-haiku-5-5"), "xhigh")).toBe(false); // a 400: "use effort 'high' or below, or enable thinking"
     expect(thinkingOffAllowed(modelRules("claude-sonnet-5"), "max")).toBe(true);
   });
 });
