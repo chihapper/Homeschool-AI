@@ -123,6 +123,16 @@ decision on hosting (issue #13) before any pilot. No deadline has been set.
   other vendors and open models, gut says only Gemini, GPT or Anthropic would do). `docs/COST.md` holds the
   measurements and the levers; the assessor on Sonnet 5.5 is the next decision. Harness runs are quoted before
   they run.
+- **A second vendor is under consideration for the report only** (user, 2026-10-08: "I want to try GPT 6.1 Sol for
+  the assessor as it can be half the price and it is a solid model"). Checked against OpenAI's own pages the same
+  day: `gpt-6.1-sol` lists at $2 in / $0.10 cached / $10 out per million tokens, the same as Sonnet 5.5, so it is
+  half of Opus 5.5 but not of Sonnet; `gpt-6-luna` is priced like Haiku 5.5. If it goes ahead: no framework, a
+  small adapter behind `streamParsed` (the one seam every offline report-style call shares), OpenAI's official SDK,
+  the Responses API with structured outputs (`zodTextFormat`, strict schemas), `reasoning.effort` mapped from the
+  app's effort, refusals and `incomplete` handled; the model table gains a vendor column and the settings route
+  checks GPT IDs against OpenAI's models endpoint. The live tutor stays on the Claude API (tool loop, caching,
+  barge-in, the two-call turn are tuned to it). Needs an OpenAI key in `.env` and a look at OpenAI's data terms for
+  a child's transcript (see [[vendor-data-terms]] in the memory notes and issue #13). Not started.
 - **The tutor turn is two calls** (speak fast with no bookkeeping and no thinking; reflect afterwards
   while the student listens), and the open thread rides with the phase guidance rather than outranking
   it. See CLAUDE.md; an earlier version that let the note outrank the phase was rejected by the user.
@@ -237,6 +247,12 @@ the product (#13, #18, #23, #26). Ordering and blockers only here.
 
 **Claude-side, in order**
 
+000003. Done 2026-10-08 on `feature/ui-flow` (the user: "Add the assessor-model setting"): `assessorModel` runtime
+   setting (empty means the offline model; Settings "Report model"; health reports it resolved; the header shows it
+   when it differs; `CLAUDE_ASSESSOR_MODEL` in .env), so the report can run on a cheaper tier than the course
+   build and the profile pass, which stay on the offline model. The settings route refuses a non-Claude ID with a
+   plain message ("another vendor's model needs its adapter first"). Not yet set: the user is deciding between
+   Sonnet 5.5 and OpenAI's GPT-6.1 Sol for the report; see the standing decision on other vendors. 244 tests.
 000002. Done 2026-10-08 on `feature/ui-flow` (the user: "Build the reflect-model setting ... keep Sonnet for the
    notes"; "test the output of the assessor in opus 5.5 medium effort and Sonnet 5.5 using the raw output from a
    previous session"): `reflectModel` runtime setting (config, `reflectAgent.model`, `PUT /api/settings` checks it

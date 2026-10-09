@@ -83,6 +83,16 @@ describe("runtime settings", () => {
     resetSettings();
   });
 
+  it("lets the assessor run on its own model, and follows the offline model otherwise", () => {
+    expect(assessorAgent.model).toBe(config.model);
+    updateSettings({ model: "claude-opus-5-5", assessorModel: "claude-sonnet-5-5" });
+    expect(assessorAgent.model).toBe("claude-sonnet-5-5");
+    expect(config.model).toBe("claude-opus-5-5"); // course builds and the profile pass stay on the offline model
+    updateSettings({ assessorModel: "" });
+    expect(assessorAgent.model).toBe("claude-opus-5-5");
+    resetSettings();
+  });
+
   it("keeps the saved settings that still apply when one no longer does", () => {
     const stale = path.join(dir, "stale.json");
     fs.writeFileSync(stale, JSON.stringify({ model: "claude-sonnet-5", ttsProvider: "a-provider-that-was-removed", ttsVoice: "Ava Song" }));

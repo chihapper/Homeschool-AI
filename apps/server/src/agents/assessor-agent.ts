@@ -16,8 +16,10 @@ export const assessorAgent: AgentSpec = {
     "You evaluate a tutoring session after the fact. You are fair, evidence-driven, and specific. " +
     "You never infer mastery the transcript does not show, and you audit the tutor for claims the material does not support.",
   skills: ["mastery-assessment", "grounding"],
+  // Its own setting (Settings "Report model"), so the dearest call of a session can run on a cheaper tier
+  // than the course build; falls back to the offline model.
   get model() {
-    return config.model;
+    return config.assessorModel;
   },
   get effort() {
     return config.analysisEffort;

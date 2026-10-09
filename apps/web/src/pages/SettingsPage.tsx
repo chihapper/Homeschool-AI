@@ -5,6 +5,7 @@ import { api, PROVIDER_NAME, type OutsideKnowledgeMode, type Readiness, type Run
 const HELP: Record<keyof RuntimeSettings, string> = {
   tutorModel: "The live tutor and the intake conversation. This is what the student talks to, so it sets time-to-first-token. Haiku 5.5 (October 2026) costs about a tenth of Sonnet 5.5, speaks with thinking off as well, and is worth judging by ear before paying for Sonnet. Sonnet 5.5 is the recommended voice tier (its lowest thinking setting keeps the first word fast); Opus 5.5 is slower but stronger and always thinks a little, so keep its effort low; Haiku 4.5 is fastest and runs without effort/thinking parameters. Any model ID can be typed in; it is checked with the API when you save.",
   reflectModel: "The model that takes the tutor's notes after each reply (observations, whether to move on, the open thread), off the clock while the student listens. Leave it on the tutor's model, or pair a cheap speaker with a careful note-taker: Haiku 5.5 speaking and Sonnet 5.5 taking notes rated every answer more carefully in the 2026-10-08 comparison. Each model keeps its own prompt cache, so a split costs one extra cache write per session.",
+  assessorModel: "The model that writes the report after a session. It reads the whole course, so it is the dearest call of a session: on one saved session Sonnet 5.5 at high effort agreed with Opus 5.5 on every level at half the price (docs/COST.md). Leave it empty to use the offline model.",
   tutorEffort: "How hard the tutor thinks before speaking. Lower = faster first word. The plan compares low and medium.",
   tutorThinking: "Adaptive lets the model decide whether to think; at low effort it rarely does. Disabled asks for the least thinking the model allows: none on Opus 5 and Sonnet 5, only between tool calls on Sonnet 5.5, and just low effort on Opus 5.5, which never turns it off. Opus 5 has known failure modes with it (tool calls emitted as text).",
   model: "The offline agents: curriculum extraction at ingest, profile extraction after intake, and the assessor that writes the mastery report. Quality matters more than speed here.",
@@ -406,6 +407,15 @@ export function SettingsPage({ onChange }: { onChange: () => Promise<void> }) {
         <h3>Offline agents (curriculum, profile, assessor)</h3>
         <div className="grid3">
           {modelField("model")}
+          <label>
+            Report model {changed("assessorModel") && <span className="pill">changed</span>}
+            <select value={draft.assessorModel} onChange={(e) => set("assessorModel", e.target.value)}>
+              <option value="">Same as the offline model ({draft.model})</option>
+              {view.options.models.map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
+            <span className="hint">.env: {view.defaults.assessorModel || "same as the offline model"}</span>
+            <span className="hint">{HELP.assessorModel}</span>
+          </label>
           {effortField("analysisEffort")}
         </div>
         <h3>Caching and fallbacks</h3>

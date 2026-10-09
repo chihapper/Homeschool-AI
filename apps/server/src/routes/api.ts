@@ -70,6 +70,8 @@ function health() {
     tutorModel: s.tutorModel,
     /** The model that takes the tutor's notes, resolved: the tutor's own unless Settings names another. */
     reflectModel: config.reflectModel,
+    /** The model that writes the report, resolved: the offline model unless Settings names another. */
+    assessorModel: config.assessorModel,
     tutorEffort: s.tutorEffort,
     tutorThinking: s.tutorThinking,
     voice: {
@@ -117,18 +119,20 @@ function sampleFile(name: string): string {
 async function checkModelIds(body: unknown): Promise<void> {
   if (!body || typeof body !== "object") return;
   const patch = body as Record<string, unknown>;
-  for (const key of ["model", "tutorModel", "reflectModel"] as const) {
+  const label: Record<string, string> = { model: "Offline model", tutorModel: "Tutor model", reflectModel: "Notes model", assessorModel: "Report model" };
+  for (const key of ["model", "tutorModel", "reflectModel", "assessorModel"] as const) {
     const raw = patch[key];
     if (typeof raw !== "string") continue;
     const id = normalizeModelId(raw);
     patch[key] = id;
-    if (key === "reflectModel" && !id) continue; // empty: the tutor's model
+    if ((key === "reflectModel" || key === "assessorModel") && !id) continue; // empty: follow the model above it
+    if (!id.startsWith("claude-")) throw new Error(`${label[key]} "${raw}": only Claude models are wired in today; another vendor's model needs its adapter first.`);
     try {
       await anthropic.models.retrieve(id);
     } catch (err) {
       const e = err as { error?: { error?: { message?: string } }; message?: string };
       const detail = e.error?.error?.message ?? e.message ?? String(err);
-      throw new Error(`${key === "model" ? "Offline model" : key === "reflectModel" ? "Notes model" : "Tutor model"} "${raw}": ${detail}`);
+      throw new Error(`${label[key]} "${raw}": ${detail}`);
     }
   }
 }

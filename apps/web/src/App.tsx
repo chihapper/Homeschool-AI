@@ -68,7 +68,7 @@ export function App() {
         <span className="spacer" />
         {health && (
           <span className="muted small" title="Live tutor model. Change it in Settings.">
-            tutor <code>{health.tutorModel}</code> @ {health.tutorEffort} · {health.tutorThinking} thinking{health.reflectModel !== health.tutorModel ? <> · notes <code>{health.reflectModel}</code></> : null} · offline <code>{health.model}</code>
+            tutor <code>{health.tutorModel}</code> @ {health.tutorEffort} · {health.tutorThinking} thinking{health.reflectModel !== health.tutorModel ? <> · notes <code>{health.reflectModel}</code></> : null} · offline <code>{health.model}</code>{health.assessorModel !== health.model ? <> · report <code>{health.assessorModel}</code></> : null}
             {health.voice.tts !== "none" ? ` · voice ${PROVIDER_NAME[health.voice.tts]}` : " · text only"}
           </span>
         )}

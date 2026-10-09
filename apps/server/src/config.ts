@@ -71,6 +71,8 @@ export const RuntimeSettingsSchema = z.object({
    * own prompt cache, so a split costs one extra cache write per session, off the clock.
    */
   reflectModel: z.string().transform(normalizeModelId),
+  /** The assessor (the report after a session) may run on its own model; empty means the offline model. */
+  assessorModel: z.string().transform(normalizeModelId),
   /** Effort for the live tutor. Lower effort = faster first token. */
   tutorEffort: EffortSchema,
   /** Effort for the offline agents. */
@@ -121,6 +123,7 @@ export const envDefaults: RuntimeSettings = {
   model: normalizeModelId(env("CLAUDE_MODEL", DEFAULT_MODEL)!),
   tutorModel: normalizeModelId(env("CLAUDE_TUTOR_MODEL", DEFAULT_TUTOR_MODEL)!),
   reflectModel: normalizeModelId(env("CLAUDE_REFLECT_MODEL", "") ?? ""),
+  assessorModel: normalizeModelId(env("CLAUDE_ASSESSOR_MODEL", "") ?? ""),
   tutorEffort: EffortSchema.catch("low").parse(env("CLAUDE_TUTOR_EFFORT", "low")),
   analysisEffort: EffortSchema.catch("high").parse(env("CLAUDE_ANALYSIS_EFFORT", "high")),
   reflectEffort: EffortSchema.catch("medium").parse(env("CLAUDE_REFLECT_EFFORT", "medium")),
@@ -233,6 +236,10 @@ export const config = {
   /** The model that takes the tutor's notes: `reflectModel` when set, else the tutor's own. */
   get reflectModel(): string {
     return effective().reflectModel || effective().tutorModel;
+  },
+  /** The model that writes the report: `assessorModel` when set, else the offline model. */
+  get assessorModel(): string {
+    return effective().assessorModel || effective().model;
   },
   get tutorEffort(): Effort {
     return effective().tutorEffort;

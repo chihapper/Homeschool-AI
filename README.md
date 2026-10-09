@@ -75,7 +75,7 @@ sentence batches.
 | Variable | Purpose |
 |---|---|
 | `ANTHROPIC_API_KEY` | Required. |
-| `CLAUDE_MODEL` | Model for offline agents (curriculum, profile, assessment). Default `claude-opus-5-5`. |
+| `CLAUDE_MODEL`, `CLAUDE_ASSESSOR_MODEL` | Model for the offline agents (curriculum, profile, assessment). Default `claude-opus-5-5`; the assessor may use its own (empty: the same). |
 | `CLAUDE_TUTOR_MODEL`, `CLAUDE_REFLECT_MODEL`, `CLAUDE_TUTOR_EFFORT` | Live tutor model and effort; the notes the tutor takes after each reply may run on another model (empty: the same). Default `claude-sonnet-5-5` at `low` effort for voice latency; `claude-haiku-5-5` (October 2026) is about a tenth of the price and worth a trial. IDs use hyphens (`claude-sonnet-5-5`, not `5.5`); the Settings tab checks a typed ID with the API before saving. What each model accepts lives in one table, `apps/server/src/llm/models.ts`. |
 | `CLAUDE_REFUSAL_FALLBACKS` | Server-side fallback to another Claude model if a safety classifier declines a turn. Default on. |
 | `CLAUDE_TUTOR_THINKING`, `CLAUDE_PREWARM_CACHE` | Latency knobs; see [docs/LATENCY.md](docs/LATENCY.md). |
