@@ -14,6 +14,7 @@ const HELP: Record<keyof RuntimeSettings, string> = {
   prewarmCache: "Write the tutor's prompt cache when a session starts, so the first turn is a cache hit instead of a cold write.",
   refusalFallbacks: "If the safety classifier refuses a turn, retry it on a fallback model automatically instead of showing the canned fallback line.",
   outsideKnowledge: "What the tutor does with facts the student brings up that are not in your material. Applies from the next session.",
+  sessionMaxMinutes: "How long a lesson may run, 3 to 60 minutes. With two minutes left the tutor brings the idea to a close; at the limit it says goodbye in a reply of its own and the app ends the session, which brings up the report. A session keeps the limit it started with.",
   ttsProvider: "Who voices the tutor in browser voice mode. A switch applies from the next reply, even in a session already running: every provider delivers the same audio format.",
   ttsBatchSentences: "Sentences the model has already written are sent to the voice together, so its pace and pitch carry across them instead of restarting at every sentence. The first sentence still goes alone so the reply starts fast. Turn off to hear the difference.",
   elevenVoiceId: "Every voice on your ElevenLabs account: premade, cloned, designed, and any saved from the Voice Library. The play button next to the list plays ElevenLabs' own sample of the voice, which costs no credits.",
@@ -316,6 +317,12 @@ export function SettingsPage({ onChange }: { onChange: () => Promise<void> }) {
             </label>
           ))}
         </div>
+        <label style={{ marginTop: 12, maxWidth: 420 }}>
+          Session length limit (minutes) {changed("sessionMaxMinutes") && <span className="pill">changed</span>}
+          <input type="number" min={3} max={60} step={1} value={draft.sessionMaxMinutes} onChange={(e) => set("sessionMaxMinutes", Number(e.target.value))} />
+          <span className="hint">.env: {view.defaults.sessionMaxMinutes}</span>
+          <span className="hint">{HELP.sessionMaxMinutes}</span>
+        </label>
         <p className="muted small" style={{ marginTop: 8 }}>A session keeps the setting it started with. .env: {view.defaults.outsideKnowledge} {changed("outsideKnowledge") && <span className="pill">changed</span>}</p>
         {saveBar}
       </div>

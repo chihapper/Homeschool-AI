@@ -87,6 +87,8 @@ export const RuntimeSettingsSchema = z.object({
   refusalFallbacks: z.boolean(),
   /** Facts from outside the family's material: answer and check against Wikipedia, answer only, or material only. Read when a session starts. */
   outsideKnowledge: OutsideKnowledgeModeSchema,
+  /** How long a lesson may run before the tutor closes it, in minutes (3 to 60). Frozen on the session when it starts (domain/clock.ts). */
+  sessionMaxMinutes: z.number().int().min(3).max(60),
   /** Who voices the tutor in browser voice mode. Read at the start of every turn, so a switch applies to the next reply. */
   ttsProvider: z.enum(TTS_PROVIDERS),
   /** Send the sentences already waiting as one request so the voice keeps its cadence across them. Off = one request per sentence. */
@@ -131,6 +133,7 @@ export const envDefaults: RuntimeSettings = {
   prewarmCache: env("CLAUDE_PREWARM_CACHE", "true") !== "false",
   refusalFallbacks: env("CLAUDE_REFUSAL_FALLBACKS", "true") !== "false",
   outsideKnowledge: OutsideKnowledgeModeSchema.catch("check").parse(env("OUTSIDE_KNOWLEDGE", "check")),
+  sessionMaxMinutes: Math.round(envNumber("SESSION_MAX_MINUTES", 3, 60, 30)),
   ttsProvider: (TTS_PROVIDERS as readonly string[]).includes(env("VOICE_TTS", "inworld")!) ? (env("VOICE_TTS", "inworld") as TtsProvider) : "inworld",
   ttsBatchSentences: env("VOICE_TTS_BATCH", "true") !== "false",
   // George, a premade voice used in ElevenLabs' own quickstart. Any voice from the account's list works.
@@ -261,6 +264,9 @@ export const config = {
   },
   get outsideKnowledge(): OutsideKnowledgeMode {
     return effective().outsideKnowledge;
+  },
+  get sessionMaxMinutes(): number {
+    return effective().sessionMaxMinutes;
   },
   get ttsProvider(): TtsProvider {
     return effective().ttsProvider;

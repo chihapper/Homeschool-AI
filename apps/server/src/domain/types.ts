@@ -23,6 +23,16 @@ export const SourceChunkSchema = z.object({
 });
 export type SourceChunk = z.infer<typeof SourceChunkSchema>;
 
+/** Token counts of one model call, with the model, for the meter (domain/cost.ts, llm/prices.ts). */
+export const UsageSchema = z.object({
+  model: z.string(),
+  inputTokens: z.number(),
+  outputTokens: z.number(),
+  cacheReadTokens: z.number().optional(),
+  cacheWriteTokens: z.number().optional(),
+});
+export type Usage = z.infer<typeof UsageSchema>;
+
 export const ConceptSchema = z.object({
   id: z.string().describe("Stable slug, e.g. 'photosynthesis-light-reactions'."),
   name: z.string(),
@@ -85,6 +95,8 @@ export const CourseSchema = z.object({
     .optional(),
   /** Absent means everything is taught (courses built before focus existed, and fresh ingests). See domain/focus.ts. */
   focus: CourseFocusSchema.optional(),
+  /** The curriculum agent's calls that built the course, for the meter. Absent on courses built before it existed. */
+  usage: z.array(UsageSchema).optional(),
   createdAt: z.string(),
 });
 export type Course = z.infer<typeof CourseSchema>;
@@ -246,6 +258,8 @@ export const ProfileUpdateSchema = z.object({
   held: z.array(ProfileChangeSchema),
   /** The profile before this update, so it can be undone. */
   previous: LearnerProfileSchema,
+  /** The profile pass's call, for the meter. */
+  usage: UsageSchema.optional(),
   /**
    * The course record's notes before this update, when the update changed them (`changes` entries for
    * priorKnowledge, observedGaps and courseGuidance belong to the record of `courseId`). Undo restores them too.
@@ -330,6 +344,17 @@ export const TranscriptTurnSchema = z.object({
       transcriptMs: z.number().optional(),
       /** The learner barged in and the reply was cut short. */
       interrupted: z.boolean().optional(),
+      /** The meter (domain/cost.ts): the model that spoke; the reflect pass's model and tokens; the voice's characters and the seconds listened. */
+      model: z.string().optional(),
+      reflectModel: z.string().optional(),
+      reflectInputTokens: z.number().optional(),
+      reflectCacheReadTokens: z.number().optional(),
+      reflectCacheWriteTokens: z.number().optional(),
+      reflectOutputTokens: z.number().optional(),
+      ttsChars: z.number().optional(),
+      ttsProvider: z.string().optional(),
+      ttsModel: z.string().optional(),
+      sttSeconds: z.number().optional(),
     })
     .optional(),
 });
@@ -386,6 +411,8 @@ export const OutsideClaimSchema = z.object({
   /** What the tutor was asked to tell the learner once the check came back, if anything. */
   followUp: z.string().optional(),
   checkedAt: z.string().optional(),
+  /** The reference checker's call, for the meter. */
+  usage: UsageSchema.optional(),
 });
 export type OutsideClaim = z.infer<typeof OutsideClaimSchema>;
 
@@ -417,7 +444,7 @@ export const SessionSchema = z.object({
   /** General intake: the age band whose questions it starts with (domain/intake.ts), from the grade at creation. */
   intakeBand: z.enum(["A", "B", "C"]).optional(),
   /** An intake that has finished: its record is written in the background, and this says how that went. */
-  extraction: z.object({ status: z.enum(["writing", "done", "failed"]), at: z.string(), error: z.string().optional() }).optional(),
+  extraction: z.object({ status: z.enum(["writing", "done", "failed"]), at: z.string(), error: z.string().optional(), usage: UsageSchema.optional() }).optional(),
   /** Index into the session's concept walk (conceptIds below) of the concept currently being worked. */
   conceptIndex: z.number().int(),
   /**
@@ -441,6 +468,11 @@ export const SessionSchema = z.object({
   retrievedChunkIds: z.array(z.string()).optional(),
   /** The parent's outside-the-material setting when the session was created. Absent on older sessions: "answer". */
   outsideKnowledge: OutsideKnowledgeModeSchema.optional(),
+  /** The parent's session-length limit when the session started (Settings, 3 to 60 minutes; domain/clock.ts). Absent: no clock. */
+  limitMinutes: z.number().int().optional(),
+  /** When the tutor was told two minutes remained, and when it gave the closing reply. */
+  timeWarnedAt: z.string().optional(),
+  timeUpAt: z.string().optional(),
   /** Facts from outside the material that came up, with the reference check's verdicts. */
   outsideClaims: z.array(OutsideClaimSchema).optional(),
   phase: SessionPhaseSchema,
@@ -489,6 +521,8 @@ export const MasteryReportSchema = z.object({
   tutorAnswerGiveaways: z.number().int(),
   /** Copied from the session when the report is written, so the parent sees each outside fact and its check. */
   outsideClaims: z.array(OutsideClaimSchema).optional(),
+  /** The assessor's call, for the meter. */
+  usage: UsageSchema.optional(),
   createdAt: z.string(),
 });
 export type MasteryReport = z.infer<typeof MasteryReportSchema>;

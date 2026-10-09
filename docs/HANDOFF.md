@@ -20,7 +20,9 @@ settings, the OpenAI adapter for the report, the cost notes, the documentation s
 into `main` brings all four as a fast-forward; **the merge is the user's call**. 250 unit tests; typecheck
 clean in both workspaces. Runtime settings on this machine (`data/settings.json`, which wins over `.env`):
 Haiku 5.5 speaks, Sonnet 5.5 takes the notes, Sonnet 5.5 writes the report (the user's decision of 2026-10-09
-after two sessions compared, `docs/COST.md`), Opus 5.5 does the rest; Inworld is the voice. `.env` holds the
+after two sessions compared, `docs/COST.md`), Opus 5.5 does the rest; Inworld is the voice. The product
+assumption is full voice (user, 2026-10-09): typing is for testing and may go. A lesson now runs on the
+parent's clock (Settings, 3 to 60 minutes, default 30) and every call is metered (`docs/COST.md`, the meter). `.env` holds the
 Anthropic, AssemblyAI, Inworld, ElevenLabs and OpenAI keys, and still names the 5 models and the old Hume
 variables, which nothing reads. Saved students: Test Student and Sam (profiled, four course records between
 them) and John (grade 9, no intake yet). The Rome unit (`data/courses/ancient-rome-muemem4s.json`, 31
@@ -165,7 +167,7 @@ Before any commit:
 npm test && npm run typecheck
 ```
 
-250 tests as of 2026-10-09, all pure (no network, no binaries). For the two intakes there is a ready-made
+262 tests as of 2026-10-09, all pure (no network, no binaries). For the two intakes there is a ready-made
 end-to-end check: `npm run personas:intake`, with the server running, plays three scripted students
 (confident, quiet, a bluffer) through the general intake, the course intake and the start of the lesson,
 waits for both records, and prints the transcripts and about twenty checks each (`--only quiet`, `--keep`,
@@ -223,16 +225,19 @@ history and in the docs each entry names.
 
 **User-side**
 
-1. Test in the web app (both servers up, `http://localhost:5173`): add a student on the Students tab and hold
+1. Decide the profile pass's model: replayed on the same two sessions (`npm run profile:compare`), Sonnet 5.5
+   proposed nearly the same revisions as Opus 5.5 at half the cost (`docs/COST.md`); the setting would be a
+   `profileModel` beside the others, one small change. Both models wrote "he" for Sam there (Claude-side 2).
+2. Test in the web app (both servers up, `http://localhost:5173`): add a student on the Students tab and hold
    the intake there; start them on a course from the Courses tab (the lesson opens with the course's
    questions); Focus ticks on the Courses tab; a lesson with "Already read this"; the Progress panel on the
    Reports tab. Then the same by voice in Chrome (the app's browser pane has no microphone): the intake
    hand-over and the passage have never been heard aloud.
-2. Merge when satisfied: `feature/ui-flow` into `main` brings the four stacked branches as a fast-forward.
-3. Decide the hosting, copyright and children's-data line (issue #13) before anyone asks for a login page.
+3. Merge when satisfied: `feature/ui-flow` into `main` brings the four stacked branches as a fast-forward.
+4. Decide the hosting, copyright and children's-data line (issue #13) before anyone asks for a login page.
    Now: turn off AssemblyAI's model training in its dashboard, which needs a paid plan and also gives zero
    retention for streaming (#23), and send the two neutral vendor emails (#18 Inworld, #23 AssemblyAI).
-4. Read the README "What this is (and is not)" section and `docs/ROADMAP.md` in your own voice; they
+5. Read the README "What this is (and is not)" section and `docs/ROADMAP.md` in your own voice; they
    are the product statements a customer or an engineer will read.
 
 **Claude-side, open, in order**
@@ -265,6 +270,12 @@ history and in the docs each entry names.
 
 **Done, newest first** (one line each; the commit and the doc carry the detail)
 
+- 2026-10-09: the session clock (`domain/clock.ts`, `sessionMaxMinutes` 3 to 60, a warning with two minutes
+  left, the closing reply at the limit, the browser ends the session once it is heard; lessons only; the stage, read back through `clockStage`, replaces the phase-and-thread block in the closing reply, leads the final instruction and closes the last user message, because as an `<orchestrator>` directive and then as a final instruction alone it was ignored, 2026-10-09) and the
+  meter (`domain/cost.ts`, `llm/prices.ts`: usage recorded on every turn, report, profile update, intake record,
+  check and course build; `GET /api/sessions/:id/cost`, `GET /api/usage`; cost lines on the lesson panel, the
+  report and each student's card). `scripts/profile-compare.ts` (`npm run profile:compare`) and the Opus-versus-
+  Sonnet replay of the profile pass. Full voice is the product assumption.
 - 2026-10-09: the report model set to Sonnet 5.5 after two sessions compared; the mastery-assessment skill's
   Summaries section made explicit; `scripts/assess-compare.ts` (`npm run assess:compare`); time-to-first-word
   and reasoning tokens on `usage` from both vendor paths; the documentation sweep (`docs/COST.md`).

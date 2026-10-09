@@ -208,6 +208,7 @@ export async function* streamTurn(opts: StreamTurnOptions): AsyncGenerator<strin
     if (silenced && !anyError) break;
   }
 
+  latency.model = opts.spec.model;
   latency.totalMs = Math.round(performance.now() - t0);
   if (latency.ttftMs < 0) latency.ttftMs = latency.totalMs;
   opts.onLatency?.(latency);

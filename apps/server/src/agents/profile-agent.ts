@@ -127,8 +127,11 @@ export function reviseContext(input: ReviseInput): string {
   ].join("\n\n");
 }
 
+/** Token usage of one pass, for a cost line (domain/cost.ts) or an experiment (scripts/profile-compare.ts). */
+export interface ProposeUsage { input_tokens: number; output_tokens: number; cache_read_input_tokens?: number | null; cache_creation_input_tokens?: number | null }
+
 /** One structured-output call: the revised profile, the revised course notes, reasons, and the note for the parent. */
-export async function proposeRevision(input: ReviseInput): Promise<ProfileRevision> {
+export async function proposeRevision(input: ReviseInput, onUsage?: (u: ProposeUsage, model: string) => void): Promise<ProfileRevision> {
   if (!input.learner.profile) throw new Error(`${input.learner.name} has no profile to revise; the intake writes the first one.`);
   const system = buildSystem(profileAgent, []);
   const { message, parsed } = await streamParsed<z.infer<typeof ProfileRevisionSchema>>({
@@ -148,6 +151,7 @@ export async function proposeRevision(input: ReviseInput): Promise<ProfileRevisi
       },
     ],
   });
+  onUsage?.(message.usage as ProposeUsage, profileAgent.model);
   assertNotRefused(message);
   if (message.stop_reason === "max_tokens") throw new Error("The profile revision was cut off at its output limit.");
   if (!parsed) throw new Error("The profile revision returned no parsable output.");

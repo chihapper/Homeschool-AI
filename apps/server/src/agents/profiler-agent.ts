@@ -11,6 +11,7 @@
  */
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { assertNotRefused, streamParsed } from "../llm/client.js";
+import type { SdkUsage } from "../domain/cost.js";
 import { config } from "../config.js";
 import { LearnerProfileExtractionSchema, type Learner, type LearnerProfile, type Session } from "../domain/types.js";
 import { BAND_ORDER, BANDS, gradeBand, PASSAGE, RETELL_PROMPT, type Band } from "../domain/intake.js";
@@ -166,7 +167,7 @@ export function passageReading(): string {
 }
 
 /** Turn the intake transcript into a structured profile (offline, high effort). */
-export async function finalizeProfile(ctx: Pick<ProfilerContext, "session" | "learner">): Promise<LearnerProfile> {
+export async function finalizeProfile(ctx: Pick<ProfilerContext, "session" | "learner">, onUsage?: (u: SdkUsage, model: string) => void): Promise<LearnerProfile> {
   const system = buildSystem({ ...profilerAgent, model: config.model, effort: config.analysisEffort }, [contextBlock(ctx, true)]);
   const transcript = ctx.session.transcript.map((t) => `${t.role === "user" ? ctx.learner.name : "Tutor"}: ${t.content}`).join("\n");
   // Streamed, like the other offline extractions: never lose a long high-effort generation to the request timeout.
@@ -185,6 +186,7 @@ export async function finalizeProfile(ctx: Pick<ProfilerContext, "session" | "le
       },
     ],
   });
+  onUsage?.(message.usage, config.model);
   assertNotRefused(message);
   if (message.stop_reason === "max_tokens") throw new Error("Profile extraction was cut off at the output limit.");
   if (!parsed) throw new Error("Profile extraction returned no parsable output.");

@@ -7,8 +7,9 @@
  * The LLM agents *request* transitions via the `advance` tool; the orchestrator validates them
  * (e.g. no next-concept without recorded evidence) and owns all persistence.
  */
-import { ObservationSchema, type Concept, type Course, type Learner, type Lesson, type MasteryReport, type Observation, type ProfileUpdate, type Session, type SessionKind, type TranscriptTurn } from "../domain/types.js";
+import { ObservationSchema, type Concept, type Course, type Learner, type Lesson, type MasteryReport, type Observation, type ProfileUpdate, type Session, type SessionKind, type TranscriptTurn, type Usage } from "../domain/types.js";
 import { gradeBand, planSitting, selectProbeConcepts, toCourseKnowledge } from "../domain/intake.js";
+import { AFTER_CLOSE, clockCall, wrappingUp } from "../domain/clock.js";
 import { applyRevision, normalizeProfile, studentLevel } from "../domain/profile.js";
 import { proposeRevision } from "../agents/profile-agent.js";
 import type { TurnLatency } from "../llm/client.js";
@@ -22,7 +23,8 @@ import { finalizeProfile, passageReading, profilerTurn, type NextStep } from "..
 import { courseIntakeTurn, extractCourseKnowledge } from "../agents/course-intake-agent.js";
 import { prewarmTutor, reflectTurn, tutorTurn, type AdvanceTarget, type TutorContext } from "../agents/tutor-agent.js";
 import { config } from "../config.js";
-import { assessSession } from "../agents/assessor-agent.js";
+import { assessorAgent, assessSession } from "../agents/assessor-agent.js";
+import { usageRecord } from "../domain/cost.js";
 import { checkOutsideClaim } from "../agents/reference-agent.js";
 import { aboutFaith, mergeFinishedChecks, recordOutsideClaim, SAY_FIRST, settleChecks, spokenFollowUps, startCheck } from "./outside.js";
 import { isEvidence } from "../domain/told.js";
@@ -154,6 +156,8 @@ function startSession(kind: SessionKind, learner: Learner, o: StartOptions): Ses
     retrievalConceptId: retrieval?.conceptId,
     // Read once, like the focus: the tutor's cached prompt states it, so a Settings change applies from the next session.
     outsideKnowledge: config.outsideKnowledge,
+    // The parent's clock, read once like the focus: a lesson closes itself at this many minutes (domain/clock.ts).
+    limitMinutes: config.sessionMaxMinutes,
     phase: "teach",
     pendingDirectives: opening,
   });
@@ -293,6 +297,9 @@ export function applyAdvance(session: Session, course: Course, lesson: Lesson, t
         session.pendingDirectives.push("All concepts in this lesson are done. Wrap up the session.");
         return "OK: that was the last concept. Phase is now wrap-up.";
       }
+      // From the two-minute warning on, the last minutes stay on the idea in hand: a concept opened for one
+      // minute would reach the report as barely touched.
+      if (wrappingUp(session)) return "Refused: the session is in its last two minutes, so it stays on this concept; the next session moves on.";
       session.conceptIndex += 1;
       session.phase = "teach";
       const next = course.concepts.find((c) => c.id === walk[session.conceptIndex]);
@@ -311,6 +318,8 @@ export interface RespondResult {
    * and the phase are current; the session on disk is updated when it settles.
    */
   reflection?: Promise<Session>;
+  /** This reply closed the session because its time was up (domain/clock.ts); the app ends the session next. */
+  timeUp?: boolean;
   /**
    * An intake finished in this reply and the sitting went straight on: `session` is the one that took over (the
    * course intake, or the lesson), and its opening words are part of `text`. Later messages belong to it.
@@ -375,6 +384,21 @@ async function* respondTurn(
   // for joins this turn's directives, so the tutor comes back to it in this reply.
   mergeFinishedChecks(session);
   const { learner, course, lesson } = resolve(session);
+  // The parent's clock (domain/clock.ts): after the closing reply nothing more is said. The marks set here are what
+  // the tutor agent reads back (clockStage): with two minutes left it wraps up the idea in hand; at the limit this
+  // reply closes the session and the app ends it.
+  if (session.timeUpAt) {
+    yield AFTER_CLOSE;
+    return { text: AFTER_CLOSE, session, timeUp: true };
+  }
+  let closing = false;
+  const clock = clockCall(session, new Date());
+  if (clock?.kind === "warn") {
+    session.timeWarnedAt = new Date().toISOString();
+  } else if (clock?.kind === "close") {
+    session.timeUpAt = new Date().toISOString();
+    closing = true;
+  }
   const now = new Date().toISOString();
   if (userText.trim()) session.transcript.push({ role: "user", content: userText.trim(), at: now, expressions });
 
@@ -487,6 +511,12 @@ async function* respondTurn(
         if (last?.latency) {
           last.latency.reflectMs = r.latency.totalMs;
           last.latency.reflectThinkingChars = r.latency.thinkingChars;
+          // For the meter: the reflect pass may run on its own model.
+          last.latency.reflectModel = r.latency.model;
+          last.latency.reflectInputTokens = r.latency.inputTokens;
+          last.latency.reflectCacheReadTokens = r.latency.cacheReadTokens;
+          last.latency.reflectCacheWriteTokens = r.latency.cacheWriteTokens;
+          last.latency.reflectOutputTokens = r.latency.outputTokens;
         }
       } catch (err) {
         console.warn("[reflect] pass failed:", err instanceof Error ? err.message : err);
@@ -537,7 +567,7 @@ async function* respondTurn(
     });
     reflections.set(sessionId, reflection);
   }
-  return { text: result.text, session, reflection };
+  return { text: result.text, session, reflection, ...(closing ? { timeUp: true } : {}) };
 }
 
 /** Latency summary across a session's assistant turns (for the API and the chat CLI). Interrupted turns are skipped. */
@@ -605,8 +635,9 @@ export async function endSession(sessionId: string): Promise<{ session: Session;
   mergeFinishedChecks(session);
   sessions.put(session);
   if (!course || !lesson || session.transcript.length < 2) return { session };
-  const report = await assessSession({ session, learner, course, lesson, knowledge: knowledgeFor(learner.id, course.id) });
-  reports.put({ ...report, id: session.id });
+  let usage: Usage | undefined;
+  const report = await assessSession({ session, learner, course, lesson, knowledge: knowledgeFor(learner.id, course.id), onUsage: (u) => { usage = usageRecord(assessorAgent.model, u); } });
+  reports.put({ ...report, id: session.id, ...(usage ? { usage } : {}) });
   // The profile pass runs after the report is saved, in the background: the parent is waiting on the report,
   // and the revision lands on the record when it is done. Never rejects; a failure is logged.
   const profileUpdate = learner.profile ? reviseProfile(learner.id, course, session, report) : undefined;
@@ -663,22 +694,23 @@ export function writeIntakeRecord(sessionId: string): Promise<void> {
     const session = sessions.require(sessionId);
     const learner = learners.require(learnerId);
     const settle = (extraction: NonNullable<Session["extraction"]>): void => void sessions.put({ ...sessions.require(sessionId), extraction });
+    let usage: Usage | undefined; // the extraction call, for the meter
     try {
       if (session.kind === "course-intake") {
         const course = courses.require(session.courseId ?? "");
         const asked = session.probeConceptIds ?? [];
         const concepts = asked.map((id) => course.concepts.find((c) => c.id === id)).filter((c): c is Concept => Boolean(c));
-        const extraction = await extractCourseKnowledge({ session, learner, course, concepts });
+        const extraction = await extractCourseKnowledge({ session, learner, course, concepts }, (u, model) => { usage = usageRecord(model, u); });
         const at = new Date().toISOString();
         // Read again: a profile pass may have added notes while this was being written.
         courseKnowledge.put(toCourseKnowledge(extraction, { id: knowledgeId(learnerId, course.id), learnerId, courseId: course.id, probeConceptIds: asked, sessionId, at }, knowledgeFor(learnerId, course.id)));
       } else {
         // Normalised like every later revision: no repeats, and at most six guidance items (an intake once wrote eleven).
-        const profile = normalizeProfile(await finalizeProfile({ session, learner }));
+        const profile = normalizeProfile(await finalizeProfile({ session, learner }, (u, model) => { usage = usageRecord(model, u); }));
         const { profilePending: _written, ...fresh } = learners.require(learnerId);
         learners.put({ ...fresh, profile });
       }
-      settle({ status: "done", at: new Date().toISOString() });
+      settle({ status: "done", at: new Date().toISOString(), ...(usage ? { usage } : {}) });
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
       console.warn(`[intake] writing the record of session ${sessionId} failed:`, error);
@@ -749,11 +781,14 @@ async function revise(learnerId: string, course: Course, session: Session, repor
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
       .slice(-3)
       .map((r) => ({ report: r, course: r.courseId ? courses.get(r.courseId) : undefined }));
-    const revision = await proposeRevision({ learner, course, session, report, knowledge: knowledgeFor(learnerId, course.id), priorReports });
+    let usage: Usage | undefined;
+    const revision = await proposeRevision({ learner, course, session, report, knowledge: knowledgeFor(learnerId, course.id), priorReports }, (u, model) => { usage = usageRecord(model, u); });
     // Read both records again: the pass took a minute or two, and an undo or a course intake may have landed meanwhile.
     const fresh = learners.require(learnerId);
     if (!fresh.profile) return undefined;
     const { learner: revised, course: notes, update } = applyRevision(fresh, revision, { sessionId: session.id, courseId: course.id, courseTitle: course.title, at: new Date().toISOString() }, knowledgeFor(learnerId, course.id));
+    // The update object is the one in the saved history, so the meter's record rides along.
+    if (update && usage) update.usage = usage;
     learners.put(revised);
     if (notes) putCourseNotes(learnerId, course.id, notes);
     return update;

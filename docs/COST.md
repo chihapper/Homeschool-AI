@@ -85,8 +85,22 @@ matched Opus level for level on both sessions at half the cost, in 35 to 45 s, a
 further prompting work. Sol at medium effort stays available as a second opinion; Luna is not the report a
 parent reads.
 
-The profile pass after the report (Opus 5.5) reads the two records, the transcript and the report; an
-estimate, not a measurement: a tenth to a fifth of a dollar.
+The profile pass after the report reads the two records, the transcript and the report. Measured 2026-10-09 by
+replaying it on the same two sessions with each model, nothing saved (`npm run profile:compare`):
+
+| Profile pass | Rome session (23 turns, 3 earlier reports) | Plants session (51 turns, first ever) |
+|---|---|---|
+| Opus 5.5, high | 29 s, $0.11; saw that this report had already been reflected and changed nothing | 56 s, $0.17; 21 changes |
+| Sonnet 5.5, high | 21 s, $0.06; re-proposed the two slow-field changes the last update had held | 45 s, $0.09; 24 changes |
+
+On the first-ever session the two proposals overlap almost entry for entry: the same removals, the same new
+knowledge and gaps quoted in the child's words, the same three course-guidance items; Sonnet added two more
+gaps (the sugar's name needing a hint, "stomata" never said). On the Rome rerun Opus noticed the report had
+already produced an update and proposed nothing, where Sonnet treated it as new evidence; a live pass never
+sees the same report twice, so that is a point to Opus's reading, not a fault that would show in use. Both
+wrote "he" for Sam, whose records state no gender: the pronoun check does not cover this pass yet (handoff).
+Sonnet does the job at about half the cost. The user decides whether to switch the profile pass; the setting
+would be a `profileModel` beside the others.
 
 ## Where the money has gone so far
 
@@ -108,3 +122,22 @@ Estimates from the saved files; the development sessions' own runs are not in th
 2. Haiku 5.5 speaking, Sonnet 5.5 taking notes: done 2026-10-08.
 3. Fewer harness runs, each quoted first.
 4. The profile pass on Sonnet 5.5: untested; the same shape of saving as the assessor.
+
+## The meter (built 2026-10-09)
+
+Every call records what it used, where it is made, and `domain/cost.ts` prices it from `llm/prices.ts`
+(list prices, dated in the file): each tutor turn's `latency` carries the speaking call's model and tokens,
+the reflect pass's, the characters the voice spoke and the seconds the transcriber listened; a report, a
+profile update, an intake's record write, a reference check and a course build carry their own `usage`.
+A model or voice with no price on file is named instead of guessed. Where it shows: the lesson panel
+("Cost so far"), the report ("This session cost about..."), each student's card ("This month: N lessons, M
+minutes, about $x"), and the API (`GET /api/sessions/:id/cost`, `GET /api/usage?month=YYYY-MM`, which also
+prices each course build). Sessions recorded before the meter show "a model not recorded" for their turns.
+Not metered yet: page scans read by the model at ingest (`ingest/ocr.ts`).
+
+**The assumption is full voice.** The user's product decision (2026-10-09): every lesson is spoken, typing is
+for testing and may go. A 20-turn voice lesson is about $0.65 to $0.80 today; the monthly figures above
+should be read at the voice rate, so a typical child at twelve lessons is $8 to $10 and a heavy one at twenty
+is $13 to $16. Two things the parent can set that bound a session: the session length (Settings, 3 to 60
+minutes; the tutor wraps up with two minutes left and says goodbye at the limit, after which the app ends
+the session) and, later, a monthly allowance read from the same meter.

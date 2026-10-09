@@ -13,6 +13,7 @@ import { BAND_ORDER, BANDS, PASSAGE, RETELL_PROMPT } from "../domain/intake.js";
 import { CourseFocusSchema } from "../domain/types.js";
 import { sanitizeFocus } from "../domain/focus.js";
 import { buildProgress } from "../domain/progress.js";
+import { courseBuildCost, monthlyUsage, sessionCost } from "../domain/cost.js";
 import { courseKnowledge, courses, knowledgeFor, knowledgeId, knowledgeOf, learners, putCourseNotes, reports, sessions } from "../store/index.js";
 import { activeTtsProvider, config, getSettings, MODEL_OPTIONS, REPO_ROOT, resetSettings, RuntimeSettingsSchema, ttsModelLabel, ttsVoiceLabel, updateSettings } from "../config.js";
 import { undoProfileUpdate } from "../domain/profile.js";
@@ -438,6 +439,19 @@ export function registerApiRoutes(app: FastifyInstance): void {
   );
   app.post("/api/sessions", async (req) => createSession(SessionBody.parse(req.body)));
   app.get("/api/sessions/:id", async (req: FastifyRequest<{ Params: { id: string } }>) => getSession(req.params.id));
+  /** What one session has cost so far, with its report and profile pass once they exist (domain/cost.ts). */
+  app.get("/api/sessions/:id/cost", async (req: FastifyRequest<{ Params: { id: string } }>) => {
+    const session = getSession(req.params.id);
+    const learner = learners.get(session.learnerId);
+    return sessionCost(session, { report: reports.get(session.id), update: learner?.profileHistory?.find((u) => u.sessionId === session.id) });
+  });
+  /** One month's use per student (?month=YYYY-MM, default this month), and what each course build cost. */
+  app.get("/api/usage", async (req: FastifyRequest<{ Querystring: { month?: string } }>) => {
+    const asked = req.query.month ?? "";
+    const month = /^\d{4}-\d{2}$/.test(asked) ? asked : new Date().toISOString().slice(0, 7);
+    const use = monthlyUsage(month, sessions.list(), reports.list(), learners.list());
+    return { ...use, courses: courses.list().map((c) => ({ courseId: c.id, title: c.title, ...courseBuildCost(c) })) };
+  });
   app.get("/api/sessions/:id/latency", async (req: FastifyRequest<{ Params: { id: string } }>) => latencySummary(getSession(req.params.id)));
   app.delete("/api/sessions/:id", async (req: FastifyRequest<{ Params: { id: string } }>) => {
     sessions.require(req.params.id);
@@ -464,7 +478,7 @@ export function registerApiRoutes(app: FastifyInstance): void {
       // stream; the next turn waits for them anyway (settleReflection).
       const spoken = [...r.value.session.transcript].reverse().find((t) => t.role === "assistant");
       // `sessionId` is the session that answered: after an intake's hand-over it is the one that took over, and the browser follows it.
-      reply.raw.write(`data: ${JSON.stringify({ done: true, sessionId: r.value.session.id, handover: r.value.handover ?? null, phase: r.value.session.phase, conceptIndex: r.value.session.conceptIndex, latency: spoken?.latency ?? null })}\n\n`);
+      reply.raw.write(`data: ${JSON.stringify({ done: true, timeUp: r.value.timeUp ?? false, sessionId: r.value.session.id, handover: r.value.handover ?? null, phase: r.value.session.phase, conceptIndex: r.value.session.conceptIndex, latency: spoken?.latency ?? null })}\n\n`);
       const settled = await r.value.reflection?.catch(() => undefined);
       if (settled) {
         const last = [...settled.transcript].reverse().find((t) => t.role === "assistant");

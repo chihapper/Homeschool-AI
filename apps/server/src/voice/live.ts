@@ -105,6 +105,8 @@ interface Conn {
   eleven: { key: string; requests: StitchedRequest[] };
   /** Inworld's socket for this session, opened when the student starts talking; each reply is one context on it. */
   inworld: InworldConnection | null;
+  /** When the transcriber started listening for the current student turn (performance.now()), for the meter. */
+  listenStartedAt: number;
   closed: boolean;
 }
 
@@ -160,6 +162,7 @@ export function registerLiveVoiceRoutes(app: FastifyInstance): void {
       micWanted: false,
       eleven: { key: "", requests: [] },
       inworld: null,
+      listenStartedAt: 0,
       closed: false,
     };
     const log = req.log;
@@ -180,7 +183,7 @@ export function registerLiveVoiceRoutes(app: FastifyInstance): void {
     });
 
     // ---- the tutor turn: text streams to the browser and, sentence by sentence, to the synthesizer ----
-    const runTurn = async (text: string, t0: number, transcriptMs: number): Promise<void> => {
+    const runTurn = async (text: string, t0: number, transcriptMs: number, sttSeconds = 0): Promise<void> => {
       if (conn.turn) await interrupt();
       const abort = new AbortController();
       const ms = (): number => Math.round(performance.now() - t0);
@@ -202,8 +205,12 @@ export function registerLiveVoiceRoutes(app: FastifyInstance): void {
         let fullText = "";
         let audioStarted = false;
         let ttsErrorShown = false;
+        /** Characters sent to the voice this turn, for the meter. */
+        let ttsChars = 0;
         /** The tutor's bookkeeping pass, started once the reply was composed. */
         let reflection: Promise<unknown> | undefined;
+        /** The reply closed the session on the parent's clock; the browser ends the session once the audio is out. */
+        let timeUp = false;
 
         const producer = (async () => {
           try {
@@ -221,6 +228,7 @@ export function registerLiveVoiceRoutes(app: FastifyInstance): void {
             // Hand the reflect pass to the turn so it can report when the notes landed; the learner is
             // listening to the reply while it runs.
             reflection = r.value.reflection;
+            timeUp = Boolean(r.value.timeUp);
             return r.value.session;
           } finally {
             q.push(null);
@@ -269,6 +277,7 @@ export function registerLiveVoiceRoutes(app: FastifyInstance): void {
               if (provider === "inworld") {
                 const text = inworldText(batch, lastSent, inworldPause);
                 if (!text) continue;
+                ttsChars += batchText(batch).length;
                 lastSent = batch[batch.length - 1];
                 marks.tts_requests = (marks.tts_requests ?? 0) + 1;
                 if (streamFailure) {
@@ -295,6 +304,7 @@ export function registerLiveVoiceRoutes(app: FastifyInstance): void {
               if (provider === "elevenlabs") {
                 const text = batchText(batch);
                 if (!text) continue;
+                ttsChars += text.length;
                 // Stitching ids only mean something for the voice and model that produced them.
                 const key = `${config.elevenVoiceId}|${config.elevenModel}`;
                 if (conn.eleven.key !== key) conn.eleven = { key, requests: [] };
@@ -379,11 +389,17 @@ export function registerLiveVoiceRoutes(app: FastifyInstance): void {
           }
         }
         const interrupted = abort.signal.aborted;
-        send({ type: "assistant_done", text: fullText, phase, conceptIndex, interrupted, sessionId: conn.sessionId });
+        send({ type: "assistant_done", text: fullText, phase, conceptIndex, interrupted, sessionId: conn.sessionId, timeUp });
         send({ type: "latency", marks });
         if (!interrupted && fullText) {
           try {
-            annotateLastTurn(conn.sessionId, { transcriptMs, ...(audioStarted ? { firstAudioMs: marks.first_audio } : {}) });
+            annotateLastTurn(conn.sessionId, {
+              transcriptMs,
+              ...(audioStarted ? { firstAudioMs: marks.first_audio } : {}),
+              // The meter: what the voice spoke and the transcriber heard this turn.
+              ...(ttsChars ? { ttsChars, ttsProvider: provider, ttsModel: provider === "elevenlabs" ? config.elevenModel : config.inworldModel } : {}),
+              ...(sttSeconds ? { sttSeconds: Math.round(sttSeconds * 10) / 10 } : {}),
+            });
           } catch (err) {
             log.warn({ err }, "could not annotate turn latency");
           }
@@ -441,7 +457,7 @@ export function registerLiveVoiceRoutes(app: FastifyInstance): void {
       if (finalText && finalText.trim()) {
         send({ type: "transcript", text: finalText });
         // Streaming transcription: the transcript is ready at end of speech, so transcriptMs is ~0.
-        await runTurn(finalText, endOfSpeechAt, 0);
+        await runTurn(finalText, endOfSpeechAt, 0, conn.listenStartedAt ? (endOfSpeechAt - conn.listenStartedAt) / 1000 : 0);
       } else {
         send({ type: "info", message: "I didn't catch that. Try again?" });
       }
@@ -456,6 +472,7 @@ export function registerLiveVoiceRoutes(app: FastifyInstance): void {
       }
       conn.sttConnecting = true;
       conn.sttCancelled = false;
+      conn.listenStartedAt = performance.now();
       try {
         const stt = await AssemblyAIStream.connect({
           apiKey: config.voice.assemblyAiKey,

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { api, fmtDate, PROVIDER_NAME, type Course, type CourseKnowledge, type Depth, type Health, type IntakePassage, type Learner, type ProfileChange, type Session, type StartingEstimate } from "../api";
+import { api, fmtDate, fmtUsd, PROVIDER_NAME, type Course, type CourseKnowledge, type Depth, type Health, type IntakePassage, type Learner, type ProfileChange, type Session, type StartingEstimate, type UsageMonth } from "../api";
 import { Conversation, type Mode } from "../components/Conversation";
 import { VoiceClient } from "../voice";
 
@@ -239,6 +239,11 @@ export function LearnersPage({ learners, courses, knowledge, health, onChange, o
   const [age, setAge] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [passage, setPassage] = useState<IntakePassage | null>(null);
+  /** This month's use per student, from the meter. */
+  const [usage, setUsage] = useState<UsageMonth | null>(null);
+  useEffect(() => {
+    api.usage().then(setUsage).catch(() => setUsage(null));
+  }, [learners]);
   /** The student whose intake area is open, if any. Adding a student opens it for them. */
   const [intakeFor, setIntakeFor] = useState<string | null>(openIntakeFor ?? null);
   const area = useRef<HTMLDivElement>(null);
@@ -393,6 +398,14 @@ export function LearnersPage({ learners, courses, knowledge, health, onChange, o
             ) : (
               needsIntake && <p className="muted">{l.name} has not had the intake conversation yet, so the tutor does not know how they like to work. Start it here when {l.name} is with you. Lessons can begin without it; until then the tutor works from the course and your notes alone.</p>
             )}
+            {(() => {
+              const m = usage?.learners.find((u) => u.learnerId === l.id);
+              return m ? (
+                <p className="muted small" title="Every model and voice call this month at list prices (docs/COST.md)">
+                  This month: {m.lessons} lesson{m.lessons === 1 ? "" : "s"}{m.sessions > m.lessons ? ` and ${m.sessions - m.lessons} intake${m.sessions - m.lessons === 1 ? "" : "s"}` : ""}, {m.minutes} minutes{m.listenedMinutes ? ` (${m.listenedMinutes} spoken)` : ""}, about {fmtUsd(m.usd)} in model and voice calls{m.unpriced.length ? ` (no price on file for ${m.unpriced.join(", ")})` : ""}.
+                </p>
+              ) : null;
+            })()}
             <ParentNotes key={`${l.id}-${l.parentNotes ?? ""}`} learner={l} onChange={onChange} />
             <h4>What {l.name} knows, by course</h4>
             {records.length === 0 && <p className="muted small">Nothing yet. A course appears here after {l.name}'s first lesson on it.</p>}

@@ -28,6 +28,25 @@ describe("the tutor's turn is split into speaking and reflecting", () => {
     expect(reflect).toMatch(/advance/);
   });
 
+  it("closes on the parent's clock: the phase block gives way and the final instruction asks for no question; the warning leads the wrap-up", () => {
+    const closing: Session = { ...session, timeUpAt: "2026-10-09T15:30:05.000Z", pendingDirectives: ["Moving on to the next concept: X."] };
+    const blocks = buildTutorContext({ ...ctx, session: closing }, "speak");
+    expect(blocks.find((b) => b.startsWith("Phase: "))).toMatch(/^Phase: closing/);
+    expect(blocks.some((b) => b.startsWith("<orchestrator>"))).toBe(false);
+    expect(blocks.at(-1)).toMatch(/Ask no question/);
+    expect(blocks.at(-1)).not.toMatch(/single question/);
+    expect(buildTutorContext({ ...ctx, session: closing }, "reflect").at(-1)).toMatch(/do not call advance or open_thread/);
+
+    const warned: Session = { ...session, timeWarnedAt: "2026-10-09T15:28:10.000Z" };
+    const speak = buildTutorContext({ ...ctx, session: warned }, "speak").at(-1) ?? "";
+    expect(speak).toMatch(/^This session has about two minutes left: tell the learner/);
+    expect(speak).toMatch(/single question/); // the wrap-up still ends in a question; only the close does not
+    const spoken: Session = { ...warned, transcript: [{ role: "assistant", content: "Two minutes left.", at: "2026-10-09T15:28:14.000Z" }] };
+    expect(buildTutorContext({ ...ctx, session: spoken }, "speak").at(-1)).toMatch(/^This session is in its last two minutes/);
+    // Intakes are not clocked, so their prompts never change.
+    expect(buildTutorContext({ ...ctx, session: { ...closing, kind: "course-intake" } }, "speak").at(-1)).toMatch(/single question/);
+  });
+
   it("carries one open thread from the reflect pass into the next spoken turn", () => {
     const s: Session = { ...session, pendingDirectives: ["Now in ASSESS: ask for demonstrations."] };
     expect(setOpenThread(s, "  He answered around what the fertilizer\n  actually does.  ")).toMatch(/The open thread is now/);

@@ -9,7 +9,8 @@
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
 import { config } from "../config.js";
-import type { OutsideClaim } from "../domain/types.js";
+import type { OutsideClaim, Usage } from "../domain/types.js";
+import { usageRecord } from "../domain/cost.js";
 import { assertNotRefused, reasoningParams, streamParsed } from "../llm/client.js";
 import { createWikipediaClient, referenceBrief, renderBrief, sectionText, type WikiArticle, type WikipediaClient } from "../reference/wikipedia.js";
 import { buildSystem, type AgentSpec } from "./base.js";
@@ -54,7 +55,7 @@ export interface CheckInput {
  * What a check found, in the fields it fills on the OutsideClaim, plus the sentence the tutor would say about it
  * next turn. The orchestrator decides whether that sentence is owed (orchestrator/outside.ts, followUpFor).
  */
-export type CheckOutcome = Pick<OutsideClaim, "status" | "statusNote" | "verdict" | "explanation" | "evidence" | "source"> & { sayToLearner?: string };
+export type CheckOutcome = Pick<OutsideClaim, "status" | "statusNote" | "verdict" | "explanation" | "evidence" | "source" | "usage"> & { sayToLearner?: string };
 
 const STANCE_FOR_CHECKER: Record<OutsideClaim["tutorStance"], string> = {
   confirmed: "that it is right",
@@ -66,7 +67,7 @@ const STANCE_FOR_CHECKER: Record<OutsideClaim["tutorStance"], string> = {
 export interface CheckDeps {
   wiki: WikipediaClient;
   /** One look at the reference. `final` means read-more is no longer allowed. */
-  judge: (input: CheckInput, reference: string, final: boolean) => Promise<CheckVerdict>;
+  judge: (input: CheckInput, reference: string, final: boolean) => Promise<CheckVerdict & { usage?: Usage }>;
 }
 
 /** Collapse spacing and quote marks, so a quotation copied across a line break still matches. */
@@ -102,12 +103,18 @@ export async function checkClaim(input: CheckInput, deps: CheckDeps): Promise<Ch
 
   const brief = referenceBrief(articles, input.claim);
   let reference = renderBrief(brief);
+  const spent: Usage[] = []; // one or two judge calls, for the meter
   let v = await deps.judge(input, reference, false);
+  if (v.usage) spent.push(v.usage);
   if (v.verdict === "read-more") {
     const extra = articles.map((a) => sectionText(a, v.sectionToRead)).find(Boolean);
     if (extra) reference = renderBrief(brief, extra);
     v = await deps.judge(input, reference, true);
+    if (v.usage) spent.push(v.usage);
   }
+  const usage = spent.length
+    ? spent.reduce((a, b) => ({ model: a.model, inputTokens: a.inputTokens + b.inputTokens, outputTokens: a.outputTokens + b.outputTokens, cacheReadTokens: (a.cacheReadTokens ?? 0) + (b.cacheReadTokens ?? 0), cacheWriteTokens: (a.cacheWriteTokens ?? 0) + (b.cacheWriteTokens ?? 0) }))
+    : undefined;
   // Still asking to read more after the second look: the articles did not settle it.
   const verdict = v.verdict === "read-more" ? "not-found" : v.verdict;
   const explanation = v.explanation.trim() || (v.verdict === "read-more" ? "The articles did not settle it." : undefined);
@@ -117,6 +124,7 @@ export async function checkClaim(input: CheckInput, deps: CheckDeps): Promise<Ch
       status: "not-checked",
       statusNote: "A matter of faith, values or interpretation, which is left to the family's material and the parent.",
       explanation,
+      ...(usage ? { usage } : {}),
     };
   }
   const article = articles.find((a) => a.title === v.articleTitle) ?? articles[0];
@@ -129,11 +137,12 @@ export async function checkClaim(input: CheckInput, deps: CheckDeps): Promise<Ch
     evidence: quoted,
     source: { title: article.title, url: article.url, revisionId: article.revisionId, quality: article.quality },
     ...(v.sayToLearner.trim() ? { sayToLearner: v.sayToLearner.trim() } : {}),
+    ...(usage ? { usage } : {}),
   };
 }
 
 /** The real judge: one structured-output call to Claude. */
-export async function claudeJudge(input: CheckInput, reference: string, final: boolean): Promise<CheckVerdict> {
+export async function claudeJudge(input: CheckInput, reference: string, final: boolean): Promise<CheckVerdict & { usage?: Usage }> {
   const model = referenceAgent.model;
   const { output_config: effortConfig, ...thinking } = reasoningParams(model, referenceAgent.effort) as { output_config?: Record<string, unknown> };
   const system = buildSystem(referenceAgent, []);
@@ -166,7 +175,7 @@ export async function claudeJudge(input: CheckInput, reference: string, final: b
   assertNotRefused(message);
   if (message.stop_reason === "max_tokens") throw new Error("The check was cut off at its output limit.");
   if (!parsed) throw new Error("The check returned no verdict.");
-  return parsed;
+  return { ...parsed, usage: usageRecord(model, message.usage) };
 }
 
 let client: WikipediaClient | undefined;

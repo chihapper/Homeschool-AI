@@ -14,6 +14,16 @@ function session(over: Partial<Session> = {}): Session {
 const taught = (conceptId: string) => ({ at: "", conceptId, kind: "partial" as const, evidence: "said something", note: "" });
 
 describe("applyAdvance", () => {
+  it("holds a move to the next concept from the two-minute warning on, but still lets the last concept wrap up", () => {
+    const s = session({ phase: "assess", observations: [taught("a"), taught("a")], timeWarnedAt: "2026-10-09T15:28:00.000Z" });
+    expect(applyAdvance(s, course, lesson, "next-concept", "r")).toMatch(/^Refused: the session is in its last two minutes/);
+    expect(s.conceptIndex).toBe(0);
+    expect(s.phase).toBe("assess");
+    const last = session({ phase: "assess", conceptIndex: 1, observations: [taught("b"), taught("b")], timeWarnedAt: "2026-10-09T15:28:00.000Z" });
+    expect(applyAdvance(last, course, lesson, "next-concept", "r")).toMatch(/^OK: that was the last concept/);
+    expect(last.phase).toBe("wrap-up");
+  });
+
   it("walks teach -> inquire -> assess", () => {
     const s = session({ observations: [taught("a")] });
     expect(applyAdvance(s, course, lesson, "assess", "r")).toMatch(/^OK/); // teach -> assess allowed once something is recorded

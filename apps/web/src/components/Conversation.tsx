@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, fmtMs, PROVIDER_NAME, summarizeLatency, type Course, type Health, type Learner, type Report, type Session, type Turn } from "../api";
+import { api, fmtMs, fmtUsd, PROVIDER_NAME, summarizeLatency, type Course, type Health, type Learner, type Report, type Session, type SessionCost, type Turn } from "../api";
 import type { ReadyMessage, VoiceClient, VoiceState } from "../voice";
 
 /** How the person at the screen talks to the tutor. Text needs only an Anthropic key; voice needs the keys named in Settings. */
@@ -81,6 +81,11 @@ export function Conversation({ session, voice, courses, learners, health, onSess
   const autoListenRef = useRef(true);
   const [lastMarks, setLastMarks] = useState<Record<string, number> | null>(null);
   const [voiceInfo, setVoiceInfo] = useState<ReadyMessage | null>(voice?.ready ?? null);
+  /** The parent's clock ran out and the tutor gave its closing reply: the session ends once the words are out. */
+  const [timeUp, setTimeUp] = useState(false);
+  /** The meter's running total for this session, refreshed after every turn. */
+  const [cost, setCost] = useState<SessionCost | null>(null);
+  const [now, setNow] = useState(() => Date.now());
   const bottom = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLInputElement>(null);
   // The page may pass a new callback on every render; the voice handlers are attached once and read the latest.
@@ -106,6 +111,20 @@ export function Conversation({ session, voice, courses, learners, health, onSess
   useEffect(() => {
     if (!busy && mode === "text" && !finished) input.current?.focus();
   }, [busy, mode, finished]);
+
+  useEffect(() => {
+    if (variant !== "lesson") return;
+    api.sessionCost(session.id).then(setCost).catch(() => {});
+  }, [session.id, session.transcript.length, variant]);
+
+  // The clock on screen, one tick a second while the session runs on a limit.
+  useEffect(() => {
+    if (!session.limitMinutes || finished) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [session.limitMinutes, finished]);
+  const secondsLeft = session.limitMinutes ? Math.max(0, Math.round(session.limitMinutes * 60 - (now - new Date(session.startedAt).getTime()) / 1000)) : undefined;
+  const clockLabel = secondsLeft === undefined ? null : `${Math.floor(secondsLeft / 60)}:${String(secondsLeft % 60).padStart(2, "0")} left`;
 
   const refreshSession = useCallback(async (id: string): Promise<Session> => {
     const s = await api.session(id);
@@ -141,6 +160,7 @@ export function Conversation({ session, voice, courses, learners, health, onSess
       }),
       voice.on("done", (m) => {
         if (m.sessionId) active = m.sessionId;
+        if (m.timeUp) setTimeUp(true);
         refreshSession(active)
           .catch((e) => setErr((e as Error).message))
           .finally(() => setPending(null));
@@ -194,6 +214,7 @@ export function Conversation({ session, voice, courses, learners, health, onSess
       }
       // An intake finished in this reply and the sitting went straight on: show the session that took over.
       if (r.value.handover) setInfo(HANDOVER_NOTE[r.value.handover.kind] ?? null);
+      if (r.value.timeUp) setTimeUp(true);
       sid = r.value.sessionId;
     } catch (e) {
       setErr((e as Error).message);
@@ -246,6 +267,17 @@ export function Conversation({ session, voice, courses, learners, health, onSess
     setPartial("");
     onLeave();
   };
+
+  // Time is up: the tutor has said goodbye. In text the session ends at once; in voice, once the goodbye has been heard.
+  const endedByClock = useRef(false);
+  useEffect(() => {
+    if (!timeUp || endedByClock.current || variant !== "lesson") return;
+    if (mode === "voice" && vstate !== "idle") return;
+    endedByClock.current = true;
+    setInfo("Time is up. The tutor has closed the session; the report is on its way.");
+    void end();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timeUp, vstate, mode]);
 
   // ---------------------------------------------------------------------------------------------------------
   const lat = summarizeLatency(session.transcript);
@@ -317,6 +349,7 @@ export function Conversation({ session, voice, courses, learners, health, onSess
               <span className="muted">Concept {session.conceptIndex + 1} of {walk.length}{walk.length < lesson.conceptIds.length ? ` kept (of ${lesson.conceptIds.length})` : ""}: <strong>{conceptName(currentConceptId)}</strong></span>
             )}
             {mode === "voice" && !finished && <span className={`pill vs-${vstate}`}>{vstate}</span>}
+            {clockLabel && !finished && <span className={`pill${timeUp ? " vs-listening" : secondsLeft !== undefined && secondsLeft <= 120 ? " vs-thinking" : ""}`} title="The session length set in Settings">{timeUp ? "time is up" : clockLabel}</span>}
             <span className="muted">{learner?.name}{course ? ` · ${course.title}` : ""}</span>
           </div>
           <div className="row">
@@ -377,6 +410,12 @@ export function Conversation({ session, voice, courses, learners, health, onSess
                 <tr><td>cache hit rate</td><td>{Math.round(lat.cacheHitRate * 100)}%</td></tr>
               </tbody>
             </table>
+            {cost && (
+              <p className="muted small" title="List prices for the model and voice calls this session has made so far (docs/COST.md)">
+                Cost so far about <strong>{fmtUsd(cost.total)}</strong>: tutor {fmtUsd(cost.speak)}, notes {fmtUsd(cost.reflect)}{cost.voice ? `, voice ${fmtUsd(cost.voice)}` : ""}{cost.checks ? `, checks ${fmtUsd(cost.checks)}` : ""}
+                {cost.unpriced.length ? ` (no price on file for ${cost.unpriced.join(", ")})` : ""}
+              </p>
+            )}
             {health && <p className="muted small">Tutor <code>{health.tutorModel}</code> @ {health.tutorEffort} · {health.tutorThinking}</p>}
             {mode === "voice" && voiceInfo && (
               <p className="muted small">

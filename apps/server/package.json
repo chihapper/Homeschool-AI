@@ -14,7 +14,8 @@
     "chat": "tsx src/cli/chat.ts",
     "doctor": "tsx src/cli/doctor.ts",
     "personas:intake": "tsx scripts/intake-personas.ts",
-    "assess:compare": "tsx scripts/assess-compare.ts"
+    "assess:compare": "tsx scripts/assess-compare.ts",
+    "profile:compare": "tsx scripts/profile-compare.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.125.0",

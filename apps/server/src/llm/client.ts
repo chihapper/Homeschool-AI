@@ -75,6 +75,17 @@ export interface TurnLatency {
   transcriptMs?: number;
   /** The learner barged in; the reply was cut short and what was spoken is what the transcript holds. */
   interrupted?: boolean;
+  /** The meter (domain/cost.ts): the model that spoke, the reflect pass's model and tokens, the voice's characters and the seconds listened. */
+  model?: string;
+  reflectModel?: string;
+  reflectInputTokens?: number;
+  reflectCacheReadTokens?: number;
+  reflectCacheWriteTokens?: number;
+  reflectOutputTokens?: number;
+  ttsChars?: number;
+  ttsProvider?: string;
+  ttsModel?: string;
+  sttSeconds?: number;
 }
 
 /**

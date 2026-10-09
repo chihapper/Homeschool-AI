@@ -17,7 +17,8 @@
     "chat": "npm run chat -w apps/server --",
     "doctor": "npm run doctor -w apps/server --",
     "personas:intake": "npm run personas:intake -w apps/server --",
-    "assess:compare": "npm run assess:compare -w apps/server --"
+    "assess:compare": "npm run assess:compare -w apps/server --",
+    "profile:compare": "npm run profile:compare -w apps/server --"
   },
   "engines": {
     "node": ">=20"

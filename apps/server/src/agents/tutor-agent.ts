@@ -37,6 +37,7 @@ import { walkedConceptIds } from "../domain/focus.js";
 import { DEPTH_LABEL, depthOf } from "../domain/profile.js";
 import type { CourseKnowledge, StartingEstimate } from "../domain/types.js";
 import { toldFigures } from "../domain/told.js";
+import { CLOSE_GUIDANCE, CLOSE_INSTRUCTION, CLOSE_PROMPT, CLOSE_REFLECT_NOTE, clockStage, WRAP_UP_PROMPT, WRAP_UP_REFLECT_NOTE, WRAP_UP_THREAD_NOTE, wrapUpInstruction } from "../domain/clock.js";
 
 /**
  * Output caps for the two calls of a turn. `max_tokens` covers thinking as well as words (on every model since
@@ -293,9 +294,18 @@ export function buildTutorContext(ctx: TutorContext, mode: "speak" | "reflect" =
 
   // The phase is what kind of work this turn does; the thread is what the work is on. One dialogue, so
   // they are given together rather than as competing instructions.
+  // The parent's clock (domain/clock.ts): from the two-minute warning the reply wraps up the idea in hand, and at
+  // the limit it closes the session. The stage replaces the phase-and-thread block, leads the final instruction and
+  // (in tutorTurn) closes the last user message. All three: as an <orchestrator> directive, and then as the final
+  // instruction alone, the same words lost to the thread ("holding them to it gently is the whole method") and the
+  // closing reply pressed the open question instead of closing (2026-10-09, Haiku 5.5).
+  const stage = clockStage(session);
+  const closingNow = mode === "speak" && stage?.kind === "close";
   const thread = openThread(session);
   blocks.push(
-    PHASE_GUIDANCE[session.phase] +
+    closingNow
+      ? CLOSE_GUIDANCE
+      : PHASE_GUIDANCE[session.phase] +
       (thread
         ? `\n\nThis dialogue is still working on something: ${thread.text}\n` +
           "That is where you and the learner actually are, so this turn works on it — inside whatever the phase above asks of you. " +
@@ -304,15 +314,17 @@ export function buildTutorContext(ctx: TutorContext, mode: "speak" | "reflect" =
           (thread.turns < THREAD_PATIENCE
             ? `This is turn ${thread.turns} on it, so a fresh angle is better than repeating yourself word for word.`
             : `This is turn ${thread.turns} on it: you have come at it from several angles and the learner has not accounted for it yet. ` +
-              "Stop varying the approach. Say plainly that you want to come back to this, ask the question in its simplest form, and wait — silence here is doing work, so do not fill it with a hint.")
+              "Stop varying the approach. Say plainly that you want to come back to this, ask the question in its simplest form, and wait — silence here is doing work, so do not fill it with a hint.") +
+          (mode === "speak" && stage?.kind === "wrap-up" ? WRAP_UP_THREAD_NOTE : "")
         : ""),
   );
   const machineDirectives = session.pendingDirectives.filter((d) => !d.startsWith(THREAD_PREFIX) && !isFollowUp(d) && !d.startsWith(SAY_FIRST));
-  if (machineDirectives.length) blocks.push(`<orchestrator>\n${machineDirectives.join("\n")}\n</orchestrator>`);
+  // Phase moves and the like are for a lesson that carries on; the closing reply has nothing to do with them.
+  if (machineDirectives.length && !closingNow) blocks.push(`<orchestrator>\n${machineDirectives.join("\n")}\n</orchestrator>`);
   // A follow-up the tutor owes the learner leads the speaking call's final instruction (see isFollowUp).
   const followUps = mode === "speak" ? session.pendingDirectives.filter(isFollowUp) : [];
   const fetched = passagesForLatestReply(ctx);
-  if (fetched.length) {
+  if (fetched.length && !closingNow) {
     blocks.push(
       `<passages_for_this_turn>\nThese passages from elsewhere in the material match what the learner just said. Use them if they bear on it; otherwise leave them.\n` +
         fetched.map((c) => `<passage id="${c.id}" heading="${c.headingPath.join(" > ")}">\n${c.text}\n</passage>`).join("\n") +
@@ -328,12 +340,15 @@ export function buildTutorContext(ctx: TutorContext, mode: "speak" | "reflect" =
           ? `You have already said this to the learner, as the start of this reply: "${ctx.saidFirst}" Carry on from there with the rest of the reply, without repeating it or saying it again in other words.\n\n`
           : "") +
         (followUps.length ? `Your reply starts with something you owe the learner, before anything else. ${followUps.join(" ")}\n\n` : "") +
-        "You are speaking to the learner now and they are waiting, so answer straight away: two to four sentences ending in your single question, and nothing after it. " +
+        (stage?.kind === "close"
+          ? CLOSE_INSTRUCTION
+          : (stage?.kind === "wrap-up" ? wrapUpInstruction(stage.announce) : "") +
+            "You are speaking to the learner now and they are waiting, so answer straight away: two to four sentences ending in your single question, and nothing after it. " +
         "Do not answer your own question, and do not narrate a pause, a hesitation, or a reaction the learner has not actually given: their last message is the only thing they have said. " +
         "Whether they are ready to move on, and the notes on what they showed, are settled after you speak, in a separate pass you do not run here; this call only speaks. " +
         toldLine +
         "Passages that match the learner's latest words are above when there are any. If you need another passage to answer honestly, call lookup_source before your first word, " +
-        "and never announce or narrate a lookup (no \"let me check the material\"): say what the material says, not that you are checking it. Never mention tools, phases, or the profile out loud."
+        "and never announce or narrate a lookup (no \"let me check the material\"): say what the material says, not that you are checking it. Never mention tools, phases, or the profile out loud.")
       : "The learner has just heard your reply (the last assistant message) and is listening; nothing you write here reaches them, so write nothing. " +
         "Take your notes now: call record_observation for what the learner showed in their LATEST reply only, quoting them; everything from earlier turns is already on file above, so do not record it again, " +
         "and call advance when the phase is genuinely finished. " +
@@ -350,7 +365,8 @@ export function buildTutorContext(ctx: TutorContext, mode: "speak" | "reflect" =
         (retrieval
           ? ` The session opened with a spaced-retrieval question about "${retrieval.name}", from an earlier lesson, and the learner's latest reply is their answer to it: ` +
             `record how they did with record_observation under conceptId "${retrieval.id}", not the current concept. If they said they do not remember, that is a gap; if they did not take the question up, record nothing for it.`
-          : ""),
+          : "") +
+        (stage?.kind === "close" ? CLOSE_REFLECT_NOTE : stage?.kind === "wrap-up" ? WRAP_UP_REFLECT_NOTE : ""),
   );
   return blocks;
 }
@@ -526,6 +542,11 @@ export function tutorTurn(ctx: TutorContext, signal?: AbortSignal): AsyncGenerat
       },
     ];
   }
+  // The parent's clock, once more where a small model follows it most reliably: in the message it is answering.
+  const stage = clockStage(ctx.session);
+  const clockPrompt = stage?.kind === "close" ? CLOSE_PROMPT : stage?.kind === "wrap-up" && stage.announce ? WRAP_UP_PROMPT : undefined;
+  const last = messages.at(-1);
+  if (clockPrompt && last?.role === "user" && typeof last.content === "string") last.content = `${last.content}\n\n${clockPrompt}`;
   // Thinking off regardless of the session setting: this call is the one the learner waits on.
   return streamTurn({ spec: { ...tutorAgent, thinking: "disabled" }, system, messages, tools: tutorTools(ctx, "speak"), maxTokens: SPEAK_MAX_TOKENS, signal });
 }

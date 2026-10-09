@@ -28,7 +28,7 @@ export interface IntakePassage { title: string; text: string; retell: string; ba
 /** An intake finished inside a reply and the sitting went straight on in another session. */
 export interface Handover { from: string; to: string; kind: SessionKind }
 /** How a turn ended. `sessionId` is the session that answered: after a hand-over, the one that took over. */
-export interface TurnDone { sessionId: string; handover: Handover | null; phase: Phase; conceptIndex: number; latency: Latency | null }
+export interface TurnDone { sessionId: string; handover: Handover | null; phase: Phase; conceptIndex: number; latency: Latency | null; /** The reply closed the session on the parent's clock; end it to get the report. */ timeUp: boolean }
 /** What a session is for. A sitting can chain them: the general intake, then the course intake, then the lesson. */
 export type SessionKind = "general-intake" | "course-intake" | "lesson";
 /** One difference the profile pass made (or held): a list field gets one entry per item added (from "") or removed (to ""). */
@@ -54,8 +54,12 @@ export interface OutsideClaim {
   verdict?: "supported" | "contradicted" | "complicated" | "not-found"; explanation?: string; evidence?: string;
   source?: { title: string; url: string; revisionId?: number; quality?: string }; followUp?: string; checkedAt?: string;
 }
-export interface Session { id: string; learnerId: string; kind?: SessionKind; continuedIn?: string; continuedFrom?: string; probeConceptIds?: string[]; courseId?: string; lessonId?: string; conceptIndex: number; conceptIds?: string[]; narrationFirst?: boolean; outsideKnowledge?: OutsideKnowledgeMode; outsideClaims?: OutsideClaim[]; phase: Phase; transcript: Turn[]; observations: Observation[]; pendingDirectives: string[]; startedAt: string; endedAt?: string }
+export interface Session { id: string; learnerId: string; kind?: SessionKind; limitMinutes?: number; timeWarnedAt?: string; timeUpAt?: string; continuedIn?: string; continuedFrom?: string; probeConceptIds?: string[]; courseId?: string; lessonId?: string; conceptIndex: number; conceptIds?: string[]; narrationFirst?: boolean; outsideKnowledge?: OutsideKnowledgeMode; outsideClaims?: OutsideClaim[]; phase: Phase; transcript: Turn[]; observations: Observation[]; pendingDirectives: string[]; startedAt: string; endedAt?: string }
 export interface SessionSummary { id: string; learnerId: string; kind?: SessionKind; continuedIn?: string; continuedFrom?: string; courseId?: string; lessonId?: string; phase: Phase; conceptIndex: number; turns: number; observations: number; startedAt: string; endedAt?: string; hasReport: boolean }
+/** What a session cost, in dollars, from the counts the app records (mirrors domain/cost.ts). */
+export interface SessionCost { speak: number; reflect: number; voice: number; report: number; profile: number; checks: number; intake: number; total: number; unpriced: string[]; turns: number; minutes: number; listenedSeconds: number }
+export interface LearnerMonth { learnerId: string; name: string; sessions: number; lessons: number; minutes: number; listenedMinutes: number; usd: number; unpriced: string[] }
+export interface UsageMonth { month: string; learners: LearnerMonth[]; usd: number; unpriced: string[]; courses: Array<{ courseId: string; title: string; total: number; unpriced: string[] }> }
 export interface LatencySummary { turns: number; ttftP50Ms: number; ttftMaxMs: number; totalP50Ms: number; cacheHitRate: number; firstAudioP50Ms?: number }
 export interface Report {
   sessionId: string; learnerId: string; courseId?: string; lessonId?: string; createdAt: string;
@@ -82,6 +86,7 @@ export const PROVIDER_KEY: Record<TtsProvider, string> = { elevenlabs: "ELEVENLA
 export interface RuntimeSettings {
   model: string; tutorModel: string; reflectModel: string; assessorModel: string; tutorEffort: string; analysisEffort: string; reflectEffort: string; tutorThinking: "adaptive" | "disabled"; prewarmCache: boolean; refusalFallbacks: boolean;
   outsideKnowledge: OutsideKnowledgeMode;
+  sessionMaxMinutes: number;
   ttsProvider: TtsProvider;
   ttsBatchSentences: boolean; sttMinSilenceMs: number; sttMaxSilenceMs: number;
   elevenVoiceId: string; elevenVoiceName: string; elevenModel: string; elevenStability: number; elevenSpeed: number;
@@ -162,6 +167,10 @@ export const api = {
   session: (id: string) => fetch(`/api/sessions/${id}`).then(j<Session>),
   deleteSession: (id: string) => fetch(`/api/sessions/${id}`, { method: "DELETE" }).then(j<{ ok: true }>),
   latency: (sessionId: string) => fetch(`/api/sessions/${sessionId}/latency`).then(j<LatencySummary>),
+  /** What a session has cost so far, with its report and profile pass once they exist. */
+  sessionCost: (sessionId: string) => fetch(`/api/sessions/${sessionId}/cost`).then(j<SessionCost>),
+  /** One month's use per student (default: this month) and what each course build cost. */
+  usage: (month?: string) => fetch(`/api/usage${month ? `?month=${month}` : ""}`).then(j<UsageMonth>),
   endSession: (id: string) => fetch(`/api/sessions/${id}/end`, { method: "POST" }).then(j<{ session: Session; report?: Report }>),
   /** Attach browser-measured voice timings to the latest tutor turn. */
   turnLatency: (id: string, body: { firstAudioMs?: number; transcriptMs?: number }) => fetch(`/api/sessions/${id}/turn-latency`, json("POST", body)).then(j<{ ok: true }>),
@@ -181,7 +190,7 @@ export const api = {
     const reader = res.body.getReader();
     const dec = new TextDecoder();
     let buf = "";
-    let done: TurnDone = { sessionId, handover: null, phase: "teach", conceptIndex: 0, latency: null };
+    let done: TurnDone = { sessionId, handover: null, phase: "teach", conceptIndex: 0, latency: null, timeUp: false };
     for (;;) {
       const { value, done: end } = await reader.read();
       if (end) break;
@@ -191,10 +200,10 @@ export const api = {
         const line = buf.slice(0, i).trim();
         buf = buf.slice(i + 2);
         if (!line.startsWith("data: ")) continue;
-        const ev = JSON.parse(line.slice(6)) as { delta?: string; done?: boolean; reflected?: boolean; sessionId?: string; handover?: Handover | null; phase?: Phase; conceptIndex?: number; latency?: Latency | null; error?: string };
+        const ev = JSON.parse(line.slice(6)) as { delta?: string; done?: boolean; reflected?: boolean; sessionId?: string; handover?: Handover | null; phase?: Phase; conceptIndex?: number; latency?: Latency | null; error?: string; timeUp?: boolean };
         if (ev.error) throw new Error(ev.error);
         if (ev.delta) yield ev.delta;
-        if (ev.done) done = { sessionId: ev.sessionId ?? sessionId, handover: ev.handover ?? null, phase: ev.phase ?? "teach", conceptIndex: ev.conceptIndex ?? 0, latency: ev.latency ?? null };
+        if (ev.done) done = { sessionId: ev.sessionId ?? sessionId, handover: ev.handover ?? null, phase: ev.phase ?? "teach", conceptIndex: ev.conceptIndex ?? 0, latency: ev.latency ?? null, timeUp: ev.timeUp ?? false };
         if (ev.reflected) onReflected?.(ev.sessionId ?? done.sessionId);
       }
     }
@@ -219,5 +228,7 @@ export function summarizeLatency(transcript: Turn[]): LatencySummary {
   };
 }
 
+/** Dollars as a parent reads them: cents when small, two decimals above a dollar. */
+export const fmtUsd = (usd: number): string => (usd >= 1 ? `$${usd.toFixed(2)}` : usd >= 0.01 ? `$${usd.toFixed(3)}` : usd > 0 ? `under a cent` : "$0");
 export const fmtMs = (ms: number): string => (ms >= 1000 ? `${(ms / 1000).toFixed(1)} s` : `${ms} ms`);
 export const fmtDate = (iso: string): string => new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });

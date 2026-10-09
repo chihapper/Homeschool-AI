@@ -7,7 +7,8 @@
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { assertNotRefused, streamParsed } from "../llm/client.js";
 import { config } from "../config.js";
-import { CurriculumExtractionSchema, type Course, type CurriculumExtraction, type SourceChunk } from "../domain/types.js";
+import { CurriculumExtractionSchema, type Course, type CurriculumExtraction, type SourceChunk, type Usage } from "../domain/types.js";
+import { usageRecord } from "../domain/cost.js";
 import { chunkDocument, slug } from "../ingest/chunk.js";
 import type { ExtractedDocument } from "../ingest/extract.js";
 import type { SourceDocument } from "../ingest/media/sources.js";
@@ -52,12 +53,13 @@ export async function ingestCourse(docs: Array<ExtractedDocument | SourceDocumen
   if (!chunks.length) throw new Error("No text could be extracted from the uploaded material.");
 
   const batches = batchChunks(chunks, BATCH_CHARS);
+  const usage: Usage[] = []; // each part's call, for the meter
   // Parts are independent ("extract only what is in this part"), so they run at the same time: a unit that
   // splits in two takes as long as one part, not two.
   const extractions: CurriculumExtraction[] = await Promise.all(
     batches.map((batch, i) => {
       opts.onProgress?.(`Extracting batch ${i + 1}/${batches.length} (${batch.length} chunks)`);
-      return extractBatch(batch, opts.titleHint, i, batches.length, docs, opts.onProgress);
+      return extractBatch(batch, opts.titleHint, i, batches.length, docs, opts.onProgress, (u) => usage.push(u));
     }),
   );
 
@@ -74,6 +76,7 @@ export async function ingestCourse(docs: Array<ExtractedDocument | SourceDocumen
     chunks,
     sourceFiles: docs.map((d) => d.fileName),
     sources: docs.map((d) => ({ name: d.fileName, kind: "kind" in d ? d.kind : "file", url: "url" in d ? d.url : undefined })),
+    usage,
     createdAt: new Date().toISOString(),
   };
   validateReferences(course);
@@ -87,6 +90,7 @@ async function extractBatch(
   total: number,
   docs: Array<ExtractedDocument | SourceDocument>,
   onProgress?: (msg: string) => void,
+  onUsage?: (u: Usage) => void,
 ): Promise<CurriculumExtraction> {
   const system = buildSystem(curriculumAgent, []);
   const spoken = docs.filter((d) => "kind" in d && (d.kind === "video" || d.kind === "podcast" || d.kind === "audio")).map((d) => d.fileName);
@@ -123,6 +127,7 @@ async function extractBatch(
       },
     },
   );
+  onUsage?.(usageRecord(curriculumAgent.model, message.usage));
   assertNotRefused(message);
   if (message.stop_reason === "max_tokens") {
     throw new Error(`Curriculum extraction hit the output limit on part ${index + 1}/${total} (${batch.length} chunks). Lower BATCH_CHARS in curriculum-agent.ts so each part is smaller.`);

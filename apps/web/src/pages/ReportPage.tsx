@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, fmtDate, type ConceptProgress, type ConceptStart, type Course, type Learner, type OutsideClaim, type ProgressSummary, type Report } from "../api";
+import { api, fmtDate, fmtUsd, type ConceptProgress, type ConceptStart, type Course, type Learner, type OutsideClaim, type ProgressSummary, type Report, type SessionCost } from "../api";
 
 const LEVELS = ["No evidence", "Recalls", "Explains", "Applies", "Extends"];
 
@@ -37,6 +37,12 @@ export function ReportPage({ report, courses, learners }: { report: Report | nul
   const [all, setAll] = useState<Report[]>([]);
   const [current, setCurrent] = useState<Report | null>(report);
   const [err, setErr] = useState<string | null>(null);
+  /** What the shown report's session cost, from the meter. */
+  const [cost, setCost] = useState<SessionCost | null>(null);
+  useEffect(() => {
+    setCost(null);
+    if (current) api.sessionCost(current.sessionId).then(setCost).catch(() => {});
+  }, [current?.sessionId]);
 
   useEffect(() => {
     api.reports().then(setAll).catch((e) => setErr((e as Error).message));
@@ -181,6 +187,12 @@ export function ReportPage({ report, courses, learners }: { report: Report | nul
           <div className="card">
             <h3>For the parent</h3>
             <p>{current.parentSummary}</p>
+            {cost && (
+              <p className="muted small" title="List prices for every model and voice call the session made (docs/COST.md)">
+                This session cost about <strong>{fmtUsd(cost.total)}</strong> in model and voice calls: tutor {fmtUsd(cost.speak)}, notes {fmtUsd(cost.reflect)}, voice {fmtUsd(cost.voice)}, report {fmtUsd(cost.report)}, profile pass {fmtUsd(cost.profile)}{cost.checks ? `, checks ${fmtUsd(cost.checks)}` : ""}; {cost.minutes} minutes, {cost.turns} tutor turns.
+                {cost.unpriced.length ? ` No price on file for ${cost.unpriced.join(", ")}, so the figure leaves those out.` : ""}
+              </p>
+            )}
             <h3>Next time</h3>
             <ol>{current.recommendedNext.map((r, i) => <li key={i}>{r}</li>)}</ol>
             {current.effectiveFormats.length > 0 && <p className="muted">Formats that showed understanding best: {current.effectiveFormats.join("; ")}</p>}

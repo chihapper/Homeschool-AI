@@ -198,7 +198,7 @@ function asClause(s: string): string {
 }
 
 /** A finished check, waiting to be merged into its session, with the sentence it wrote for the tutor, if any. */
-export type CheckResult = Pick<OutsideClaim, "status" | "statusNote" | "verdict" | "explanation" | "evidence" | "source"> & {
+export type CheckResult = Pick<OutsideClaim, "status" | "statusNote" | "verdict" | "explanation" | "evidence" | "source" | "usage"> & {
   sayToLearner?: string;
   claimId: string;
   at: string;
@@ -213,7 +213,7 @@ export function applyCheckResult(session: Session, r: CheckResult): string | und
   if (!c) return undefined;
   c.status = r.status;
   c.checkedAt = r.at;
-  for (const k of ["statusNote", "verdict", "explanation", "evidence", "source"] as const) {
+  for (const k of ["statusNote", "verdict", "explanation", "evidence", "source", "usage"] as const) {
     if (r[k] !== undefined) (c as Record<string, unknown>)[k] = r[k];
   }
   if (session.phase === "complete") return undefined;

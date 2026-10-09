@@ -10,6 +10,7 @@
  */
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { assertNotRefused, streamParsed } from "../llm/client.js";
+import type { SdkUsage } from "../domain/cost.js";
 import { config } from "../config.js";
 import { CourseIntakeExtractionSchema, type Concept, type Course, type CourseIntakeExtraction, type Learner, type Session } from "../domain/types.js";
 import { buildSystem, streamTurn, transcriptToMessages, type AgentTool, type AgentSpec, type TurnResult } from "./base.js";
@@ -107,7 +108,7 @@ export function courseIntakeTurn(ctx: CourseIntakeContext, signal?: AbortSignal)
 }
 
 /** Turn the course-intake transcript into the starting points and first notes of a course-knowledge record (offline, high effort). */
-export async function extractCourseKnowledge(ctx: Pick<CourseIntakeContext, "session" | "learner" | "course" | "concepts">): Promise<CourseIntakeExtraction> {
+export async function extractCourseKnowledge(ctx: Pick<CourseIntakeContext, "session" | "learner" | "course" | "concepts">, onUsage?: (u: SdkUsage, model: string) => void): Promise<CourseIntakeExtraction> {
   const system = buildSystem({ ...courseIntakeAgent, model: config.model, effort: config.analysisEffort }, [contextBlock(ctx, true)]);
   const transcript = ctx.session.transcript.map((t) => `${t.role === "user" ? ctx.learner.name : "Tutor"}: ${t.content}`).join("\n");
   const { message, parsed } = await streamParsed<CourseIntakeExtraction>({
@@ -124,6 +125,7 @@ export async function extractCourseKnowledge(ctx: Pick<CourseIntakeContext, "ses
       },
     ],
   });
+  onUsage?.(message.usage, config.model);
   assertNotRefused(message);
   if (message.stop_reason === "max_tokens") throw new Error("The course-intake extraction was cut off at the output limit.");
   if (!parsed) throw new Error("The course-intake extraction returned no parsable output.");
