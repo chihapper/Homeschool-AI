@@ -88,6 +88,8 @@ describe("runtime settings", () => {
     updateSettings({ model: "claude-opus-5-5", assessorModel: "claude-sonnet-5-5" });
     expect(assessorAgent.model).toBe("claude-sonnet-5-5");
     expect(config.model).toBe("claude-opus-5-5"); // course builds and the profile pass stay on the offline model
+    updateSettings({ assessorModel: "GPT-6.1-Sol" }); // an OpenAI id keeps its dots
+    expect(assessorAgent.model).toBe("gpt-6.1-sol");
     updateSettings({ assessorModel: "" });
     expect(assessorAgent.model).toBe("claude-opus-5-5");
     resetSettings();

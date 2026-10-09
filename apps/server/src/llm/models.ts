@@ -26,6 +26,16 @@ import type { Effort } from "../config.js";
 /** Models offered in the Settings tab. Any model ID can still be typed in; it is normalised and checked on save. */
 export const MODEL_OPTIONS = ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5", "claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5"] as const;
 
+/** OpenAI models the report may run on (llm/openai.ts; prices checked 2026-10-08: Sol is Sonnet 5.5's, Luna is Haiku 5.5's). */
+export const OPENAI_MODEL_OPTIONS = ["gpt-6.1-sol", "gpt-6-luna"] as const;
+
+export type Vendor = "anthropic" | "openai";
+
+/** Which API an ID belongs to. OpenAI's start with "gpt-"; everything else goes to the Claude API. */
+export function vendorOf(model: string): Vendor {
+  return /^gpt-/i.test(model.trim()) ? "openai" : "anthropic";
+}
+
 /** Code defaults when the environment sets nothing: the offline agents on Opus 5.5, the live tutor on Sonnet 5.5 (its lowest thinking setting keeps the first word fast). */
 export const DEFAULT_MODEL = "claude-opus-5-5";
 export const DEFAULT_TUTOR_MODEL = "claude-sonnet-5-5";
@@ -47,6 +57,7 @@ const EFFORT_RANK: Record<Effort, number> = { low: 0, medium: 1, high: 2, xhigh:
 /** A model ID as a person might type it, made canonical: lower case, hyphens, "5.5" as "5-5". */
 export function normalizeModelId(input: string): string {
   let id = input.trim().toLowerCase().replace(/\s+/g, "");
+  if (vendorOf(id) === "openai") return id; // OpenAI's IDs keep their dots: gpt-6.1-sol
   id = id.replace(/(\d)\.(\d)/g, "$1-$2"); // claude-sonnet-5.5 -> claude-sonnet-5-5
   if (/^(opus|sonnet|haiku|fable|mythos)\b/.test(id)) id = `claude-${id}`; // "sonnet-5-5" -> "claude-sonnet-5-5"
   return id;

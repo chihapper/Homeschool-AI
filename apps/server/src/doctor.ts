@@ -98,6 +98,8 @@ export async function checkReadiness(opts: { ping?: boolean } = {}): Promise<Rea
     }
   }
 
+  add(1, config.openai.apiKey ? "ok" : "warn", "OPENAI_API_KEY", config.openai.apiKey ? "Set: the report may run on an OpenAI model (Settings, Report model)." : "Optional: only needed if the Report model is an OpenAI model (gpt-...).");
+
   // --- Stage 2: media ingestion ----------------------------------------------
   const ytdlp = await bin(config.ytDlpBin);
   add(2, ytdlp ? "ok" : "warn", `yt-dlp (${config.ytDlpBin})`, ytdlp ?? "Optional: needed for YouTube/TED/video URLs. Install: pip install yt-dlp  (or brew install yt-dlp)");

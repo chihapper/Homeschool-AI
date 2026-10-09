@@ -82,6 +82,7 @@ sentence batches.
 | `OUTSIDE_KNOWLEDGE`, `WIKIPEDIA_CONTACT` | Facts your student brings in from outside the material: `check` (answer, then check against Wikipedia in the background), `answer`, or `material-only`; Settings, Outside the reading overrides it. The checks need a contact (an email address or website) that Wikimedia's policy requires in every request. |
 | `ASSEMBLYAI_API_KEY` | Browser voice: the student's speech to text. |
 | `VOICE_TTS`, `INWORLD_API_KEY`, `ELEVENLABS_API_KEY` | Browser voice: who speaks the tutor's reply, Inworld or ElevenLabs. `VOICE_TTS` is only the default; the toggle at the top of Settings, Voice switches it from the next reply. An ElevenLabs key starts with `sk_`; an Inworld key is the Portal's Base64 credential, pasted as-is. |
+| `OPENAI_API_KEY` | Optional. Lets the report (and only the report) run on an OpenAI model such as `gpt-6.1-sol`, chosen in Settings. |
 | `YTDLP_BIN`, `STT_PROVIDER`, `DEEPGRAM_API_KEY`, `WHISPER_BIN` | Video and podcast ingestion. |
 
 ## Project layout

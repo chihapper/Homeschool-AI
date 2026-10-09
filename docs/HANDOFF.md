@@ -132,7 +132,9 @@ decision on hosting (issue #13) before any pilot. No deadline has been set.
   app's effort, refusals and `incomplete` handled; the model table gains a vendor column and the settings route
   checks GPT IDs against OpenAI's models endpoint. The live tutor stays on the Claude API (tool loop, caching,
   barge-in, the two-call turn are tuned to it). Needs an OpenAI key in `.env` and a look at OpenAI's data terms for
-  a child's transcript (see [[vendor-data-terms]] in the memory notes and issue #13). Not started.
+  a child's transcript (see [[vendor-data-terms]] in the memory notes and issue #13). Built the same day (work
+  queue 000004); OpenAI's terms as read 2026-10-08: API traffic is not used for training, abuse-monitoring logs up
+  to 30 days, `store: false` keeps responses out of application state; nothing about children's data.
 - **The tutor turn is two calls** (speak fast with no bookkeeping and no thinking; reflect afterwards
   while the student listens), and the open thread rides with the phase guidance rather than outranking
   it. See CLAUDE.md; an earlier version that let the note outrank the phase was rejected by the user.
@@ -247,6 +249,18 @@ the product (#13, #18, #23, #26). Ordering and blockers only here.
 
 **Claude-side, in order**
 
+000004. Done 2026-10-08 on `feature/ui-flow` (the user: "build the adapter and run Sol 6.1"; their understanding is
+   that Sol is Opus-class at Sonnet's price, which the run will test): `llm/openai.ts`, the OpenAI side of
+   `streamParsed`. A Claude-shaped structured-output request becomes a Responses API call (instructions, input,
+   `reasoning.effort`, `max_output_tokens`, `text.format` json_schema strict, `store: false`), streamed, and the
+   reply comes back shaped like a Claude message (stop_reason end_turn / max_tokens / refusal with stop_details,
+   usage with cached input split out, one text block), so the assessor and the other callers stay vendor-blind.
+   `vendorOf` in `llm/models.ts` ("gpt-" is OpenAI; `normalizeModelId` keeps OpenAI's dots), `OPENAI_MODEL_OPTIONS`
+   (gpt-6.1-sol, gpt-6-luna) in the Report model dropdown only, `config.openai.apiKey`, a readiness row, and the
+   settings route lets only `assessorModel` be an OpenAI ID (checked against OpenAI's model list). The `openai`
+   package was added to the server workspace. 250 tests (request and reply translation, refusal, cut-off,
+   vendors). **Not run yet: `.env` has no OPENAI_API_KEY.** When it is there: `npx tsx <scratchpad>/assess-compare.mts
+   7e285a2c sol=gpt-6.1-sol@high luna=gpt-6-luna@high` (about $0.20) and compare with `docs/COST.md`.
 000003. Done 2026-10-08 on `feature/ui-flow` (the user: "Add the assessor-model setting"): `assessorModel` runtime
    setting (empty means the offline model; Settings "Report model"; health reports it resolved; the header shows it
    when it differs; `CLAUDE_ASSESSOR_MODEL` in .env), so the report can run on a cheaper tier than the course

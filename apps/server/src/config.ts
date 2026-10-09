@@ -336,6 +336,11 @@ export const config = {
     apiKey: env("ELEVENLABS_API_KEY"),
   },
 
+  /** OpenAI, for the report only (Settings, Report model; llm/openai.ts). Everything else runs on the Claude API. */
+  openai: {
+    apiKey: env("OPENAI_API_KEY"),
+  },
+
   /** Inworld text-to-speech, the other voice for browser voice mode, and the default. */
   inworld: {
     /** The Base64 credential copied from the Inworld Portal as-is (base64 of key_id:secret), without "Basic ". */

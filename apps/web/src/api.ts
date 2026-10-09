@@ -89,7 +89,7 @@ export interface RuntimeSettings {
 }
 /** A text-to-speech provider as Settings offers it: whether its key is in .env, and what is wrong if not. */
 export interface TtsProviderOption { id: TtsProvider; label: string; ready: boolean; problem?: string }
-export interface SettingsView { effective: RuntimeSettings; defaults: RuntimeSettings; overrides: Partial<RuntimeSettings>; options: { models: string[]; efforts: string[]; thinking: string[]; ttsProviders: TtsProviderOption[] } }
+export interface SettingsView { effective: RuntimeSettings; defaults: RuntimeSettings; overrides: Partial<RuntimeSettings>; options: { models: string[]; reportModels: string[]; efforts: string[]; thinking: string[]; ttsProviders: TtsProviderOption[] } }
 export interface VoiceOption { id: string; name: string; description?: string; previewUrl?: string; category?: string }
 export interface VoiceModelOption { id: string; name: string; note?: string }
 /** A spoken sample of the draft voice settings, ready to play, and how fast the first audio came back. */

@@ -17,6 +17,8 @@ import { courseKnowledge, courses, knowledgeFor, knowledgeId, knowledgeOf, learn
 import { activeTtsProvider, config, getSettings, MODEL_OPTIONS, REPO_ROOT, resetSettings, RuntimeSettingsSchema, ttsModelLabel, ttsVoiceLabel, updateSettings } from "../config.js";
 import { undoProfileUpdate } from "../domain/profile.js";
 import { anthropic, normalizeModelId } from "../llm/client.js";
+import { OPENAI_MODEL_OPTIONS, vendorOf } from "../llm/models.js";
+import { openai, openaiKeyProblem } from "../llm/openai.js";
 import { checkReadiness } from "../doctor.js";
 import { pcm16ToWav } from "../voice/pcm.js";
 import { ELEVEN_FALLBACK_MODELS, elevenKeyProblem, listElevenModels, listElevenVoices, speakElevenLabs } from "../voice/tts-elevenlabs.js";
@@ -93,6 +95,8 @@ function settingsView() {
     ...getSettings(),
     options: {
       models: [...MODEL_OPTIONS],
+      /** The report may also run on an OpenAI model. */
+      reportModels: [...MODEL_OPTIONS, ...OPENAI_MODEL_OPTIONS],
       efforts: RuntimeSettingsSchema.shape.tutorEffort.options,
       thinking: RuntimeSettingsSchema.shape.tutorThinking.options,
       ttsProviders: [
@@ -126,7 +130,18 @@ async function checkModelIds(body: unknown): Promise<void> {
     const id = normalizeModelId(raw);
     patch[key] = id;
     if ((key === "reflectModel" || key === "assessorModel") && !id) continue; // empty: follow the model above it
-    if (!id.startsWith("claude-")) throw new Error(`${label[key]} "${raw}": only Claude models are wired in today; another vendor's model needs its adapter first.`);
+    if (vendorOf(id) === "openai") {
+      // Only the report has the OpenAI adapter behind it (llm/openai.ts); the tutor and the other offline agents are the Claude API's.
+      if (key !== "assessorModel") throw new Error(`${label[key]} "${raw}": only the report can run on an OpenAI model; the rest runs on the Claude API.`);
+      const problem = openaiKeyProblem();
+      if (problem) throw new Error(`${label[key]} "${raw}": ${problem}`);
+      try {
+        await openai().models.retrieve(id);
+      } catch (err) {
+        throw new Error(`${label[key]} "${raw}": ${err instanceof Error ? err.message : String(err)}`);
+      }
+      continue;
+    }
     try {
       await anthropic.models.retrieve(id);
     } catch (err) {

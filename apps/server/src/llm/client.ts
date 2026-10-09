@@ -17,7 +17,8 @@ export function fallbackParams(): { betas: string[]; fallbacks: "default" } | Re
   return config.refusalFallbacks ? { betas: [REFUSAL_FALLBACK_BETA], fallbacks: "default" } : {};
 }
 
-import { modelRules, thinkingOffAllowed } from "./models.js";
+import { modelRules, thinkingOffAllowed, vendorOf } from "./models.js";
+import { streamParsedOpenAI } from "./openai.js";
 export { MODEL_OPTIONS, modelRules, normalizeModelId, parseModelId } from "./models.js";
 
 /** `output_config.effort` and adaptive thinking are accepted by this model. The rules live in llm/models.ts. */
@@ -90,6 +91,8 @@ export async function streamParsed<T>(
   params: MessageStreamParams,
   opts: { onProgress?: (charsSoFar: number) => void; timeout?: number } = {},
 ): Promise<{ message: Anthropic.Message; parsed: T | null }> {
+  // The one seam with a second vendor behind it: an OpenAI model ID goes to the Responses API (llm/openai.ts).
+  if (vendorOf(params.model) === "openai") return streamParsedOpenAI<T>(params, opts);
   const stream = anthropic.messages.stream(params, { timeout: opts.timeout ?? 30 * 60 * 1000 });
   if (opts.onProgress) {
     let chars = 0;
