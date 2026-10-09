@@ -1,6 +1,6 @@
 # Handoff
 
-Last updated: 2026-10-08
+Last updated: 2026-10-09
 
 Read this before anything else. It is written for a session that has seen nothing.
 
@@ -250,6 +250,17 @@ the product (#13, #18, #23, #26). Ordering and blockers only here.
 
 **Claude-side, in order**
 
+000005. Done 2026-10-09 on `feature/ui-flow` (the user: "Test another run. But also debug to see if there's something
+   slowing GPTs with how our different skills are structured ... create a skill file or more details in the skill
+   so that the gpt model follows a similar flow"). Second session (Test Student, plants, 51 turns) assessed four
+   ways; time-to-first-word and reasoning tokens now ride on `usage` from both vendor paths (`first_delta_ms`,
+   `reasoning_tokens`), which showed the GPT slowness is reasoning at high effort, not the prompt (123 s before
+   the first word on Sol; 39 s total at medium with the same findings). The terse summaries were our prompt: the
+   skill's Summaries section was one line; it now spells out the letter (order, length, quotes, a task for the
+   week, the tutor's conduct) and both vendors write it. Numbers and the reading in `docs/COST.md`; the two
+   side-by-side files (nine runs on Rome, four on plants) were sent to the user. About $0.85 of API calls.
+   Open: Luna wrote "he" for Sam once (the pronoun rule in the skill did not hold); the report model is still
+   Opus 5.5, the user's decision.
 000004. Done 2026-10-08 on `feature/ui-flow` (the user: "build the adapter and run Sol 6.1"; their understanding is
    that Sol is Opus-class at Sonnet's price, which the run will test): `llm/openai.ts`, the OpenAI side of
    `streamParsed`. A Claude-shaped structured-output request becomes a Responses API call (instructions, input,

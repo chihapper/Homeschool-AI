@@ -37,7 +37,7 @@ describe("a Responses API reply as a Claude message", () => {
     const { message, parsed } = fromResponse({ ...base, output: [{ type: "message", id: "m", role: "assistant", status: "completed", content: [{ type: "output_text", text: '{"level": 2}', annotations: [] }] }] } as never);
     expect(message.stop_reason).toBe("end_turn");
     expect(parsed).toEqual({ level: 2 });
-    expect(message.usage).toEqual({ input_tokens: 600, output_tokens: 50, cache_read_input_tokens: 400, cache_creation_input_tokens: 0 });
+    expect(message.usage).toEqual({ input_tokens: 600, output_tokens: 50, cache_read_input_tokens: 400, cache_creation_input_tokens: 0, reasoning_tokens: 20 });
   });
 
   it("reports a refusal the way the Claude API does, so assertNotRefused sees it", () => {

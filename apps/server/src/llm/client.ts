@@ -94,6 +94,12 @@ export async function streamParsed<T>(
   // The one seam with a second vendor behind it: an OpenAI model ID goes to the Responses API (llm/openai.ts).
   if (vendorOf(params.model) === "openai") return streamParsedOpenAI<T>(params, opts);
   const stream = anthropic.messages.stream(params, { timeout: opts.timeout ?? 30 * 60 * 1000 });
+  // When the first text arrived, kept on usage beside the token counts (see llm/openai.ts for the same on that side).
+  const t0 = performance.now();
+  let firstDeltaMs: number | undefined;
+  stream.on("text", () => {
+    firstDeltaMs ??= Math.round(performance.now() - t0);
+  });
   if (opts.onProgress) {
     let chars = 0;
     stream.on("text", (delta) => {
@@ -118,6 +124,7 @@ export async function streamParsed<T>(
     throw err;
   }
   const parsed = (message as { parsed_output?: unknown }).parsed_output ?? null;
+  if (firstDeltaMs !== undefined) (message.usage as unknown as Record<string, unknown>).first_delta_ms = firstDeltaMs;
   return { message, parsed: parsed as T | null };
 }
 

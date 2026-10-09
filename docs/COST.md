@@ -44,7 +44,41 @@ summaries read as a letter to the parent, name what to praise and give something
 the slowest by far at high effort. OpenAI's tokenizer counted the same material at 44k tokens against
 Claude's 59k, so at the same list price Sol comes in about a quarter under Sonnet. Luna, at under a cent,
 caught one more told-not-recalled line ("You pulled it right out...") and missed nothing on the levels.
-Opus at medium effort saves little, because the material is the cost. Decision pending with the user.
+Opus at medium effort saves little, because the material is the cost.
+
+**Where a slow GPT report spends its time (2026-10-09).** Not in the prompt: the two skills the assessor
+carries are about 3,300 tokens of a 44,000-token request, and the request is the same text for every
+vendor. The time is reasoning before the first word. On the plants session below, Sol at high effort wrote
+nothing for 123 s and then 5,200 reasoning tokens; Luna reasoned for 11,200 tokens over 95 s. At medium
+effort (OpenAI's own default) Sol on the Rome session took 39 s with 12 s to the first word and 323
+reasoning tokens, at the same price, with the same levels and the same flagged claims. For the Claude
+models the equivalent cost is thinking: Opus 5.5 at high effort wrote nothing for 50 s on the plants
+session, Sonnet for 21 s. OpenAI also notes that a strict output schema is slow the first time the API sees
+it; that did not show as the main factor here.
+
+**The second session (Test Student, the plants unit, 51 turns), high effort, same skill:**
+
+| Assessor | Time, first word | Cost | Levels (7 concepts) | Quotes | Flagged |
+|---|---|---|---|---|---|
+| Opus 5.5 | 93 s, 50 s | $0.22 | 2 2 3 1 1 2 1 | 24 | 2 |
+| Sonnet 5.5 | 43 s, 21 s | $0.10 | 2 2 3 1 1 2 1, the same | 25 | 2 |
+| GPT-6.1 Sol | 165 s, 123 s | $0.10 | 3 1 3 1 1 1 1 | 22 | 3 |
+| GPT-6 Luna | 111 s, 95 s | $0.008 | 1 1 3 1 1 1 1 | 13 | 3 |
+
+Sonnet matched Opus level for level on both sessions; Sol differed on three of seven concepts here, in
+both directions; Luna was the strictest. All four found the same two tutor slips (the yellow-grass claim,
+the share of oxygen from plants).
+
+**The terse summaries were a prompt problem, and the prompt was ours.** The skill's Summaries section said
+only "plain language, what the child can now do, what they still confuse, what to do next". The Claude
+models filled that in as a letter; the OpenAI models answered it literally. On 2026-10-09 the section was
+made explicit (a letter of 180 to 260 words, in a set order: where the child started, what they can now do
+with their own words quoted, what is still shaky and whether they showed the correction, one thing to do at
+home this week, the tutor's conduct). Rerun on the Rome session at medium effort: Sol's summary went from
+about 150 words and 9 quotes to a four-paragraph letter with 15 quotes and a task for the week, Luna's
+likewise; Sonnet's, rerun at high effort with the same skill, kept its levels and gained the task for the
+week. Luna, at medium, still missed the Aeneas slip, rated the Etruscan answer 0 where everyone else said 1,
+and once wrote "he" for Sam, whose records state no gender. Decision pending with the user.
 
 The profile pass after the report (Opus 5.5) reads the two records, the transcript and the report; an
 estimate, not a measurement: a tenth to a fifth of a dollar.
@@ -64,9 +98,10 @@ Estimates from the saved files; the development sessions' own runs are not in th
 
 ## Levers, in order of what they save
 
-1. The assessor off Opus 5.5: Sonnet 5.5 at half the cost, GPT-6.1 Sol at a little under that, or GPT-6 Luna at
-   under a cent, all with the same levels on the one session compared. Pending the user's decision; the
-   Claude summaries read better to a parent, the OpenAI ones are terser.
+1. The assessor off Opus 5.5: Sonnet 5.5 at half the cost (and Opus's levels on both sessions), GPT-6.1 Sol at
+   medium effort for a little less (its own levels, slower at high effort), or GPT-6 Luna at under a cent (the
+   strictest, with slips at the edges). With the explicit Summaries section, all of them write the letter.
+   Pending the user's decision.
 2. Haiku 5.5 speaking, Sonnet 5.5 taking notes: done 2026-10-08.
 3. Fewer harness runs, each quoted first.
 4. The profile pass on Sonnet 5.5: untested; the same shape of saving as the assessor.

@@ -86,7 +86,11 @@ function outputOf(res: OpenAI.Responses.Response): { text: string; refusal?: str
 }
 
 /** A Responses API reply as a Claude message, plus the parsed JSON document. Pure, for the tests. */
-export function fromResponse(res: OpenAI.Responses.Response): { message: Anthropic.Message; parsed: unknown | null } {
+/**
+ * @param firstDeltaMs how long the first text took to arrive, when the reply was streamed; it rides on `usage`
+ *   beside `reasoning_tokens`, so an experiment can see where a slow report spent its time.
+ */
+export function fromResponse(res: OpenAI.Responses.Response, firstDeltaMs?: number): { message: Anthropic.Message; parsed: unknown | null } {
   const { text, refusal } = outputOf(res);
   const cutOff = res.status === "incomplete" && res.incomplete_details?.reason === "max_output_tokens";
   const stopReason = refusal !== undefined ? "refusal" : cutOff ? "max_tokens" : "end_turn";
@@ -96,6 +100,8 @@ export function fromResponse(res: OpenAI.Responses.Response): { message: Anthrop
     output_tokens: res.usage?.output_tokens ?? 0,
     cache_read_input_tokens: cached,
     cache_creation_input_tokens: 0,
+    reasoning_tokens: res.usage?.output_tokens_details?.reasoning_tokens ?? 0,
+    ...(firstDeltaMs !== undefined ? { first_delta_ms: firstDeltaMs } : {}),
   };
   let parsed: unknown | null = null;
   if (stopReason === "end_turn" && text.trim()) {
@@ -131,8 +137,11 @@ export async function streamParsedOpenAI<T>(
   const stream = await openai().responses.create({ ...req, stream: true }, { timeout: opts.timeout ?? 30 * 60 * 1000 });
   let chars = 0;
   let final: OpenAI.Responses.Response | undefined;
+  const t0 = performance.now();
+  let firstDeltaMs: number | undefined;
   for await (const ev of stream) {
     if (ev.type === "response.output_text.delta") {
+      firstDeltaMs ??= Math.round(performance.now() - t0);
       chars += ev.delta.length;
       opts.onProgress?.(chars);
     } else if (ev.type === "response.completed" || ev.type === "response.incomplete") {
@@ -144,7 +153,7 @@ export async function streamParsedOpenAI<T>(
     }
   }
   if (!final) throw new Error("OpenAI stream ended without a completed response.");
-  const { message, parsed } = fromResponse(final);
+  const { message, parsed } = fromResponse(final, firstDeltaMs);
   if (message.stop_reason === "max_tokens") {
     throw new Error(`The model hit its output limit (max_output_tokens ${params.max_tokens}) before finishing, so the structured output is cut off. Ask for less at a time.`);
   }

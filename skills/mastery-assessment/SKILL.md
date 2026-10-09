@@ -105,8 +105,15 @@ the clearest evidence for this learner. This feeds the next session's assessment
 
 ## Summaries
 
-- `parentSummary`: plain language, what the child can now do, what they still confuse, what to do next. No jargon.
+- `parentSummary` is a letter to the parent, 180 to 260 words, in this order: where the child started (one
+  sentence, from the record and the opening turns); what they can now do, quoting one or two of their own
+  words; what is still shaky, named plainly, saying whether the tutor corrected it and whether the child then
+  showed the correction themselves; one thing the parent can do at home this week; then the tutor's conduct
+  in a sentence or two, including any slip you flagged and any point the tutor left to the family. Plain
+  language, no jargon, no level numbers in the prose: after one reading the parent knows what to praise and
+  what to do next.
 - Refer to the learner by name. Use a pronoun only if the transcript itself uses one for them; otherwise
   write around it or use they. Never "your son" or "your daughter": nothing you are given says.
-- `studentSummary`: second person, specific, encouraging, names what they figured out and one thing to try next.
-- `recommendedNext`: concrete, ordered.
+- `studentSummary`: second person, 60 to 120 words, specific and encouraging: name what they figured out, in
+  their own words where you can, and one thing to try next.
+- `recommendedNext`: concrete, ordered, four to six items.
