@@ -231,9 +231,10 @@ the product (#13, #18, #23, #26). Ordering and blockers only here.
 
 **User-side**
 
-1. Decide the assessor's model: Sonnet 5.5 at high effort halves the largest line of a session and agreed with
-   Opus on every level of the one session compared (`docs/COST.md`); say so and the default changes. One more
-   comparison on a science session would make it a safer call (about $0.50).
+1. Decide the assessor's model (Settings, Report model): Opus 5.5 ($0.37 a report), Sonnet 5.5 ($0.18), GPT-6.1
+   Sol ($0.14, slowest, terser) or GPT-6 Luna ($0.007, terse) all gave the same levels on the one session
+   compared (`docs/COST.md`). One more comparison on a science session would make it a safer call (about $0.70
+   for all four).
 2. Test in the web app (both servers up, `http://localhost:5173`): add a student on the Students tab and hold
    the intake there; start them on a course from the Courses tab (the lesson opens with the course's
    questions); Focus ticks on the Courses tab; a lesson with "Already read this"; the Progress panel on the
@@ -259,8 +260,11 @@ the product (#13, #18, #23, #26). Ordering and blockers only here.
    (gpt-6.1-sol, gpt-6-luna) in the Report model dropdown only, `config.openai.apiKey`, a readiness row, and the
    settings route lets only `assessorModel` be an OpenAI ID (checked against OpenAI's model list). The `openai`
    package was added to the server workspace. 250 tests (request and reply translation, refusal, cut-off,
-   vendors). **Not run yet: `.env` has no OPENAI_API_KEY.** When it is there: `npx tsx <scratchpad>/assess-compare.mts
-   7e285a2c sol=gpt-6.1-sol@high luna=gpt-6-luna@high` (about $0.20) and compare with `docs/COST.md`.
+   vendors). Run 2026-10-08 once the user added the key, on the same session as the Claude runs, about $0.15 in
+   all: Sol 108 s and $0.14, Luna 43 s and $0.007, both with the same levels as Opus and Sonnet; numbers and the
+   reading of the summaries in `docs/COST.md`, the six reports side by side sent to the user. The live report
+   model is still Opus 5.5: the user decides. The dev server reads `.env` at start, so it was restarted to see
+   the key.
 000003. Done 2026-10-08 on `feature/ui-flow` (the user: "Add the assessor-model setting"): `assessorModel` runtime
    setting (empty means the offline model; Settings "Report model"; health reports it resolved; the header shows it
    when it differs; `CLAUDE_ASSESSOR_MODEL` in .env), so the report can run on a cheaper tier than the course
