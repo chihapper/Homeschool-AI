@@ -1,5 +1,12 @@
 # Research brief: Socratic AI tutoring for homeschool families
 
+> **Status, 2026-10-09.** This is the research record as compiled on 2026-09-14; it is kept for its sources and
+> reasoning, not as a description of the build. Two of its conclusions were overtaken: the live tutor runs on
+> Sonnet 5.5 with Haiku 5.5 as the trial speaker (not Opus 5), and the voice layer is AssemblyAI listening with
+> Inworld or ElevenLabs speaking in the browser; Hume EVI and Hume's text-to-speech were removed on 2026-10-06
+> when Hume announced their sunset (Part B §1 and the "Recommended default stack" below describe them as they
+> were). What the build looks like today is in `ARCHITECTURE.md`; what it costs is in `COST.md`.
+
 *Compiled 14 September 2026 from two research passes (product landscape and learning-science evidence; voice-latency and media-ingestion technology). Sources are linked inline. Items the researchers could not confirm against a primary source are marked **(unverified)**; several primary sites (dev.hume.ai, anthropic.com, nature.com, openai.com, artificialanalysis.ai) were blocked by this environment's network policy, so some figures come from secondary coverage and are marked **(snippet)**.*
 
 ## Executive summary
@@ -156,7 +163,7 @@ No mainstream child-facing Socratic tutor built on Hume EVI was found. Hume's pu
 
 # Part B. Voice architecture, latency, and curriculum ingestion
 
-## 1. Hume EVI architecture and latency
+## 1. Hume EVI architecture and latency (historical: removed from the build 2026-10-06)
 
 **Speech-to-speech, not ASR+LLM+TTS (for the native path).** Hume describes EVI 3 as a "speech-language model" in which "a single autoregressive model processes both text and voice tokens," with a system prompt "comprised of both text and voice tokens" ([Hume: Introducing EVI 3](https://www.hume.ai/blog/introducing-evi-3), snippet). Hume claims EVI 3 "is capable of delivering voice responses in under 300ms on state-of-the-art hardware," while noting end-user latency depends on network and implementation (same post, snippet). Earlier generations: EVI 1 "<700 ms"; EVI 2 "500–800 ms" ([VentureBeat](https://venturebeat.com/ai/who-needs-gpt-4o-voice-mode-humes-evi-2-is-here-with-emotionally-inflected-voice-ai-and-api)). In Oct 2025 Hume also shipped **EVI 4 mini**, described as "40% faster with latency under 200 milliseconds" and roughly "100ms" faster per response than EVI 3; it pairs Octave 2 speech generation with a supplemental/external LLM rather than a native SLM ([TestingCatalog](https://www.testingcatalog.com/hume-ai-launches-octave-2-and-evi-4-mini-voice-models/), snippet; [Yahoo Finance](https://finance.yahoo.com/news/sambanova-hume-ai-unleash-lightning-120000958.html)).
 
@@ -213,7 +220,7 @@ No mainstream child-facing Socratic tutor built on Hume EVI was found. Hume's pu
 
 **PowerPoint.** Node: `officeParser` (jszip-based) parses PPTX into an AST with slide text and speaker notes ([GitHub](https://github.com/harshankur/officeParser)); lighter alternatives are hand-rolled jszip over `ppt/slides/slideN.xml` and `ppt/notesSlides/` (what this repo does). Python: `python-pptx`.
 
-## Recommended default stack (research conclusion)
+## Recommended default stack (research conclusion of 2026-09-14; the voice part was superseded, see the status note at the top)
 
 1. **Voice:** keep Hume EVI 3 (or EVI 4 mini for lower latency) in **CLM mode** hitting the existing `/clm/chat/completions` SSE bridge; it is the only way to keep the orchestrator/grounding/assessor loop authoritative. Accept the extra hop; compensate with Sonnet 5 low-effort or Haiku 4.5 for the tutor turn, prompt caching on the stable prefix, streaming every delta, an orchestrator-enforced filler after ~700 ms if measurements demand it, and abort-on-close.
 2. **YouTube:** prefer a hosted transcript API for public videos with an explicit "own/licensed content only" policy; fall back to local yt-dlp. Avoid server-side yt-dlp against YouTube in production.

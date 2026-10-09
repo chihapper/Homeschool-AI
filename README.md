@@ -10,11 +10,11 @@ AssemblyAI listens, Inworld or ElevenLabs speaks, and the same tutor answers eit
 ## What it does
 
 1. **Ingest** whatever you teach from: lesson plans and textbook chapters (PDF, DOCX, Markdown, text), **PowerPoint lectures** (slide text plus speaker notes), **YouTube and TED videos** (captions, or transcribed when there are none), **podcasts** (RSS feed or episode link), and web pages. Everything becomes lessons and concepts traceable to the source passage or timestamp.
-2. **Get to know** a new student in two short conversations, each held once. The first is about how to work with them, on any course: what they like doing, how they tell back a short passage built into the app (the same for every student, and you can read it on the Students tab), and what they do when a question gets hard. It never uses your course. The second comes before their first lesson on each course: one plain question on each of its central ideas and "how sure are you, 0 to 10?", with no teaching, so the tutor starts each idea from what your child already knows and you can see what they knew before. Both hand over to the lesson by themselves. What the app keeps is two records: how to work with your child, and what they know about each course. After every session's report both are revised from what the student showed, each change with its reason on the Students tab, and you can undo any of them. Pace, what they do when stuck and how much nuance they are ready for change only when two sessions in a row point the same way. There is a box for your own notes, which the tutor follows as written, and no "learning style": the evidence that matching teaching to one helps is not there.
+2. **Get to know** a new student in two short conversations, each held once. The first happens when you add them on the Students tab and is about how to work with them, on any course: what they like doing, how they tell back a short passage built into the app (the same for every student, and you can read it on the Students tab), and what they do when a question gets hard. It never uses your course. The second opens their first lesson on each course (Lesson tab): one plain question on each of its central ideas and "how sure are you, 0 to 10?", with no teaching, so the tutor starts each idea from what your child already knows and you can see what they knew before. Both hand over to the lesson by themselves. What the app keeps is two records: how to work with your child, and what they know about each course. After every session's report both are revised from what the student showed, each change with its reason on the Students tab, and you can undo any of them. Pace, what they do when stuck and how much nuance they are ready for change only when two sessions in a row point the same way. There is a box for your own notes, which the tutor follows as written, and no "learning style": the evidence that matching teaching to one helps is not there.
 3. **Tutor** with the Socratic method: elicit, probe, expose contradictions, ask for demonstrations, and only then move on. The tutor teaches only from your material. When your student brings up something from outside it, the tutor confirms it, corrects it or says it isn't sure, says it doesn't see it in the reading, and (your choice in Settings) checks it against Wikipedia in the background, coming back to it if it was unsure or wrong. It never rules on faith or values, and where your material and another source differ, it follows your material.
 4. **Assess** through the conversation itself. A separate agent reads the transcript, scores mastery per concept (0-4), lists misconceptions, audits the tutor's claims against the source, and writes summaries for parent and student.
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the agent design, [docs/LATENCY.md](docs/LATENCY.md) for how the voice path stays conversational, [docs/RESEARCH.md](docs/RESEARCH.md) for the product and learning-science research, and [skills/](skills/) for the competencies each agent is built from.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the agent design, [docs/LATENCY.md](docs/LATENCY.md) for how the voice path stays conversational, [docs/COST.md](docs/COST.md) for what a session costs and which model does what, [docs/TESTING.md](docs/TESTING.md) for the testing plan, [docs/RESEARCH.md](docs/RESEARCH.md) for the product and learning-science research, and [skills/](skills/) for the competencies each agent is built from.
 
 ## What this is (and is not)
 
@@ -26,7 +26,7 @@ what they can explain, apply, and still get wrong, and whether the tutor stayed 
 It is not a curriculum. It does not choose what to teach, plan your week, replace the reading or the
 workbook, grade tests, or keep records. Homeschool families skip and substitute parts of any curriculum,
 so what gets taught stays your call: untick lessons or concepts on the Courses tab (**Focus**) and the
-tutor leaves them alone. Tick **Already read this** when starting a session and the tutor opens the way a
+tutor leaves them alone. Tick **Already read this** when starting a lesson and the tutor opens the way a
 Charlotte Mason narration does, asking your child to tell the reading back before any questions. The
 **Progress** panel on the Reports tab turns the session reports into one view per child and course.
 
@@ -98,8 +98,10 @@ data/         Local JSON store (gitignored)
 ## Development
 
 ```bash
-npm test            # unit tests (no network)
+npm test                  # unit tests (no network)
 npm run typecheck
+npm run personas:intake   # server running: three scripted students through both intakes, with checks
+npm run assess:compare -- <sessionIdPrefix> label=model@effort ...   # one saved session, several report models
 ```
 
 Tune agent behaviour by editing `skills/*/SKILL.md` and restarting the server. Add your own skills by

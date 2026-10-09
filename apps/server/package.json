@@ -13,7 +13,8 @@
     "ingest": "tsx src/cli/ingest.ts",
     "chat": "tsx src/cli/chat.ts",
     "doctor": "tsx src/cli/doctor.ts",
-    "personas:intake": "tsx scripts/intake-personas.ts"
+    "personas:intake": "tsx scripts/intake-personas.ts",
+    "assess:compare": "tsx scripts/assess-compare.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.125.0",

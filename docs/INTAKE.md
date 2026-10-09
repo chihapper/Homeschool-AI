@@ -9,10 +9,10 @@ C: the learning science). "R1 §3" points into them.
 
 Two features, by the user's decision:
 
-1. **The general intake**: once, when a student first uses the app. It writes the learner profile, "how this
+1. **The general intake**: once, when a student is added (Students tab). It writes the learner profile, "how this
    student learns", which every course shares and the profile pass keeps current after each session.
-2. **The course intake**: once per student per course, at the student's first session on it (or from a
-   button on the Courses tab). It writes the course-knowledge record, "where this student starts on this
+2. **The course intake**: once per student per course, at the start of the student's first lesson on it (or
+   from "Ask again" on the Courses tab). It writes the course-knowledge record, "where this student starts on this
    content", which the profile pass keeps current after each session on that course.
 
 A rule that runs through both: **the general intake never uses the parent's course as its material.** The
@@ -35,7 +35,7 @@ it differs from the proposal below, which is kept as written for its reasoning a
 | Tutor | the learner block and `startingPoint` in `agents/tutor-agent.ts`; skills `learner-adaptation`, `socratic-method` | Entry point from what the student knows; opens a probed concept with their own words; a confident wrong answer is corrected early and in full. |
 | Assessor and progress | `startingPointsBlock`; `buildProgress(..., knowledge)`; skill `mastery-assessment` | "Before and after" in the report; a "Before the course" column in the progress table. |
 | Profile pass | `agents/profile-agent.ts`, `domain/profile.ts`, skill `profile-update` | Revises both records; undo puts both back. |
-| The parent's side | Students, Courses, Session and Reports tabs | Both records, the notes box, the passage, why there is no learning style, "ask now" per student on a course, the sitting described before it starts. |
+| The parent's side | Students, Courses, Lesson and Reports tabs | Both records, the notes box, the passage, why there is no learning style. Since 2026-10-06 (the user's call): the general intake is held on the Students tab when a student is added ("Add and begin the intake"); a first lesson on a course opens with the course intake on the Lesson tab, with a notice and "Skip the questions this time"; the Courses tab has "Start X on this course", "Continue with X" and "Ask again". |
 | Scripted personas | `apps/server/scripts/intake-personas.ts` | Three students through both intakes on a running server, with checks. |
 
 **The questions, by band.** One passage; the intake starts in the student's grade band, and the hard question

@@ -27,9 +27,9 @@ and giveaway counts. What is deliberately not built is in [ROADMAP.md](ROADMAP.m
 | Agent | When it runs | Skills | Output |
 |---|---|---|---|
 | **Curriculum Agent** | On upload | `curriculum-parsing`, `grounding` | `Course` (lessons, concepts, objectives, guiding questions, cited source chunks) |
-| **Intake (general)** (`profiler-agent.ts`) | A new student's first session, once | `initial-assessment`, `voice-conversation` | A six-to-eight-exchange conversation on a passage built into the app (never the family's course), then, written in the background, the first `LearnerProfile`: how to work with this student on any course |
-| **Intake (course)** (`course-intake-agent.ts`) | A student's first session on each course, once | `course-intake`, `voice-conversation` | One first-step question on each of six to eight central concepts, with "how sure, 0 to 10?" and no teaching, then, written in the background, the `CourseKnowledge` record: where this student starts on this course |
-| **Socratic Tutor** | Every teaching turn (voice or text) | `socratic-method`, `learner-adaptation`, `grounding`, `voice-conversation` | Spoken turn + tool calls (`lookup_source`, `record_observation`, `advance`) |
+| **Intake (general)** (`profiler-agent.ts`) | When a student is added (Students tab), once | `initial-assessment`, `voice-conversation` | A six-to-eight-exchange conversation on a passage built into the app (never the family's course), then, written in the background, the first `LearnerProfile`: how to work with this student on any course |
+| **Intake (course)** (`course-intake-agent.ts`) | The start of a student's first lesson on each course, once | `course-intake`, `voice-conversation` | One first-step question on each of six to eight central concepts, with "how sure, 0 to 10?" and no teaching, then, written in the background, the `CourseKnowledge` record: where this student starts on this course |
+| **Socratic Tutor** | Every teaching turn (voice or text), as two calls: the speaking call (the reply, `lookup_source` only, thinking off) and the reflect pass that runs while the student listens (`record_observation`, `advance`, `open_thread`, `flag_outside_claim`) | `socratic-method`, `learner-adaptation`, `grounding`, `voice-conversation` | The spoken turn, then the notes, the phase change and one thread for the next turn |
 | **Assessor Agent** | When a session ends | `mastery-assessment`, `grounding` | `MasteryReport` (0-4 per concept, misconceptions, grounding audit, parent/student summaries) |
 | **Reference Checker** | In the background, when the reflect pass flags a fact from outside the material | `reference-check` | A verdict on one fact from Wikipedia passages (supported, contradicted, complicated, not found), with a word-for-word quotation and a link to the version read |
 | **Profile Reviser** | In the background, after every mastery report | `profile-update` | A revised `LearnerProfile` and revised notes for the course's `CourseKnowledge` record, with a reason per changed field; `domain/profile.ts` lands the course notes and the profile's fast fields, holds the slow ones until two sessions agree, and records every change with undo for both records |
@@ -38,6 +38,15 @@ and giveaway counts. What is deliberately not built is in [ROADMAP.md](ROADMAP.m
 Skills live in `skills/<name>/SKILL.md` and are concatenated into the agent's system prompt. They are
 the "competencies" layer: you can reshape how the tutor questions, how strict the assessor is, or how
 the intake runs by editing markdown.
+
+**Which model runs what** is a runtime setting (Settings, Models; `docs/COST.md` has the measurements):
+the tutor's speaking call (`tutorModel`), its reflect pass (`reflectModel`, empty means the tutor's), the
+offline agents (`model`: the course build, the intake write-ups, the profile pass) and the report
+(`assessorModel`, empty means the offline model). Everything runs on the Claude API through
+`llm/client.ts`, with one exception: the report may run on an OpenAI model through `llm/openai.ts`, the
+adapter behind `streamParsed`, which translates a Claude-shaped structured-output request to OpenAI's
+Responses API and shapes the reply like a Claude message, so the assessor code does not know the vendor.
+The settings route lets only the report leave the Claude API.
 
 ## Ingestion sources
 
@@ -77,7 +86,10 @@ Session(kind=lesson, phase=teach) ─ Tutor ─> inquire ─> assess ─(≥2 ob
                                                                                       └─> Profile Reviser ──> both records
 ```
 
-A student with a profile skips the first box; a student with a record for the course skips the second. The
+In the web app the first box is held on the Students tab when a student is added ("Add and begin the
+intake"), and the Lesson tab starts a sitting with `skipGeneralIntake`, so a first lesson on a course opens
+with the second box; the CLI (`npm run chat`) and the API run the whole chain. A student with a profile
+skips the first box; a student with a record for the course skips the second. The
 two records are the learner profile (how to work with this student, on the learner) and the course-knowledge
 record (what they know about one course: starting points from the course intake, and notes kept since;
 `data/course-knowledge/<learner>__<course>.json`). A message sent to a finished intake is answered by the
@@ -119,8 +131,9 @@ speaks for the session that took over. Text and voice sessions share one state a
 
 ## Data
 
-File-backed JSON in `data/` (`courses/`, `learners/`, `sessions/`, `reports/`). `JsonStore` is the only
-persistence abstraction; swap it for a database when needed. A learner record carries its profile and the
+File-backed JSON in `data/` (`courses/`, `learners/`, `course-knowledge/`, `sessions/`, `reports/`, plus
+`settings.json` for the runtime settings and `backups/` for records a migration converted). `JsonStore` is
+the only persistence abstraction; swap it for a database when needed. A learner record carries its profile and the
 profile's revisions (`profileHistory`: each with the changes, their reasons, what was held, and the profile as it
 was before, so the latest can be undone; the last 40 are kept).
 

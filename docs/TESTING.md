@@ -28,10 +28,13 @@ npm run dev:web                    # http://localhost:5173
 
 Then, in the web app:
 
-- **Settings** shows the readiness check (the same rows as `npm run doctor`, with an optional API ping)
-  and the model settings. Tutor model, effort and thinking, offline model and effort, cache pre-warm and
-  refusal fallbacks are all live: a change applies to the next turn, no restart, and is saved to
-  `data/settings.json` until you reset. This is where the model comparison below happens.
+- **Settings** shows the readiness check (the same rows as `npm run doctor`, with an optional API ping),
+  the model settings and the voice settings. Four model fields: the tutor (what the student talks to), the
+  notes model (the reflect pass after each reply), the offline model (course builds, intake write-ups, the
+  profile pass) and the report model (the assessor; the only one that may be an OpenAI model). Effort,
+  thinking, cache pre-warm and refusal fallbacks sit beside them. All are live: a change applies to the next
+  turn, no restart, and is saved to `data/settings.json` until you reset. This is where the model
+  comparison below happens.
 - **Courses > Bundled samples > Ingest** builds the course from `data/samples/photosynthesis-lesson.md`.
   Expand a lesson to see every concept with its key facts, misconceptions and the chunk ids that ground
   it; open "Source passages" to compare against the verbatim text.
@@ -41,7 +44,7 @@ Then, in the web app:
   each course's "Forget" make them due again, and the Lesson tab's "Skip the questions this time" goes
   straight to the lesson. The page shows both records, the passage the intake reads, and a box
   for the parent's own notes.
-- **Session** is the tutor. Under every tutor reply is the same line `npm run chat` prints (TTFT, total,
+- **Lesson** is the tutor. Under every tutor reply is the same line `npm run chat` prints (TTFT, total,
   round-trips, cache read/written, and any text the model wrote after its tools that was dropped). The
   right-hand panel is `/state`: phase, concept, every observation as it is recorded, what the
   orchestrator queued for the next turn, and the running latency summary. "Leave for now" keeps the
@@ -74,7 +77,7 @@ What to look at, in order:
 
 Do this three times with different personas (novice who needs teaching first, confident but with a misconception, bored fast learner) and compare the reports. That is your first pedagogy eval.
 
-**Model comparison.** Run the same persona with the tutor model set to `claude-sonnet-5`, `claude-opus-5`, and `claude-haiku-4-5` (Settings tab, or `CLAUDE_TUTOR_MODEL` in `.env` for the CLI). Reset the student's profile between runs so each starts from the same place. Compare TTFT p50 and how well each holds the Socratic line. This decides the voice model.
+**Model comparison.** Run the same persona with the tutor model set to `claude-haiku-5-5`, `claude-sonnet-5-5` and `claude-opus-5-5` (Settings tab, or `CLAUDE_TUTOR_MODEL` in `.env` for the CLI); the notes model can differ from the speaker (the 2026-10-08 numbers are in `docs/LATENCY.md`). For the report, `npm run assess:compare -- <sessionIdPrefix> label=model@effort ...` assesses one saved session with several models and prints the reports side by side without saving anything (`docs/COST.md` has two sessions compared). Reset the student's profile between runs so each starts from the same place. Compare TTFT p50 and how well each holds the Socratic line. This decides the voice model.
 
 **One reply per turn.** The tutor's tools (`record_observation`, `advance`) run after it speaks. Once its reply contains a question, anything the model writes after the tools is dropped and counted ("chars dropped after tools" on the turn line); if it advanced before asking, it gets one more segment to ask. A turn line that shows dropped text is the model trying to talk twice; a rising count across a session is worth a skill edit.
 
@@ -184,5 +187,7 @@ Manual personas do not scale. The next piece of work is a simulated-student harn
 agent plays a learner with a fixed profile and planted misconceptions, runs a full session against the
 tutor automatically, and a rubric scores the transcript on questions-per-turn, hint-ladder adherence,
 answer giveaways (must be zero), grounding violations, and whether the assessor's levels match the
-planted state. Run it across the three personas and all three models before every skill edit, and you
-have a regression suite for teaching quality. See `docs/RESEARCH.md`, "What to measure in pilots."
+planted state. Run it across the three personas and the current models before every skill edit, and you
+have a regression suite for teaching quality. See `docs/RESEARCH.md`, "What to measure in pilots." The
+report side of this exists already: `npm run assess:compare` replays one saved session through several
+assessor models, which is how the report model was chosen (`docs/COST.md`).

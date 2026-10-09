@@ -78,7 +78,12 @@ home this week, the tutor's conduct). Rerun on the Rome session at medium effort
 about 150 words and 9 quotes to a four-paragraph letter with 15 quotes and a task for the week, Luna's
 likewise; Sonnet's, rerun at high effort with the same skill, kept its levels and gained the task for the
 week. Luna, at medium, still missed the Aeneas slip, rated the Etruscan answer 0 where everyone else said 1,
-and once wrote "he" for Sam, whose records state no gender. Decision pending with the user.
+and once wrote "he" for Sam, whose records state no gender.
+
+**Decided 2026-10-09 (the user): the report runs on Sonnet 5.5 at high effort** (Settings, Report model). It
+matched Opus level for level on both sessions at half the cost, in 35 to 45 s, and its letters need no
+further prompting work. Sol at medium effort stays available as a second opinion; Luna is not the report a
+parent reads.
 
 The profile pass after the report (Opus 5.5) reads the two records, the transcript and the report; an
 estimate, not a measurement: a tenth to a fifth of a dollar.
@@ -98,10 +103,8 @@ Estimates from the saved files; the development sessions' own runs are not in th
 
 ## Levers, in order of what they save
 
-1. The assessor off Opus 5.5: Sonnet 5.5 at half the cost (and Opus's levels on both sessions), GPT-6.1 Sol at
-   medium effort for a little less (its own levels, slower at high effort), or GPT-6 Luna at under a cent (the
-   strictest, with slips at the edges). With the explicit Summaries section, all of them write the letter.
-   Pending the user's decision.
+1. The assessor on Sonnet 5.5 at high effort: done 2026-10-09, half of each report. GPT-6.1 Sol at medium
+   effort is the second opinion if one is wanted; GPT-6 Luna is not the report a parent reads.
 2. Haiku 5.5 speaking, Sonnet 5.5 taking notes: done 2026-10-08.
 3. Fewer harness runs, each quoted first.
 4. The profile pass on Sonnet 5.5: untested; the same shape of saving as the assessor.
