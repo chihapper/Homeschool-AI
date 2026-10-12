@@ -274,8 +274,9 @@ history and in the docs each entry names.
   with an estimated percentage, a ring in the top-right corner and a notice when it is ready or has failed;
   course cards start folded; publisher and grades are fields (read from the material, editable). The user's
   Good and the Beautiful build "missed lesson 3": the Student Journal has no Lesson 3 page (its own contents
-  go 1, 2, 4); the lesson-title rule now keeps the material's labels verbatim ("Lesson 6–7"). Recommended to
-  the user: add the parent's lesson book with the journal, since the journal is mostly activity pages.
+  go 1, 2, 4); the lesson-title rule now keeps the material's labels verbatim ("Lesson 6–7"). The course book
+  (147 MB, all twelve lessons) had been refused by the 50 MB upload cap; the cap is now 500 MB per file, and
+  the user is to rebuild from the course book.
 
 - 2026-10-12: the user's first intake on the new flow (Andy) exposed three gaps, all fixed and checked live: a tab
   switch closed the intake area, the parent added Andy again and the profile landed on the second record (the open
