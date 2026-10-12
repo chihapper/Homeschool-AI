@@ -132,6 +132,11 @@ export function startingPoint(conceptId: string, knowledge?: CourseKnowledge, as
         (start.confidence !== undefined ? ` (sure ${start.confidence} out of 10)` : "") +
         (start.materialSays ? ` The reading says: ${start.materialSays}` : ""),
     );
+    // Andy's first lesson (2026-10-12) spent four minutes re-teaching density, which Andy had explained correctly and
+    // rated 10 out of 10 at the intake.
+    if (start.estimate === "can-explain") {
+      lines.push("They could already explain this before the course began. Do not teach it again: one question that applies it to a new case, a second demonstration only if the notes need one, then move on.");
+    }
   }
   if (last) lines.push(`Last assessed: level ${last.level} of 4 on ${last.asOf.slice(0, 10)}${start ? ", which is where they stand now; the starting point is where they began" : ""}.`);
   return lines.join("\n");
@@ -251,7 +256,7 @@ export function buildTutorContext(ctx: TutorContext, mode: "speak" | "reflect" =
   if (ctx.intakeJustNow && !ctx.knowledge?.starts.length) {
     blocks.push(
       `<asked_just_now>\nMoments ago, in this sitting, the learner was asked what they already know about this course, with no teaching and no corrections. ` +
-        `Their answers are their starting point: when a concept they spoke about comes up, open by returning to what they said. The notes on it are still being written.\n` +
+        `Their answers are each concept's starting point, for when the lesson reaches it. Open on the current concept above, from what they said about it if anything; never open on another concept because they spoke about it with more confidence. The notes on it are still being written.\n` +
         `${ctx.intakeJustNow}\n</asked_just_now>`,
     );
   }
@@ -310,7 +315,8 @@ export function buildTutorContext(ctx: TutorContext, mode: "speak" | "reflect" =
         ? `\n\nThis dialogue is still working on something: ${thread.text}\n` +
           "That is where you and the learner actually are, so this turn works on it — inside whatever the phase above asks of you. " +
           "If they take you somewhere else, go with them for a sentence, because a real question of theirs deserves a real answer, then bring it back in the same turn. " +
-          "A question they answered around is not an interruption to the lesson; it is the lesson, and holding them to it gently is the whole method.\n" +
+          "A question they answered around is not an interruption to the lesson; it is the lesson, and holding them to it gently is the whole method. " +
+          "But if their latest reply already answers it, in any words, it is done: say what they got right and move on, and never ask it again to get the material's wording.\n" +
           (thread.turns < THREAD_PATIENCE
             ? `This is turn ${thread.turns} on it, so a fresh angle is better than repeating yourself word for word.`
             : `This is turn ${thread.turns} on it: you have come at it from several angles and the learner has not accounted for it yet. ` +
@@ -339,12 +345,17 @@ export function buildTutorContext(ctx: TutorContext, mode: "speak" | "reflect" =
       ? (ctx.saidFirst
           ? `You have already said this to the learner, as the start of this reply: "${ctx.saidFirst}" Carry on from there with the rest of the reply, without repeating it or saying it again in other words.\n\n`
           : "") +
+        notesBlock(session) +
         (followUps.length ? `Your reply starts with something you owe the learner, before anything else. ${followUps.join(" ")}\n\n` : "") +
         (stage?.kind === "close"
           ? CLOSE_INSTRUCTION
           : (stage?.kind === "wrap-up" ? wrapUpInstruction(stage.announce) : "") +
             "You are speaking to the learner now and they are waiting, so answer straight away: two to four sentences ending in your single question, and nothing after it. " +
         "Do not answer your own question, and do not narrate a pause, a hesitation, or a reaction the learner has not actually given: their last message is the only thing they have said. " +
+        "A right idea in their own words is a right answer: accept it, and if the material has a term for it, give the term once in passing (\"yes, and the book's word for that is ...\"), never as a correction or a new question. " +
+        "Not \"the one word to tighten is lighter\", but \"yes, the egg is lighter for its size: the book calls that less dense\"; then go on to a new case or the next idea, and do not ask them to say it again. " +
+        "Before you tell them two things they said cannot both be true, check that they really conflict: two wordings of one idea are not a contradiction. " +
+        "If they say they already said it, look back: if they did, in any words, say so plainly and move on. " +
         "Whether they are ready to move on, and the notes on what they showed, are settled after you speak, in a separate pass you do not run here; this call only speaks. " +
         toldLine +
         "Passages that match the learner's latest words are above when there are any. If you need another passage to answer honestly, call lookup_source before your first word, " +
@@ -357,8 +368,12 @@ export function buildTutorContext(ctx: TutorContext, mode: "speak" | "reflect" =
         "This is also the only place you get to think before teaching: the next spoken turn happens fast and cannot weigh anything. " +
         "So decide what this dialogue is still working on and call open_thread with it in one sentence — a question they answered around, a claim that contradicts something they said earlier, " +
         "an answer that was right but sounded like a guess. If the thread is finished, do not call it, and the next turn moves on. " +
-        "If the learner says you already told them something, or disputes who said what, read back through the conversation before you record anything and settle it: " +
-        'the thread states who is right as a fact (for example "He is right: I gave him 753 B.C. earlier; own it, test the idea differently"), never as a dispute still open. ' +
+        "A right idea in the learner's own words is understanding, and it finishes the thread: never open or keep a thread to get the material's wording (\"said lighter, needs to say less dense\"). " +
+        "Press on words only when they hide a wrong idea, and then the thread names the idea, not the word. " +
+        "In notes and threads, call the learner by name or \"they\": never \"he\" or \"she\" unless the learner or the parent used it, because notes feed the parent's report. " +
+        "If the learner says you already told them something, says they already answered, or disputes who said what, read back through the conversation before you record anything and settle it: " +
+        'the thread states who is right as a fact (for example "They are right: I gave them 753 B.C. earlier; own it, test the idea differently"), never as a dispute still open. ' +
+        "When they had already answered, in any words, the matter is settled: open no thread on it, or one that says they were right and the dialogue moves on. " +
         "If the latest exchange brought up a checkable fact the material does not settle, from the learner or from you, call flag_outside_claim for it; never for faith, values or opinion. " +
         (flagged.length ? `Already flagged this session, so never flag these again, however you would word them now: ${flagged.join("; ")}. ` : "") +
         "Make every call in one batch. If there is nothing to record, no reason to advance and nothing unfinished, do nothing at all." +
@@ -463,7 +478,8 @@ export function tutorTools(ctx: TutorContext, mode: "speak" | "reflect" = "speak
       description:
         "Name in ONE SHORT SENTENCE (about fifteen words; longer is cut off) what this dialogue is still working on, so your next turn continues it instead of starting fresh. " +
         "Use it when the exchange left something unfinished: a question the learner answered around, a claim of theirs that contradicts something they said earlier, " +
-        'an answer that was right but sounded like a guess. For example: "He answered around what the fertilizer actually does for the corn." ' +
+        'an answer that was right but sounded like a guess. For example: "They answered around what the fertilizer actually does for the corn." ' +
+        "Never use it to get the material's wording for an idea they already stated in their own words. " +
         "Calling it again replaces it; when the thread is genuinely finished, do not call it at all. Do not use it to restate the phase or the lesson plan.",
       input_schema: {
         type: "object",
@@ -552,13 +568,46 @@ export function tutorTurn(ctx: TutorContext, signal?: AbortSignal): AsyncGenerat
 }
 
 /**
+ * The conversation the reflect pass reads. The orchestrator saves the reply before the pass starts, so it is usually
+ * the last turn already; it is added only when it is not. Until 2026-10-12 it was always added, so the pass read
+ * every reply twice: it noted "my last reply was sent twice", and a parent's report said the tutor repeated itself.
+ */
+export function withReply<T extends { role: "user" | "assistant"; content: string }>(transcript: T[], spoken: string): Array<T | { role: "assistant"; content: string }> {
+  const last = transcript.at(-1);
+  if (!spoken || (last?.role === "assistant" && last.content.trim() === spoken.trim())) return transcript;
+  return [...transcript, { role: "assistant" as const, content: spoken }];
+}
+
+/**
+ * What the reflect pass concluded about the learner's previous answer, for the speaking call. The speaking call
+ * judges the latest reply itself, with no time to think, and it used to see the notes only for the current concept:
+ * in Andy's lesson (2026-10-12) the notes had called an answer right ("lighter is loose wording for less dense") and
+ * the next reply told Andy that two of their statements contradicted each other. Notes on any concept count here.
+ */
+export function notesOnPreviousAnswer(session: Pick<Session, "transcript" | "observations">): Observation[] {
+  const lastReply = [...session.transcript].reverse().find((t) => t.role === "assistant");
+  if (!lastReply) return [];
+  return session.observations.filter((o) => o.at > lastReply.at && o.kind !== "told").slice(-4);
+}
+
+function notesBlock(session: Session): string {
+  const notes = notesOnPreviousAnswer(session);
+  if (!notes.length) return "";
+  return (
+    "Your notes on their answer before this one, taken after your last reply:\n" +
+    notes.map((o) => `- [${o.kind}] ${o.evidence} (${o.note})`).join("\n") +
+    "\nWhat the notes call right was right: build on it, and do not ask for it again.\n\n"
+  );
+}
+
+/**
  * The REFLECT call: records observations and requests the phase change, after the reply was spoken.
  * `spokenText` is the reply the learner just heard (not yet in the transcript when this runs).
  * Returns when the bookkeeping is done; anything it writes as text is ignored.
  */
 export async function reflectTurn(ctx: TutorContext, spokenText: string, signal?: AbortSignal): Promise<TurnResult> {
   const system = buildSystem(reflectAgent, buildTutorContext({ ...ctx, justSpoken: spokenText || undefined }, "reflect"), STABLE_CONTEXT_BLOCKS);
-  const messages = transcriptToMessages([...ctx.session.transcript, ...(spokenText ? [{ role: "assistant" as const, content: spokenText }] : [])]);
+  const messages = transcriptToMessages(withReply(ctx.session.transcript, spokenText));
   if (!messages.length) return { text: "", appended: [], stopReason: null, latency: { ttftMs: 0, totalMs: 0, iterations: 0, cacheReadTokens: 0, cacheWriteTokens: 0, inputTokens: 0, outputTokens: 0, suppressedChars: 0 } };
   // The API requires the conversation to end with a user message, and this one ends with the tutor's own
   // reply, so close it with the instruction for this pass.

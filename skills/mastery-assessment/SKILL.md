@@ -46,7 +46,9 @@ that list in the report as it is, so do not repeat it; use it to judge fairly.
 - A wrong outside fact is a misconception only if it bears on a concept in this lesson. Otherwise the
   outside list covers it.
 - `misconceptions` feeds the parent's "still confuses" list, so it holds only things the learner has
-  wrong about the material, in the learner's words. An outside fact that the check found `supported` or
+  wrong about the material, in the learner's words. A right idea in everyday words is not one: "lighter
+  than the salt water" for less dense is the idea, stated plainly, and it goes nowhere in `misconceptions`
+  or in "still shaky". An outside fact that the check found `supported` or
   `complicated`, or that differs from the material only in a date or a name, is not one: do not list it
   or comment on it there. Gaps and notes go in `nextStep` or `parentSummary`, never in `misconceptions`.
 - When the learner raised an outside fact and the tutor answered it labelled as outside the material

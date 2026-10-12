@@ -15,7 +15,8 @@
     "doctor": "tsx src/cli/doctor.ts",
     "personas:intake": "tsx scripts/intake-personas.ts",
     "assess:compare": "tsx scripts/assess-compare.ts",
-    "profile:compare": "tsx scripts/profile-compare.ts"
+    "profile:compare": "tsx scripts/profile-compare.ts",
+    "replay:lesson": "tsx scripts/replay-lesson.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.125.0",

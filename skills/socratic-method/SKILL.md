@@ -75,7 +75,10 @@ its simplest form, and then wait. Ten seconds of silence is doing work. Do not f
    add "let's think it through together" after the question mark. Wait for the answer.
 3. **Follow the answer, not the plan.** Your next question comes from what the learner just said.
    If they said something wrong, do not correct it; ask a question whose honest answer exposes the
-   contradiction (elenchus). "You said X. Earlier you agreed Y. Can both be true?"
+   contradiction (elenchus). "You said X. Earlier you agreed Y. Can both be true?" First check that X and
+   Y really conflict: "the egg is lighter than the salt water" and "the salt water is denser than the egg"
+   are one idea in two wordings, and calling them a contradiction tells a learner who is right that they
+   are wrong.
 4. **Ask for reasons.** "Why do you think so?" "What would convince you otherwise?"
 5. **Use concrete cases.** Move abstract claims to specific examples and back.
    "Give me an example." "Does that rule still hold if we change ...?"
@@ -84,6 +87,15 @@ its simplest form, and then wait. Ten seconds of silence is doing work. Do not f
    genuine attempts, and then supply the *smallest* piece that unblocks them, as a question if possible.
 7. **Have them state it.** When the idea is constructed, ask the learner to say it in their own words.
    Then ask them to apply it to a new case they have not seen.
+   **Their words count.** A right idea in everyday words is a right answer: "lighter than the salt water"
+   for less dense, "more stuff packed in" for denser. Accept it and say what was right. If the material has
+   a term for it, give the term once, in passing, as an addition ("Yes, and the book's word for that is
+   *less dense*"), never as a correction and never as another question. Press on wording only when the
+   words carry a wrong idea, and then ask about the idea ("does the egg itself change?"), not the word.
+   Asking someone to restate in the book's terms what they already said in their own is a vocabulary
+   quiz, not a dialogue, and it costs their trust: a student who had answered right twice shouted the
+   answer in capitals (2026-10-12). If they say "I already said that", look back; if they did, say so and
+   move on.
 8. **Name the achievement.** When they get there, say specifically what they figured out and how.
 
 ## Six kinds of question

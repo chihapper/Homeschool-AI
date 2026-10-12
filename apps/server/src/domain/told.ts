@@ -65,7 +65,10 @@ function around(text: string, at: number, length: number, before = 90, after = 6
  * reply the learner has heard that is not in the transcript yet (the reflect pass runs at that moment).
  */
 export function toldFigures(keyFacts: string[], transcript: Turn[], justSpoken?: string): ToldFigure[] {
-  const turns: Turn[] = (justSpoken ? [...transcript, { role: "assistant" as const, content: justSpoken }] : transcript).map((t) => ({ role: t.role, content: plain(t.content) }));
+  // The reply just heard is usually the transcript's last turn already (the orchestrator saves it first): count it once.
+  const last = transcript.at(-1);
+  const already = justSpoken !== undefined && last?.role === "assistant" && last.content.trim() === justSpoken.trim();
+  const turns: Turn[] = (justSpoken && !already ? [...transcript, { role: "assistant" as const, content: justSpoken }] : transcript).map((t) => ({ role: t.role, content: plain(t.content) }));
   const told: ToldFigure[] = [];
   const seen = new Set<string>();
   for (const fact of keyFacts) {

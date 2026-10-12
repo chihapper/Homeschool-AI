@@ -235,7 +235,8 @@ export function retrievalDirective(conceptName: string, learnedOn: string): stri
   return `Spaced retrieval: before today's concept, open with ONE quick retrieval question about "${conceptName}" (learned on ${learnedOn}). No hints, and keep the answer out of the question: that name may contain it. Once they have answered, move on to today's concept.`;
 }
 
-function tutorContextFor(session: Session, learner: Learner, course: Course, lesson: Lesson): TutorContext | undefined {
+/** Exported for replay scripts (scripts/replay-lesson.ts), which rebuild a past turn exactly. */
+export function tutorContextFor(session: Session, learner: Learner, course: Course, lesson: Lesson): TutorContext | undefined {
   const concept = course.concepts.find((c) => c.id === walkedConceptIds(session, course, lesson)[session.conceptIndex]);
   if (!concept) return undefined;
   return { session, learner, course, lesson, concept, index: indexFor(course), onObservation: () => "", onAdvance: () => "", ...whatIsKnown(session, learner, course) };

@@ -18,8 +18,9 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the agent design, [docs/LAT
 
 ## What this is (and is not)
 
-This is a study partner for one unit of the material you already teach from, plus a running picture of
-where your child stands on it. You bring a chapter, a week's readings, or a topical booklet; the tutor
+This is a study partner for the material you already teach from, one course at a time, plus a running
+picture of where your child stands on it. You bring the course as you have it, such as a lesson book and its
+student workbook; the tutor
 questions your child on it and never asserts anything the material does not say; the report shows you
 what they can explain, apply, and still get wrong, and whether the tutor stayed inside your material.
 

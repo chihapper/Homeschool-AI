@@ -57,7 +57,7 @@ export function CoursesPage({ courses, onChange, builds, openCourse, ...starts }
           <button className="primary" onClick={() => setAdding(true)}>Add a course</button>
         </div>
         <p className="muted" style={{ marginBottom: 0 }}>
-          Each course is built from material you already own: a unit's lesson book, readings, worksheets or recordings. The tutor teaches only from it. Open a course to see its lessons, choose what is taught, and start a student on it.
+          Each course is built from material you already own: a course's lesson book, readings, worksheets or recordings. The tutor teaches only from it. Open a course to see its lessons, choose what is taught, and start a student on it.
         </p>
         {building.length > 0 && (
           <div className="building-list">
@@ -120,7 +120,7 @@ function AddCourseDialog({ builds, onClose, onOpenCourse }: { builds: CourseBuil
 
         {!tracking && (
           <>
-            <p className="muted small">One unit at a time works best: a unit's lesson book, a chapter, a week's readings. For a curriculum with a separate student workbook, add the parent's lesson book too: a workbook is mostly activity pages, and the teaching is in the book.</p>
+            <p className="muted small">Upload the course as you have it: the parent's lesson book, plus the student workbook or journal if you want its activities in the lessons. The lesson book matters most, because a workbook on its own is mostly activity pages and the teaching is in the book. A very large book, such as a whole year in several hundred pages, builds better split into its parts.</p>
             <div
               className={`dropzone${dragging ? " over" : ""}`}
               onClick={() => fileInput.current?.click()}
