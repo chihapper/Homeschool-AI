@@ -52,12 +52,13 @@ export interface BandQuestions {
  * student's grade band; a strong, sure answer earns the next band's question and a weak one the band below, two
  * moves at most. It is adaptive placement in miniature: the band a student reaches is evidence for `depth`.
  * The answers are here so the tutor can judge an answer and, after the hard question only, give the answer
- * from the passage (being asked first and told after is what makes the question worth asking).
+ * from the passage (being asked first and told after is what makes the question worth asking). The student hears
+ * none of this as "the passage": they heard it read, so the questions say "what I read you" (user, 2026-10-12).
  */
 export const BANDS: Record<Band, BandQuestions> = {
   A: {
     grades: "grades 4 to 6",
-    apply: "You drop an ice cube into a full glass of water. Where does it end up, and what does the passage say is the reason?",
+    apply: "You drop an ice cube into a full glass of water. Where does it end up, and why, from what I read you?",
     applyAnswer: "At the top. Ice is lighter than the same amount of liquid water, because as water freezes its molecules line up in an open pattern that takes up more room.",
     hard: "Fish live through the winter under the ice. If ice sank instead of floating, what would happen to the lake, and to the fish?",
     hardAnswer: "The lake would freeze from the bottom up and could freeze solid, so there would be no liquid water left for the fish to live in.",
@@ -66,15 +67,15 @@ export const BANDS: Record<Band, BandQuestions> = {
     grades: "grades 7 to 9",
     apply: "Someone fills a bottle to the very top with water, seals it, and puts it in the freezer. What happens to the bottle, and why?",
     applyAnswer: "Water takes up more room as it freezes, because its molecules line up in an open pattern, so the ice pushes on the bottle and it bulges or cracks.",
-    hard: "The passage says the ice on top of a lake works like a lid. Walk me through it step by step: why does the ice form on top in the first place, and how does that keep the fish alive?",
+    hard: "I read you that the ice on top of a lake works like a lid. Walk me through it step by step: why does the ice form on top in the first place, and how does that keep the fish alive?",
     hardAnswer:
       "As water cools toward freezing its molecules line up in an open pattern that takes up more room, so ice is lighter than the same amount of water and floats; the lake freezes from the top down; the ice on top slows the cold from reaching the water underneath, so it stays liquid and the fish live in it through the winter.",
   },
   C: {
     grades: "grade 10 and up",
-    apply: "A water pipe runs through an unheated garage, and on a freezing night it bursts. Using only what the passage says, explain why. Then tell me: would it burst if water behaved like most other things when it got cold?",
+    apply: "A water pipe runs through an unheated garage, and on a freezing night it bursts. Using only what I read you, explain why. Then tell me: would it burst if water behaved like most other things when it got cold?",
     applyAnswer: "Water takes up more room as it freezes, so the ice forces the pipe apart. Most things shrink a little as they get colder, so a liquid like that would take up less room and the pipe would not burst.",
-    hard: "The passage calls water the odd one out. Suppose it were not. Take me through a winter in that lake, step by step, and then tell me which one fact in the passage everything else depends on.",
+    hard: "I read you that water is the odd one out. Suppose it were not. Take me through a winter in that lake, step by step, and then tell me the one fact everything else depends on.",
     hardAnswer:
       "Ice would be heavier than the water and sink, so the lake would freeze from the bottom up and could freeze solid, with no lid of ice to slow the cold; the fish and plants would not survive. It all rests on one fact: freezing water's molecules line up in an open pattern that takes up more room, which makes ice lighter than the same amount of water.",
   },

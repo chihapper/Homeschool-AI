@@ -27,8 +27,13 @@ export function App() {
   const [report, setReport] = useState<Report | null>(null);
   /** Who and what the Lesson tab should show when it opens from the Courses tab. */
   const [preset, setPreset] = useState<LessonPreset | null>(null);
-  /** The student whose intake the Students tab should open on, when sent there from the Lesson tab. */
+  /**
+   * The student whose intake area is open on the Students tab, and the intake conversation once it has begun. Kept
+   * here, like the lesson's session, so a visit to another tab keeps them: on 2026-10-12 the area closed on a tab
+   * switch before Begin, the parent added the student again, and the profile landed on the second record.
+   */
   const [intakeFor, setIntakeFor] = useState<string | null>(null);
+  const [intakeSession, setIntakeSession] = useState<Session | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
@@ -49,7 +54,6 @@ export function App() {
 
   const go = (t: Tab) => {
     setTab(t);
-    if (t !== "students") setIntakeFor(null);
     if (t === "students" || t === "courses" || t === "lesson") void refresh();
   };
 
@@ -75,7 +79,7 @@ export function App() {
       </header>
       <main>
         {error && <div className="card error">{error}</div>}
-        {tab === "students" && <LearnersPage learners={learners} courses={courses} knowledge={knowledge} health={health} onChange={refresh} openIntakeFor={intakeFor} />}
+        {tab === "students" && <LearnersPage learners={learners} courses={courses} knowledge={knowledge} health={health} onChange={refresh} intakeFor={intakeFor} onIntakeFor={setIntakeFor} intakeSession={intakeSession} onIntakeSession={setIntakeSession} />}
         {tab === "courses" && (
           <CoursesPage
             courses={courses}

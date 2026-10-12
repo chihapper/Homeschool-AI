@@ -25,6 +25,12 @@ const ESTIMATE_LABEL: Record<StartingEstimate, string> = { none: "nothing yet", 
 /** A value short enough to read in a line; a rewritten paragraph (how they speak) is shown on its own instead. */
 const SHORT = 60;
 
+/** Case and spacing do not make a different child (the server applies the same rule, domain/students.ts). */
+function sameName(a: string, b: string): boolean {
+  const key = (s: string) => s.split(" ").filter(Boolean).join(" ").toLowerCase();
+  return key(a) !== "" && key(a) === key(b);
+}
+
 /** One change as the parent reads it, without the field name. */
 function describe(c: ProfileChange): string {
   if (c.from && c.to) return c.from.length + c.to.length <= SHORT * 2 ? `${c.from} → ${c.to}` : `revised: “${c.to}”`;
@@ -122,18 +128,20 @@ function CourseRecord({ k, course, learner, onChange }: { k: CourseKnowledge; co
  * exchanges on a passage built into the app, so the tutor learns how to work with the child before any course.
  * It is a session of its own; the profile is written from it in the background once it ends.
  */
-function IntakeArea({ learner, passage, courses, learners, health, onChange, onClose }: {
+function IntakeArea({ learner, passage, courses, learners, health, session, onSession, onChange, onClose }: {
   learner: Learner;
   passage: IntakePassage | null;
   courses: Course[];
   learners: Learner[];
   health: Health | null;
+  /** The intake conversation, held by the app so a visit to another tab keeps it; null until Begin. */
+  session: Session | null;
+  onSession: (s: Session | null) => void;
   onChange: () => Promise<void>;
   onClose: () => void;
 }) {
   const voiceReady = Boolean(health?.voice.stt === "assemblyai" && health?.voice.tts && health.voice.tts !== "none");
   const [mode, setMode] = useState<Mode>("text");
-  const [session, setSession] = useState<Session | null>(null);
   /** The voice connection, created inside the click so the browser allows audio; null while typing. */
   const [voice, setVoice] = useState<VoiceClient | null>(null);
   const [busy, setBusy] = useState(false);
@@ -153,7 +161,7 @@ function IntakeArea({ learner, passage, courses, learners, health, onChange, onC
         c.prepare();
         setVoice(c);
       }
-      setSession(s);
+      onSession(s);
     } catch (e) {
       setErr((e as Error).message);
     } finally {
@@ -163,7 +171,7 @@ function IntakeArea({ learner, passage, courses, learners, health, onChange, onC
   const close = async () => {
     voiceRef.current?.close();
     setVoice(null);
-    setSession(null);
+    onSession(null);
     await onChange();
     onClose();
   };
@@ -216,7 +224,7 @@ function IntakeArea({ learner, passage, courses, learners, health, onChange, onC
           courses={courses}
           learners={learners}
           health={health}
-          onSession={setSession}
+          onSession={onSession}
           onEnded={() => void close()}
           onLeave={() => void close()}
         />
@@ -225,14 +233,18 @@ function IntakeArea({ learner, passage, courses, learners, health, onChange, onC
   );
 }
 
-export function LearnersPage({ learners, courses, knowledge, health, onChange, openIntakeFor }: {
+export function LearnersPage({ learners, courses, knowledge, health, onChange, intakeFor, onIntakeFor, intakeSession, onIntakeSession }: {
   learners: Learner[];
   courses: Course[];
   knowledge: CourseKnowledge[];
   health: Health | null;
   onChange: () => Promise<void>;
-  /** Sent here from the Lesson tab: open the intake area on this student. */
-  openIntakeFor?: string | null;
+  /** The student whose intake area is open: adding a student opens it, and so does the Lesson tab's button. Held by the app, so a visit to another tab keeps it. */
+  intakeFor: string | null;
+  onIntakeFor: (id: string | null) => void;
+  /** The intake conversation once it has begun, held by the app for the same reason. */
+  intakeSession: Session | null;
+  onIntakeSession: (s: Session | null) => void;
 }) {
   const [name, setName] = useState("");
   const [grade, setGrade] = useState("");
@@ -244,28 +256,51 @@ export function LearnersPage({ learners, courses, knowledge, health, onChange, o
   useEffect(() => {
     api.usage().then(setUsage).catch(() => setUsage(null));
   }, [learners]);
-  /** The student whose intake area is open, if any. Adding a student opens it for them. */
-  const [intakeFor, setIntakeFor] = useState<string | null>(openIntakeFor ?? null);
   const area = useRef<HTMLDivElement>(null);
+  /** What to tell the parent when adding opened a student already on the list instead of making a second one. */
+  const [note, setNote] = useState<string | null>(null);
+  /** An intake in progress: no other student's intake starts until it ends. */
+  const intakeRunning = Boolean(intakeSession && intakeSession.phase !== "complete");
+  // While a profile is being written from an intake (about half a minute), look again every few seconds so the card
+  // fills in by itself. Before, it said "being written" until the page was reloaded, which read as unsaved.
+  const writing = learners.some((l) => !l.profile && l.profilePending && !l.profilePending.error);
+  useEffect(() => {
+    if (!writing) return;
+    const t = setInterval(() => void onChange(), 4000);
+    return () => clearInterval(t);
+  }, [writing, onChange]);
   useEffect(() => {
     api.intakePassage().then(setPassage).catch(() => setPassage(null));
   }, []);
-  useEffect(() => {
-    if (openIntakeFor) setIntakeFor(openIntakeFor);
-  }, [openIntakeFor]);
   useEffect(() => {
     if (intakeFor) area.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }, [intakeFor]);
 
   const add = async () => {
     setErr(null);
+    setNote(null);
+    // One record per child: the same name again is the same child added twice, most likely because the intake area
+    // was closed. Open the intake of the student already on the list instead of adding a second record.
+    const same = learners.find((l) => sameName(l.name, name));
+    if (same) {
+      if (!same.profile && !same.profilePending) {
+        setName("");
+        setGrade("");
+        setAge("");
+        onIntakeFor(same.id);
+        setNote(same.name + " is already on the list and has not had the intake yet, so it is open below. Nothing new was added.");
+      } else {
+        setErr("There is already a student named " + same.name + ". To hold the intake again, use Reset profile on that card; for a different child with the same name, add an initial (" + same.name + " B.).");
+      }
+      return;
+    }
     try {
       const l = await api.createLearner({ name: name.trim(), gradeLevel: grade || undefined, age: age ? Number(age) : undefined });
       setName("");
       setGrade("");
       setAge("");
       await onChange();
-      setIntakeFor(l.id);
+      onIntakeFor(l.id);
     } catch (e) {
       setErr((e as Error).message);
     }
@@ -285,7 +320,8 @@ export function LearnersPage({ learners, courses, knowledge, health, onChange, o
   };
   const remove = async (l: Learner) => {
     if (!confirm(`Delete ${l.name}? Their sessions and reports stay on disk but will show an id instead of a name.`)) return;
-    if (intakeFor === l.id) setIntakeFor(null);
+    if (intakeFor === l.id) onIntakeFor(null);
+    if (intakeSession?.learnerId === l.id) onIntakeSession(null);
     await api.deleteLearner(l.id);
     await onChange();
   };
@@ -317,6 +353,7 @@ export function LearnersPage({ learners, courses, knowledge, health, onChange, o
           <button className="primary" disabled={!name.trim()} onClick={add}>Add and begin the intake</button>
         </div>
         {err && <p className="error">{err}</p>}
+        {note && <p className="muted small">{note}</p>}
         {passage && !intakeLearner && (
           <details style={{ marginTop: 8 }}>
             <summary className="small">What the intake reads to every student: “{passage.title}”</summary>
@@ -341,8 +378,10 @@ export function LearnersPage({ learners, courses, knowledge, health, onChange, o
             courses={courses}
             learners={learners}
             health={health}
+            session={intakeSession?.learnerId === intakeLearner.id ? intakeSession : null}
+            onSession={onIntakeSession}
             onChange={onChange}
-            onClose={() => setIntakeFor(null)}
+            onClose={() => onIntakeFor(null)}
           />
         )}
       </div>
@@ -358,7 +397,7 @@ export function LearnersPage({ learners, courses, knowledge, health, onChange, o
                 {l.profile ? <span className="pill">profiled</span> : pending ? <span className="pill">{pending.error ? "profile not written" : "intake done · profile being written"}</span> : <span className="pill">needs the intake</span>}
               </h3>
               <div className="row">
-                {needsIntake && <button className="primary small" disabled={intakeFor === l.id} onClick={() => setIntakeFor(l.id)}>Start the intake</button>}
+                {needsIntake && <button className="primary small" disabled={intakeFor === l.id || intakeRunning} onClick={() => onIntakeFor(l.id)}>Start the intake</button>}
                 {(l.profile || pending) && <button className="ghost small" onClick={() => resetProfile(l)}>Reset profile</button>}
                 <button className="ghost small" onClick={() => remove(l)}>Delete</button>
               </div>

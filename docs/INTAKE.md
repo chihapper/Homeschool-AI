@@ -43,7 +43,7 @@ comes from the next band up after a sound answer, the band below after a weak on
 
 | Band | Apply (step 3) | The hard one (step 4) |
 |---|---|---|
-| A, grades 4 to 6 (and below) | An ice cube dropped in a full glass: where does it end up, and what does the passage say is the reason? | Fish live through the winter under the ice. If ice sank, what would happen to the lake, and to the fish? |
+| A, grades 4 to 6 (and below) | An ice cube dropped in a full glass: where does it end up, and why, from what was read? | Fish live through the winter under the ice. If ice sank, what would happen to the lake, and to the fish? |
 | B, grades 7 to 9 | A bottle filled to the top, sealed, put in the freezer: what happens to it, and why? | The ice works like a lid: step by step, why does ice form on top, and how does that keep the fish alive? |
 | C, grade 10 and up | A pipe bursts on a freezing night: why, and would it if water behaved like most things? | Suppose water were not the odd one out: a winter in that lake step by step, and the one fact everything depends on. |
 

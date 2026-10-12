@@ -55,14 +55,14 @@ export interface NextStep {
 
 /** The hand-over an intake is asked to make. The next thing starts in the same breath, so it is never a goodbye. */
 export function handOverWords(next: NextStep | undefined): string {
-  if (!next) return 'Nothing follows this conversation. Thank them and say that is everything for now, for example: "Thanks, that\'s everything for now."';
+  if (!next) return 'Nothing follows this conversation. Say that is everything for now, for example: "That\'s everything for now."';
   if (next.kind === "course-intake") {
     return (
       `Next comes a few questions about what they already know about "${next.courseTitle}", and the first of them follows straight after your words, in the same breath. ` +
-      `So lead into it without asking anything and without naming the course, for example: "Thanks. Before we start the reading, I have a few quick questions for you."`
+      `So lead into it without asking anything and without naming the course, for example: "Before we start the reading, I have a few quick questions for you."`
     );
   }
-  return `Next comes the lesson${next.lessonTitle ? ` "${next.lessonTitle}"` : ""}. Say so in your own words, for example: "Thanks. Now let's start today's reading." Do not start the lesson yourself: it follows straight after your words.`;
+  return `Next comes the lesson${next.lessonTitle ? ` "${next.lessonTitle}"` : ""}. Say so in your own words, for example: "Now let's start today's reading." Do not start the lesson yourself: it follows straight after your words.`;
 }
 
 export interface ProfilerContext {
@@ -85,7 +85,7 @@ export function startBand(session: Session, learner: Learner): Band {
 export function passageBlock(band: Band): string {
   const bands = BAND_ORDER.map(
     (b) =>
-      `Band ${b} (${BANDS[b].grades})\n  apply: ${BANDS[b].apply}\n  a sound answer: ${BANDS[b].applyAnswer}\n  hard: ${BANDS[b].hard}\n  the answer, from the passage: ${BANDS[b].hardAnswer}`,
+      `Band ${b} (${BANDS[b].grades})\n  apply: ${BANDS[b].apply}\n  a sound answer: ${BANDS[b].applyAnswer}\n  hard: ${BANDS[b].hard}\n  the answer: ${BANDS[b].hardAnswer}`,
   ).join("\n");
   return (
     `<passage title="${PASSAGE.title}">\n${PASSAGE.text}\n</passage>\n\n` +
@@ -103,6 +103,7 @@ function contextBlock(ctx: Pick<ProfilerContext, "session" | "learner" | "next">
       ? "The passage has been read to the learner, once, and is not read again: however short their retelling, go on from it. "
       : "In step 2, say your one sentence and call read_passage in the same turn; the passage and the request to tell it back are then read out for you, and that turn is over. " +
         `The request is always these words, so never ask it yourself: "${RETELL_PROMPT}" `) +
+      'Out loud it is "what I read you" (or "the piece about ice"), never "the passage" or "the text": they heard it rather than read it, and those words make the conversation sound like a reading test. ' +
       "When the five steps are done (six to eight exchanges), speak the hand-over and call finish_intake in the same turn: speak first, then call the tool. " +
       "The hand-over asks no question. Nothing you write after finish_intake reaches the learner. " +
       "On every other turn, end with your single question and call no tool.",

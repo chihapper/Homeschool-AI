@@ -167,7 +167,7 @@ Before any commit:
 npm test && npm run typecheck
 ```
 
-262 tests as of 2026-10-09, all pure (no network, no binaries). For the two intakes there is a ready-made
+266 tests as of 2026-10-12, all pure (no network, no binaries). For the two intakes there is a ready-made
 end-to-end check: `npm run personas:intake`, with the server running, plays three scripted students
 (confident, quiet, a bluffer) through the general intake, the course intake and the start of the lesson,
 waits for both records, and prints the transcripts and about twenty checks each (`--only quiet`, `--keep`,
@@ -269,6 +269,13 @@ history and in the docs each entry names.
     simplest-form question can hand over the answer (#5).
 
 **Done, newest first** (one line each; the commit and the doc carry the detail)
+
+- 2026-10-12: the user's first intake on the new flow (Andy) exposed three gaps, all fixed and checked live: a tab
+  switch closed the intake area, the parent added Andy again and the profile landed on the second record (the open
+  area and an intake in progress now live in `App`; one name per student, 409 from `POST /api/learners`; the empty
+  duplicate is in `data/backups/`); the card did not fill in when the profile landed (the tab now looks again every
+  four seconds while one is being written); and the tutor said "the passage" out loud (now "what I read you", in
+  the fixed questions, the skill and the agent's instructions; one scripted intake confirmed it, 7 cents).
 
 - 2026-10-09: the session clock (`domain/clock.ts`, `sessionMaxMinutes` 3 to 60, a warning with two minutes
   left, the closing reply at the limit, the browser ends the session once it is heard; lessons only; the stage, read back through `clockStage`, replaces the phase-and-thread block in the closing reply, leads the final instruction and closes the last user message, because as an `<orchestrator>` directive and then as a final instruction alone it was ignored, 2026-10-09) and the

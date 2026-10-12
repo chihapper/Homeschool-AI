@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { BANDS, COURSE_PROBES, gradeBand, PASSAGE, planSitting, RETELL_PROMPT, selectProbeConcepts, stepBand, toCourseKnowledge, UNIT_PROBES } from "../src/domain/intake.js";
 import type { Concept, Course, Lesson, Session } from "../src/domain/types.js";
-import { passageReading, passageWasRead } from "../src/agents/profiler-agent.js";
+import { handOverWords, passageReading, passageWasRead } from "../src/agents/profiler-agent.js";
 import { startingPointsBlock } from "../src/agents/assessor-agent.js";
 
 /** A course of `sizes.length` lessons, lesson i holding sizes[i] concepts named l<i>c<j>. */
@@ -193,5 +193,18 @@ describe("what the assessor is told about before the session", () => {
     expect(startingPointsBlock(undefined, concepts, "Jordan")).toBe("");
     // Notes alone (a student who had sessions but no course intake) still reach the assessor.
     expect(startingPointsBlock({ ...record, starts: [] }, concepts, "Jordan")).toContain("had mixed up");
+  });
+});
+
+describe("what the student hears in the general intake", () => {
+  it("never calls the reading 'the passage': the student heard it read, and the word sounds like a test (2026-10-12)", () => {
+    const spoken = [RETELL_PROMPT, ...Object.values(BANDS).flatMap((b) => [b.apply, b.hard])];
+    for (const line of spoken) expect(line).not.toMatch(/passage|the text\b/i);
+    expect(passageReading()).not.toMatch(/passage/i);
+  });
+
+  it("gives hand-over examples that do not thank a second time (the skill already says to thank them)", () => {
+    const nexts = [undefined, { kind: "course-intake" as const, courseTitle: "Ancient Rome" }, { kind: "lesson" as const, courseTitle: "Ancient Rome", lessonTitle: "Food and Drink" }];
+    for (const next of nexts) expect(handOverWords(next)).not.toMatch(/"Thanks/);
   });
 });

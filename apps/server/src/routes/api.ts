@@ -10,6 +10,7 @@ import { documentFromUpload, documentsFromUrl, type SourceDocument } from "../in
 import { UnsupportedFileError } from "../ingest/extract.js";
 import { annotateLastTurn, createSession, endSession, getSession, latencySummary, respond, retryIntakeRecord } from "../orchestrator/session.js";
 import { BAND_ORDER, BANDS, PASSAGE, RETELL_PROMPT } from "../domain/intake.js";
+import { studentNamed } from "../domain/students.js";
 import { CourseFocusSchema } from "../domain/types.js";
 import { sanitizeFocus } from "../domain/focus.js";
 import { buildProgress } from "../domain/progress.js";
@@ -348,9 +349,12 @@ export function registerApiRoutes(app: FastifyInstance): void {
   // ---- Learners ------------------------------------------------------------
   app.get("/api/learners", async () => learners.list());
   app.get("/api/learners/:id", async (req: FastifyRequest<{ Params: { id: string } }>) => learners.require(req.params.id));
-  app.post("/api/learners", async (req) => {
+  app.post("/api/learners", async (req, reply: FastifyReply) => {
     const body = LearnerBody.parse(req.body);
-    return learners.put({ id: learners.newId(), ...body, createdAt: new Date().toISOString() });
+    // One record per child: the same name again is the same child added twice (domain/students.ts).
+    const existing = studentNamed(learners.list(), body.name);
+    if (existing) return reply.code(409).send({ error: `There is already a student named ${existing.name}.`, learnerId: existing.id });
+    return learners.put({ id: learners.newId(), ...body, name: body.name.trim(), createdAt: new Date().toISOString() });
   });
   /** Forget the profile, and its revisions, so the next session runs the intake again (re-test a persona). */
   app.delete("/api/learners/:id/profile", async (req: FastifyRequest<{ Params: { id: string } }>) => {
