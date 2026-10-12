@@ -111,6 +111,9 @@ function settingsView() {
   };
 }
 
+/** The largest file a parent can upload, per file. */
+export const MAX_UPLOAD_MB = 500;
+
 /** What the parent typed about a course, trimmed; a blank field is no answer. */
 function courseDetails(fields: { title?: string; publisher?: string; grades?: string }): { title?: string; publisher?: string; grades?: string } {
   const clean = (v?: string) => (v && v.trim() ? v.trim() : undefined);
@@ -331,7 +334,14 @@ export function registerApiRoutes(app: FastifyInstance): void {
     const files: Array<{ buf: Buffer; name: string }> = [];
     const fields: Record<string, string> = {};
     for await (const part of req.parts()) {
-      if (part.type === "file") files.push({ buf: await part.toBuffer(), name: part.filename });
+      if (part.type === "file") {
+        try {
+          files.push({ buf: await part.toBuffer(), name: part.filename });
+        } catch (err) {
+          if ((err as { code?: string }).code !== "FST_REQ_FILE_TOO_LARGE") throw err;
+          return reply.code(413).send({ error: `${part.filename} is larger than the ${MAX_UPLOAD_MB} MB the app accepts. Split the PDF, or upload the part you are teaching.` });
+        }
+      }
       else if (typeof part.value === "string") fields[part.fieldname] = part.value;
     }
     const urls = (fields.urls ?? "").split(/\s+/).filter(Boolean);

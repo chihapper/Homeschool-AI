@@ -6,14 +6,16 @@ import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
 import websocket from "@fastify/websocket";
 import { config, requireAnthropicKey, activeTtsProvider, ttsModelLabel, ttsVoiceLabel } from "./config.js";
-import { registerApiRoutes } from "./routes/api.js";
+import { MAX_UPLOAD_MB, registerApiRoutes } from "./routes/api.js";
 import { registerLiveVoiceRoutes } from "./voice/live.js";
 import { ensureMigrated } from "./store/migrate.js";
 
 export async function buildServer() {
   const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? "info" } });
   await app.register(cors, { origin: config.corsOrigins });
-  await app.register(multipart, { limits: { fileSize: 50 * 1024 * 1024, files: 20 } });
+  // Publishers' PDFs are large: The Good and the Beautiful's Marine Biology course book is 147 MB, mostly artwork,
+  // and the old 50 MB cap refused it while its 36 MB student journal went through (2026-10-12).
+  await app.register(multipart, { limits: { fileSize: MAX_UPLOAD_MB * 1024 * 1024, files: 20 } });
   await app.register(websocket, { options: { maxPayload: 1024 * 1024 } });
   registerApiRoutes(app);
   registerLiveVoiceRoutes(app);

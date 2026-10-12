@@ -135,7 +135,7 @@ function AddCourseDialog({ builds, onClose, onOpenCourse }: { builds: CourseBuil
               }}
             >
               <strong>Drop files here, or click to choose</strong>
-              <div className="muted small">PDF, Word, EPUB, PowerPoint, text, images of pages, audio or video</div>
+              <div className="muted small">PDF, Word, EPUB, PowerPoint, text, images of pages, audio or video, up to 500 MB each</div>
               <input ref={fileInput} type="file" multiple accept={ACCEPT} hidden onChange={(e) => addFiles(e.target.files)} />
             </div>
             {files.length > 0 && (
