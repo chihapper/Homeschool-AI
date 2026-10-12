@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildPercent, expectedOutChars, type BuildState } from "../src/domain/build-progress.js";
-import { dismissCourseJob, listCourseJobs, startCourseJob } from "../src/ingest/jobs.js";
+import { cancelCourseJob, dismissCourseJob, listCourseJobs, startCourseJob } from "../src/ingest/jobs.js";
 import type { Course } from "../src/domain/types.js";
 
 const t0 = 1_000_000;
@@ -52,6 +52,23 @@ describe("course builds as background jobs", () => {
     expect(done).toMatchObject({ status: "done", percent: 100, courseId: "marine", title: "Marine Biology 3-8", lessons: 2, concepts: 1 });
     expect(dismissCourseJob(job.id)).toBe(true);
     expect(listCourseJobs().some((j) => j.id === job.id)).toBe(false);
+  });
+
+  it("cancels a running build: its work is told to stop, it leaves the list at once, and nothing it does later counts", async () => {
+    let stopped = false;
+    let finish!: (c: Course) => void;
+    const job = startCourseJob("photosynthesis-lesson.md", (_t, signal) => {
+      signal.addEventListener("abort", () => (stopped = true));
+      return new Promise<Course>((r) => (finish = r));
+    });
+    await new Promise((r) => setImmediate(r));
+    expect(cancelCourseJob(job.id)).toBe(true);
+    expect(stopped).toBe(true);
+    expect(listCourseJobs().some((j) => j.id === job.id)).toBe(false);
+    finish({ id: "late", title: "Late", lessons: [], concepts: [] } as unknown as Course);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(listCourseJobs().some((j) => j.id === job.id)).toBe(false);
+    expect(cancelCourseJob(job.id)).toBe(false);
   });
 
   it("keeps the reason a build failed", async () => {

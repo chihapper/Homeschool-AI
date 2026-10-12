@@ -143,7 +143,7 @@ export const api = {
    * Upload material and start a build: answers with the build job once the files are on the server. Sent with
    * XMLHttpRequest rather than fetch because only it reports how much of the upload has gone.
    */
-  uploadCourse: (form: CourseForm, onUpload?: (fraction: number) => void) =>
+  uploadCourse: (form: CourseForm, onUpload?: (fraction: number) => void, signal?: AbortSignal) =>
     new Promise<CourseJob>((resolve, reject) => {
       const fd = new FormData();
       for (const k of ["title", "publisher", "grades"] as const) if (form[k].trim()) fd.append(k, form[k].trim());
@@ -165,10 +165,14 @@ export const api = {
         else reject(new Error(body.error ?? `${xhr.status} ${xhr.statusText}`));
       };
       xhr.onerror = () => reject(new Error("The upload did not reach the server. Is it running?"));
+      xhr.onabort = () => reject(new Error("Cancelled."));
+      signal?.addEventListener("abort", () => xhr.abort());
       xhr.send(fd);
     }),
   /** Course builds in progress and finished ones not yet dismissed. */
   jobs: () => fetch("/api/jobs").then(j<CourseJob[]>),
+  /** Stop a running build: nothing is saved and it leaves the list. */
+  cancelJob: (id: string) => fetch(`/api/jobs/${id}/cancel`, json("POST")).then(j<{ ok: boolean }>),
   dismissJob: (id: string) => fetch(`/api/jobs/${id}`, { method: "DELETE" }).then(j<{ ok: boolean }>),
   /** The parent's own details for a course. A blank publisher or grades clears it. */
   updateCourseDetails: (id: string, details: { title?: string; publisher?: string; grades?: string }) => fetch(`/api/courses/${id}/details`, json("PUT", details)).then(j<Course>),

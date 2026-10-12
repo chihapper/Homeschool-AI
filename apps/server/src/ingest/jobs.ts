@@ -35,6 +35,9 @@ interface Job {
   id: string;
   title: string;
   state: BuildState;
+  abort: AbortController;
+  /** The parent cancelled: the job is already gone from the list, and whatever its work does next is ignored. */
+  cancelled?: boolean;
   course?: Course;
   error?: string;
   endedAt?: number;
@@ -62,11 +65,14 @@ function view(j: Job, now: number): CourseJobView {
   };
 }
 
-/** Start a build and return at once. `work` reads the files and builds the course, reporting through the tracker. */
-export function startCourseJob(title: string, work: (t: BuildTracker) => Promise<Course>, log?: (msg: string) => void): CourseJobView {
+/**
+ * Start a build and return at once. `work` reads the files and builds the course, reporting through the tracker,
+ * and stops when the signal is aborted (the parent cancelled).
+ */
+export function startCourseJob(title: string, work: (t: BuildTracker, signal: AbortSignal) => Promise<Course>, log?: (msg: string) => void): CourseJobView {
   const finished = [...jobs.values()].filter((j) => j.endedAt).sort((a, b) => (a.endedAt ?? 0) - (b.endedAt ?? 0));
   for (const old of finished.slice(0, Math.max(0, finished.length - KEEP_FINISHED + 1))) jobs.delete(old.id);
-  const job: Job = { id: randomUUID(), title, state: { stage: "reading", startedAt: Date.now(), partSourceChars: [], partOutChars: [] } };
+  const job: Job = { id: randomUUID(), title, state: { stage: "reading", startedAt: Date.now(), partSourceChars: [], partOutChars: [] }, abort: new AbortController() };
   jobs.set(job.id, job);
   const tracker: BuildTracker = {
     structuring(partSourceChars) {
@@ -84,12 +90,14 @@ export function startCourseJob(title: string, work: (t: BuildTracker) => Promise
   };
   // Started on the next tick so the caller has the job's id before any work (or failure) happens.
   setImmediate(() => {
-    work(tracker)
+    work(tracker, job.abort.signal)
       .then((course) => {
+        if (job.cancelled) return;
         job.course = course;
         job.state.stage = "done";
       })
       .catch((err: unknown) => {
+        if (job.cancelled) return;
         job.error = err instanceof Error ? err.message : String(err);
         job.state.shown = buildPercent(job.state, Date.now());
         job.state.stage = "failed";
@@ -104,6 +112,18 @@ export function startCourseJob(title: string, work: (t: BuildTracker) => Promise
 
 export function listCourseJobs(now = Date.now()): CourseJobView[] {
   return [...jobs.values()].sort((a, b) => a.state.startedAt - b.state.startedAt).map((j) => view(j, now));
+}
+
+/**
+ * The parent cancelled a running build (the wrong file, the wrong sample): the model calls stop, nothing is saved,
+ * and the job leaves the list at once with no notice, because there is nothing to tell. False when it has finished.
+ */
+export function cancelCourseJob(id: string): boolean {
+  const j = jobs.get(id);
+  if (!j || j.endedAt) return false;
+  j.cancelled = true;
+  j.abort.abort();
+  return jobs.delete(id);
 }
 
 /** The parent closed the notification: forget a finished job. A running one stays. */

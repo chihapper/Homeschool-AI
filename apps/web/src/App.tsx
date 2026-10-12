@@ -82,7 +82,7 @@ export function App() {
             {health.voice.tts !== "none" ? ` · voice ${PROVIDER_NAME[health.voice.tts]}` : " · text only"}
           </span>
         )}
-        <BuildsCorner builds={builds.builds} />
+        <BuildsCorner builds={builds.builds} onCancel={builds.cancel} />
       </header>
       <BuildNotices
         builds={builds.builds}

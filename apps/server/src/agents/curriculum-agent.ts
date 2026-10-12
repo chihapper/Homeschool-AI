@@ -52,6 +52,8 @@ export interface IngestOptions {
   onProgress?: (msg: string) => void;
   /** The build's stage and each part's progress, for the job the parent watches (ingest/jobs.ts). */
   tracker?: BuildTracker;
+  /** Aborted when the parent cancels the build: the model calls stop and nothing is saved. */
+  signal?: AbortSignal;
 }
 
 export async function ingestCourse(docs: Array<ExtractedDocument | SourceDocument>, opts: IngestOptions = {}): Promise<Course> {
@@ -66,7 +68,7 @@ export async function ingestCourse(docs: Array<ExtractedDocument | SourceDocumen
   const extractions: CurriculumExtraction[] = await Promise.all(
     batches.map((batch, i) => {
       opts.onProgress?.(`Extracting batch ${i + 1}/${batches.length} (${batch.length} chunks)`);
-      return extractBatch(batch, opts.titleHint, i, batches.length, docs, opts.onProgress, (u) => usage.push(u), (chars) => opts.tracker?.part(i, chars));
+      return extractBatch(batch, opts.titleHint, i, batches.length, docs, opts.onProgress, (u) => usage.push(u), (chars) => opts.tracker?.part(i, chars), opts.signal);
     }),
   );
 
@@ -89,6 +91,7 @@ export async function ingestCourse(docs: Array<ExtractedDocument | SourceDocumen
     createdAt: new Date().toISOString(),
   };
   validateReferences(course);
+  opts.signal?.throwIfAborted();
   opts.tracker?.saving();
   return courses.put(course);
 }
@@ -102,6 +105,7 @@ async function extractBatch(
   onProgress?: (msg: string) => void,
   onUsage?: (u: Usage) => void,
   onChars?: (chars: number) => void,
+  signal?: AbortSignal,
 ): Promise<CurriculumExtraction> {
   const system = buildSystem(curriculumAgent, []);
   const spoken = docs.filter((d) => "kind" in d && (d.kind === "video" || d.kind === "podcast" || d.kind === "audio")).map((d) => d.fileName);
@@ -137,6 +141,7 @@ async function extractBatch(
         reported = chars;
         onProgress?.(`Still extracting part ${index + 1}/${total}: ${Math.round(chars / 1000)}k characters of course structure so far`);
       },
+      signal,
     },
   );
   onUsage?.(usageRecord(curriculumAgent.model, message.usage));

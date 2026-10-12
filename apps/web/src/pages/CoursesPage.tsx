@@ -65,6 +65,7 @@ export function CoursesPage({ courses, onChange, builds, openCourse, ...starts }
               <div key={b.key} className="builds-row">
                 <ProgressRing percent={b.percent} size={28} />
                 <span><strong>{b.title}</strong> <span className="muted small">· {b.label.toLowerCase()} · about {b.percent}%</span></span>
+                <button className="link" onClick={() => builds.cancel(b)}>Cancel</button>
               </div>
             ))}
           </div>
@@ -187,6 +188,17 @@ function AddCourseDialog({ builds, onClose, onOpenCourse }: { builds: CourseBuil
                 <p className="muted small">You can close this window and keep using the app. The progress stays in the top-right corner, and a notice appears when the course is ready. A full unit can take several minutes.</p>
               )}
               <div className="row">
+                {(build.status === "uploading" || build.status === "running") && (
+                  <button
+                    className="ghost"
+                    onClick={() => {
+                      // Back to the form once the parent has confirmed: the build is gone.
+                      if (builds.cancel(build)) setTracking(null);
+                    }}
+                  >
+                    Cancel build
+                  </button>
+                )}
                 {build.status === "done" && build.courseId && (
                   <button
                     className="primary"
@@ -213,7 +225,12 @@ function AddCourseDialog({ builds, onClose, onOpenCourse }: { builds: CourseBuil
             </div>
           </div>
         )}
-        {tracking && !build && <p className="muted">Starting...</p>}
+        {/* The build was cancelled from the corner list or another window. */}
+        {tracking && !build && (
+          <p className="muted">
+            This build was stopped. <button className="link" onClick={() => setTracking(null)}>Back to the form</button>
+          </p>
+        )}
       </div>
     </div>
   );

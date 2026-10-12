@@ -10,8 +10,8 @@ import { documentFromUpload, documentsFromUrl, type SourceDocument } from "../in
 import { annotateLastTurn, createSession, endSession, getSession, latencySummary, respond, retryIntakeRecord } from "../orchestrator/session.js";
 import { BAND_ORDER, BANDS, PASSAGE, RETELL_PROMPT } from "../domain/intake.js";
 import { studentNamed } from "../domain/students.js";
-import { dismissCourseJob, listCourseJobs, startCourseJob } from "../ingest/jobs.js";
-import { CourseFocusSchema } from "../domain/types.js";
+import { cancelCourseJob, dismissCourseJob, listCourseJobs, startCourseJob } from "../ingest/jobs.js";
+import { CourseFocusSchema, type Course } from "../domain/types.js";
 import { sanitizeFocus } from "../domain/focus.js";
 import { buildProgress } from "../domain/progress.js";
 import { courseBuildCost, monthlyUsage, sessionCost } from "../domain/cost.js";
@@ -109,6 +109,15 @@ function settingsView() {
       ],
     },
   };
+}
+
+/** A course saved in the instant the parent cancelled is removed again: a cancelled build leaves nothing behind. */
+function keepUnlessCancelled(course: Course, signal: AbortSignal): Course {
+  if (signal.aborted) {
+    courses.delete(course.id);
+    signal.throwIfAborted();
+  }
+  return course;
 }
 
 /** The largest file a parent can upload, per file. */
@@ -310,6 +319,7 @@ export function registerApiRoutes(app: FastifyInstance): void {
   // ---- Course builds (background jobs; the corner ring and the notification read these) ----------------------
   app.get("/api/jobs", async () => listCourseJobs());
   app.delete("/api/jobs/:id", async (req: FastifyRequest<{ Params: { id: string } }>) => ({ ok: dismissCourseJob(req.params.id) }));
+  app.post("/api/jobs/:id/cancel", async (req: FastifyRequest<{ Params: { id: string } }>) => ({ ok: cancelCourseJob(req.params.id) }));
 
   app.put("/api/courses/:id/focus", async (req: FastifyRequest<{ Params: { id: string } }>) => {
     const course = courses.require(req.params.id);
@@ -348,11 +358,17 @@ export function registerApiRoutes(app: FastifyInstance): void {
     if (!files.length && !urls.length) return reply.code(400).send({ error: "Provide at least one file or URL." });
     const details = courseDetails(fields);
     const log = (m: string) => req.log.info(m);
-    const job = startCourseJob(details.title ?? files[0]?.name ?? urls[0], async (tracker) => {
+    const job = startCourseJob(details.title ?? files[0]?.name ?? urls[0], async (tracker, signal) => {
       const docs: SourceDocument[] = [];
-      for (const f of files) docs.push(await documentFromUpload(f.buf, f.name, { onProgress: log }));
-      for (const u of urls) docs.push(...(await documentsFromUrl(u, { onProgress: log })));
-      return ingestCourse(docs, { titleHint: details.title, publisher: details.publisher, grades: details.grades, onProgress: log, tracker });
+      for (const f of files) {
+        signal.throwIfAborted();
+        docs.push(await documentFromUpload(f.buf, f.name, { onProgress: log }));
+      }
+      for (const u of urls) {
+        signal.throwIfAborted();
+        docs.push(...(await documentsFromUrl(u, { onProgress: log })));
+      }
+      return keepUnlessCancelled(await ingestCourse(docs, { titleHint: details.title, publisher: details.publisher, grades: details.grades, onProgress: log, tracker, signal }), signal);
     }, log);
     return reply.code(202).send(job);
   });
@@ -374,11 +390,17 @@ export function registerApiRoutes(app: FastifyInstance): void {
     const details = courseDetails(body);
     const log = (m: string) => req.log.info(m);
     // A build job like an upload's: answered at once, followed on GET /api/jobs.
-    const job = startCourseJob(details.title ?? files[0]?.name ?? body.urls?.[0] ?? "Course", async (tracker) => {
+    const job = startCourseJob(details.title ?? files[0]?.name ?? body.urls?.[0] ?? "Course", async (tracker, signal) => {
       const docs: SourceDocument[] = [];
-      for (const f of files) docs.push(await documentFromUpload(f.buf, f.name, { onProgress: log }));
-      for (const u of body.urls ?? []) docs.push(...(await documentsFromUrl(u, { episodes: body.episodes, lang: body.lang, onProgress: log })));
-      return ingestCourse(docs, { titleHint: details.title, publisher: details.publisher, grades: details.grades, onProgress: log, tracker });
+      for (const f of files) {
+        signal.throwIfAborted();
+        docs.push(await documentFromUpload(f.buf, f.name, { onProgress: log }));
+      }
+      for (const u of body.urls ?? []) {
+        signal.throwIfAborted();
+        docs.push(...(await documentsFromUrl(u, { episodes: body.episodes, lang: body.lang, onProgress: log })));
+      }
+      return keepUnlessCancelled(await ingestCourse(docs, { titleHint: details.title, publisher: details.publisher, grades: details.grades, onProgress: log, tracker, signal }), signal);
     }, log);
     return reply.code(202).send(job);
   });

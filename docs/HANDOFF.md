@@ -167,7 +167,7 @@ Before any commit:
 npm test && npm run typecheck
 ```
 
-272 tests as of 2026-10-12, all pure (no network, no binaries). For the two intakes there is a ready-made
+273 tests as of 2026-10-12, all pure (no network, no binaries). For the two intakes there is a ready-made
 end-to-end check: `npm run personas:intake`, with the server running, plays three scripted students
 (confident, quiet, a bluffer) through the general intake, the course intake and the start of the lesson,
 waits for both records, and prints the transcripts and about twenty checks each (`--only quiet`, `--keep`,
@@ -269,6 +269,13 @@ history and in the docs each entry names.
     simplest-form question can hand over the answer (#5).
 
 **Done, newest first** (one line each; the commit and the doc carry the detail)
+
+- 2026-10-12: a course build can be cancelled (popup, corner list, Courses page; the model call is dropped and
+  nothing is saved; POST /api/jobs/:id/cancel); the ring shows a percent sign. Diagnosed, NOT yet fixed (awaiting
+  the user): in Andy's first Marine Biology lesson the tutor pressed a correct answer for the material's wording
+  ("lighter" vs "less dense"), the speaking call claimed a contradiction that was not there, and the lesson stayed
+  on density (10/10 at intake) instead of the current concept; separately the reflect pass reads every reply twice
+  (pushed to the transcript, then appended again in reflectTurn), which put a false "repeated a message" in a report.
 
 - 2026-10-12: Courses tab reworked at the user's request: "Add a course" is a popup; a build is a background job
   with an estimated percentage, a ring in the top-right corner and a notice when it is ready or has failed;

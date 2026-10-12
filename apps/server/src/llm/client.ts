@@ -100,11 +100,12 @@ export interface TurnLatency {
  */
 export async function streamParsed<T>(
   params: MessageStreamParams,
-  opts: { onProgress?: (charsSoFar: number) => void; timeout?: number } = {},
+  opts: { onProgress?: (charsSoFar: number) => void; timeout?: number; signal?: AbortSignal } = {},
 ): Promise<{ message: Anthropic.Message; parsed: T | null }> {
   // The one seam with a second vendor behind it: an OpenAI model ID goes to the Responses API (llm/openai.ts).
   if (vendorOf(params.model) === "openai") return streamParsedOpenAI<T>(params, opts);
-  const stream = anthropic.messages.stream(params, { timeout: opts.timeout ?? 30 * 60 * 1000 });
+  // The signal lets a parent cancel a course build: the request is dropped and its tokens stop with it.
+  const stream = anthropic.messages.stream(params, { timeout: opts.timeout ?? 30 * 60 * 1000, ...(opts.signal ? { signal: opts.signal } : {}) });
   // When the first text arrived, kept on usage beside the token counts (see llm/openai.ts for the same on that side).
   const t0 = performance.now();
   let firstDeltaMs: number | undefined;
