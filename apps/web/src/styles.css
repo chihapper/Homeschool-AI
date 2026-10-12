@@ -2,7 +2,7 @@
 * { box-sizing: border-box; }
 body { margin: 0; font-family: Georgia, "Iowan Old Style", serif; background: var(--bg); color: var(--ink); }
 code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 0.92em; background: #f1ede4; padding: 1px 5px; border-radius: 4px; }
-header { display: flex; align-items: center; gap: 16px; padding: 12px 24px; border-bottom: 1px solid #e5e0d5; background: #fffdf8; flex-wrap: wrap; }
+header { display: flex; align-items: center; gap: 16px; padding: 12px 72px 12px 24px; border-bottom: 1px solid #e5e0d5; background: #fffdf8; flex-wrap: wrap; }
 header h1 { font-size: 20px; margin: 0; }
 header .spacer { flex: 1; }
 nav button { background: none; border: none; font: inherit; color: var(--muted); padding: 6px 10px; cursor: pointer; border-radius: 6px; position: relative; }
@@ -130,3 +130,37 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 .notice .row { margin-top: 8px; }
 .intake-area > .card:first-child { border-color: var(--accent); }
 .segmented button:disabled { opacity: .5; cursor: default; }
+
+/* Courses: folded cards, the "Add a course" window, and builds that run in the background. */
+.course-card { padding: 0; }
+.course-head { all: unset; box-sizing: border-box; width: 100%; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 14px 20px; cursor: pointer; border-radius: 12px; }
+.course-head:hover { background: #fbf8f2; }
+.course-head:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.chevron { color: var(--muted); width: 14px; }
+.course-title { font-size: 18px; font-weight: 600; margin-right: 6px; }
+.course-meta { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.course-body { padding: 0 20px 18px; border-top: 1px solid var(--line); }
+.form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-top: 12px; }
+.form-grid input { min-width: 0; width: 100%; }
+.details-grid { margin-top: 14px; }
+.overlay { position: fixed; inset: 0; background: rgba(31, 42, 55, .38); display: flex; align-items: flex-start; justify-content: center; padding: 8vh 16px 16px; z-index: 50; overflow-y: auto; }
+.dialog { background: var(--card); border-radius: 14px; padding: 20px 22px; width: 100%; max-width: 620px; box-shadow: 0 18px 50px rgba(31, 42, 55, .25); }
+.dropzone { margin-top: 12px; border: 2px dashed #d8d2c4; border-radius: 12px; padding: 22px; text-align: center; cursor: pointer; background: #fcfaf5; }
+.dropzone.over, .dropzone:hover { border-color: var(--accent); background: var(--accent-soft); }
+.file-list { list-style: none; padding: 0; margin: 8px 0 0; }
+button.link { all: unset; color: var(--accent); cursor: pointer; text-decoration: underline; font-size: 13px; margin-right: 8px; }
+.build-progress { display: flex; gap: 20px; align-items: center; margin-top: 16px; }
+.build-progress p { margin: 6px 0; }
+.building-list { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
+.builds-row { display: flex; align-items: center; gap: 10px; }
+.ring { flex: none; }
+.builds-corner { position: fixed; top: 10px; right: 16px; z-index: 46; background: #fffdf8; border-radius: 50%; }
+.builds-button { all: unset; cursor: pointer; display: inline-flex; position: relative; border-radius: 50%; }
+.builds-button:focus-visible { outline: 2px solid var(--accent); }
+.builds-count { position: absolute; top: -4px; right: -6px; background: var(--accent); color: #fff; font-size: 11px; border-radius: 999px; padding: 0 5px; }
+.builds-pop { position: absolute; right: 0; top: 42px; width: 300px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px; box-shadow: 0 12px 30px rgba(31, 42, 55, .18); z-index: 40; display: flex; flex-direction: column; gap: 10px; }
+.notices { position: fixed; bottom: 16px; right: 16px; z-index: 45; display: flex; flex-direction: column; gap: 10px; width: min(380px, calc(100vw - 32px)); }
+.notice-toast { background: var(--card); border: 1px solid var(--line); border-left: 4px solid var(--ok); border-radius: 10px; padding: 12px 14px; box-shadow: 0 10px 28px rgba(31, 42, 55, .16); display: flex; flex-direction: column; gap: 8px; animation: slidein .25s ease; }
+.notice-toast.failed { border-left-color: var(--bad); }
+@keyframes slidein { from { transform: translateY(-8px); opacity: 0; } to { transform: none; opacity: 1; } }
+.course-meta .pill { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; }

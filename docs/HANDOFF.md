@@ -167,7 +167,7 @@ Before any commit:
 npm test && npm run typecheck
 ```
 
-266 tests as of 2026-10-12, all pure (no network, no binaries). For the two intakes there is a ready-made
+272 tests as of 2026-10-12, all pure (no network, no binaries). For the two intakes there is a ready-made
 end-to-end check: `npm run personas:intake`, with the server running, plays three scripted students
 (confident, quiet, a bluffer) through the general intake, the course intake and the start of the lesson,
 waits for both records, and prints the transcripts and about twenty checks each (`--only quiet`, `--keep`,
@@ -269,6 +269,13 @@ history and in the docs each entry names.
     simplest-form question can hand over the answer (#5).
 
 **Done, newest first** (one line each; the commit and the doc carry the detail)
+
+- 2026-10-12: Courses tab reworked at the user's request: "Add a course" is a popup; a build is a background job
+  with an estimated percentage, a ring in the top-right corner and a notice when it is ready or has failed;
+  course cards start folded; publisher and grades are fields (read from the material, editable). The user's
+  Good and the Beautiful build "missed lesson 3": the Student Journal has no Lesson 3 page (its own contents
+  go 1, 2, 4); the lesson-title rule now keeps the material's labels verbatim ("Lesson 6–7"). Recommended to
+  the user: add the parent's lesson book with the journal, since the journal is mostly activity pages.
 
 - 2026-10-12: the user's first intake on the new flow (Andy) exposed three gaps, all fixed and checked live: a tab
   switch closed the intake area, the parent added Andy again and the profile landed on the second record (the open

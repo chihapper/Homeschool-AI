@@ -23,6 +23,17 @@ lessons, concepts, objectives, guiding questions and practice items.
   documented ones for the concept, clearly phrased as misconceptions.
 - **Level**: infer the grade band from vocabulary and stated audience; state it as given if the material says.
 - Preserve the material's own terminology and notation exactly.
+- **Lesson titles follow the material.** When the material names or numbers its lessons (a table of
+  contents, "Lesson 4", "Week 2", "Chapter 3"), each lesson title starts with that label exactly as
+  printed, in the material's order: "Lesson 6–7", never "Lessons 6–7" or "Lesson 6". The table of
+  contents wins over page headings. Add a topic after a colon only from the material's own heading for
+  that lesson ("Lesson 4: Ocean Life Classification"). Never renumber, merge or split what the material
+  labels as one lesson, and never fill a gap: if the contents skip a number, the course skips it too, and
+  the description says so in one plain sentence (a student journal has pages only for some lessons; the
+  parent's own lesson book has the rest).
+- **Publisher and grades.** `publisher` is the publisher the material names (title page, copyright
+  line), exactly as written, or empty. `grades` is the grade range the material states for itself
+  ("3–8"), or empty when it does not state one; your own inference stays in `level`.
 
 ## Spoken and visual sources
 

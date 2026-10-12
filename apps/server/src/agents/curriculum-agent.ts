@@ -14,6 +14,7 @@ import type { ExtractedDocument } from "../ingest/extract.js";
 import type { SourceDocument } from "../ingest/media/sources.js";
 import { buildSystem, type AgentSpec } from "./base.js";
 import { courses } from "../store/index.js";
+import type { BuildTracker } from "../ingest/jobs.js";
 
 export const curriculumAgent: AgentSpec = {
   name: "Curriculum Agent",
@@ -45,7 +46,12 @@ const MAX_OUTPUT_TOKENS = 64_000;
 
 export interface IngestOptions {
   titleHint?: string;
+  /** What the parent typed for these: it wins over what the model read from the material. */
+  publisher?: string;
+  grades?: string;
   onProgress?: (msg: string) => void;
+  /** The build's stage and each part's progress, for the job the parent watches (ingest/jobs.ts). */
+  tracker?: BuildTracker;
 }
 
 export async function ingestCourse(docs: Array<ExtractedDocument | SourceDocument>, opts: IngestOptions = {}): Promise<Course> {
@@ -53,13 +59,14 @@ export async function ingestCourse(docs: Array<ExtractedDocument | SourceDocumen
   if (!chunks.length) throw new Error("No text could be extracted from the uploaded material.");
 
   const batches = batchChunks(chunks, BATCH_CHARS);
+  opts.tracker?.structuring(batches.map((b) => b.reduce((n, c) => n + c.text.length, 0)));
   const usage: Usage[] = []; // each part's call, for the meter
   // Parts are independent ("extract only what is in this part"), so they run at the same time: a unit that
   // splits in two takes as long as one part, not two.
   const extractions: CurriculumExtraction[] = await Promise.all(
     batches.map((batch, i) => {
       opts.onProgress?.(`Extracting batch ${i + 1}/${batches.length} (${batch.length} chunks)`);
-      return extractBatch(batch, opts.titleHint, i, batches.length, docs, opts.onProgress, (u) => usage.push(u));
+      return extractBatch(batch, opts.titleHint, i, batches.length, docs, opts.onProgress, (u) => usage.push(u), (chars) => opts.tracker?.part(i, chars));
     }),
   );
 
@@ -70,6 +77,8 @@ export async function ingestCourse(docs: Array<ExtractedDocument | SourceDocumen
     title: opts.titleHint ?? merged.title,
     subject: merged.subject,
     level: merged.level,
+    publisher: opts.publisher || merged.publisher || undefined,
+    grades: opts.grades || merged.grades || undefined,
     description: merged.description,
     lessons: merged.lessons.map((l, i) => ({ ...l, id: `${slug(l.title)}-${i + 1}`, order: i })),
     concepts: merged.concepts,
@@ -80,6 +89,7 @@ export async function ingestCourse(docs: Array<ExtractedDocument | SourceDocumen
     createdAt: new Date().toISOString(),
   };
   validateReferences(course);
+  opts.tracker?.saving();
   return courses.put(course);
 }
 
@@ -91,6 +101,7 @@ async function extractBatch(
   docs: Array<ExtractedDocument | SourceDocument>,
   onProgress?: (msg: string) => void,
   onUsage?: (u: Usage) => void,
+  onChars?: (chars: number) => void,
 ): Promise<CurriculumExtraction> {
   const system = buildSystem(curriculumAgent, []);
   const spoken = docs.filter((d) => "kind" in d && (d.kind === "video" || d.kind === "podcast" || d.kind === "audio")).map((d) => d.fileName);
@@ -121,6 +132,7 @@ async function extractBatch(
     },
     {
       onProgress: (chars) => {
+        onChars?.(chars);
         if (chars - reported < 20_000) return;
         reported = chars;
         onProgress?.(`Still extracting part ${index + 1}/${total}: ${Math.round(chars / 1000)}k characters of course structure so far`);
@@ -175,6 +187,8 @@ export function mergeExtractions(parts: CurriculumExtraction[]): CurriculumExtra
     title: first.title,
     subject: first.subject,
     level: first.level,
+    publisher: parts.find((p) => p.publisher)?.publisher ?? "",
+    grades: parts.find((p) => p.grades)?.grades ?? "",
     description: parts.map((p) => p.description).join(" "),
     lessons: parts.flatMap((p) => p.lessons),
     concepts,

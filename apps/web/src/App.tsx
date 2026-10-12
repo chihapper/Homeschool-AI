@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, PROVIDER_NAME, type Course, type CourseKnowledge, type Health, type Learner, type Report, type Session } from "./api";
 import { CoursesPage } from "./pages/CoursesPage";
+import { BuildNotices, BuildsCorner, useCourseBuilds } from "./components/CourseBuilds";
 import { LearnersPage } from "./pages/LearnersPage";
 import { LessonPage, type LessonPreset } from "./pages/LessonPage";
 import { ReportPage } from "./pages/ReportPage";
@@ -52,6 +53,11 @@ export function App() {
     void refresh();
   }, [refresh]);
 
+  // Course builds: they run in the background; a finished one reloads the course list for every tab.
+  const builds = useCourseBuilds(() => void refresh());
+  /** The course to open on the Courses tab (from a "ready" notice); the stamp reopens it on a second click. */
+  const [openCourse, setOpenCourse] = useState<{ id: string; at: number } | null>(null);
+
   const go = (t: Tab) => {
     setTab(t);
     if (t === "students" || t === "courses" || t === "lesson") void refresh();
@@ -76,12 +82,23 @@ export function App() {
             {health.voice.tts !== "none" ? ` · voice ${PROVIDER_NAME[health.voice.tts]}` : " · text only"}
           </span>
         )}
+        <BuildsCorner builds={builds.builds} />
       </header>
+      <BuildNotices
+        builds={builds.builds}
+        onDismiss={builds.dismiss}
+        onOpen={(id) => {
+          setOpenCourse({ id, at: Date.now() });
+          go("courses");
+        }}
+      />
       <main>
         {error && <div className="card error">{error}</div>}
         {tab === "students" && <LearnersPage learners={learners} courses={courses} knowledge={knowledge} health={health} onChange={refresh} intakeFor={intakeFor} onIntakeFor={setIntakeFor} intakeSession={intakeSession} onIntakeSession={setIntakeSession} />}
         {tab === "courses" && (
           <CoursesPage
+            builds={builds}
+            openCourse={openCourse}
             courses={courses}
             onChange={refresh}
             learners={learners}

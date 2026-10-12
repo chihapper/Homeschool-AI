@@ -34,7 +34,7 @@ describe("splitting a unit into extraction parts", () => {
 
 describe("merging the parts", () => {
   const part = (title: string, lessons: string[], concepts: string[]): CurriculumExtraction => ({
-    title, subject: "History", level: "7", description: `${title}.`,
+    title, subject: "History", level: "7", publisher: "", grades: "", description: `${title}.`,
     lessons: lessons.map((t) => ({ title: t, objectives: [], conceptIds: [], guidingQuestions: [], practiceItems: [] })),
     concepts: concepts.map((id) => ({ id, name: id, summary: "", keyFacts: [], commonMisconceptions: [], sourceChunkIds: [], prerequisites: [] })),
   });

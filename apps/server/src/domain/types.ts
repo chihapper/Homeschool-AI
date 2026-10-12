@@ -84,6 +84,10 @@ export const CourseSchema = z.object({
   subject: z.string(),
   /** Grade / age band as stated or inferred from the material, e.g. "Grade 7". */
   level: z.string(),
+  /** The publisher, as the parent typed it or the material names it ("The Good and the Beautiful"). */
+  publisher: z.string().optional(),
+  /** The grades the material is for, as the parent typed it or the material states it ("3-8"). */
+  grades: z.string().optional(),
   description: z.string(),
   lessons: z.array(LessonSchema),
   concepts: z.array(ConceptSchema),
@@ -106,6 +110,10 @@ export const CurriculumExtractionSchema = z.object({
   title: z.string(),
   subject: z.string(),
   level: z.string(),
+  /** The publisher the material names (title page, copyright line), as written; empty when it names none. */
+  publisher: z.string(),
+  /** The grade range the material states for itself ("3-8"); empty when it states none. */
+  grades: z.string(),
   description: z.string(),
   lessons: z.array(LessonSchema.omit({ id: true, order: true })),
   concepts: z.array(ConceptSchema),

@@ -7,10 +7,10 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { ingestCourse } from "../agents/curriculum-agent.js";
 import { documentFromUpload, documentsFromUrl, type SourceDocument } from "../ingest/media/sources.js";
-import { UnsupportedFileError } from "../ingest/extract.js";
 import { annotateLastTurn, createSession, endSession, getSession, latencySummary, respond, retryIntakeRecord } from "../orchestrator/session.js";
 import { BAND_ORDER, BANDS, PASSAGE, RETELL_PROMPT } from "../domain/intake.js";
 import { studentNamed } from "../domain/students.js";
+import { dismissCourseJob, listCourseJobs, startCourseJob } from "../ingest/jobs.js";
 import { CourseFocusSchema } from "../domain/types.js";
 import { sanitizeFocus } from "../domain/focus.js";
 import { buildProgress } from "../domain/progress.js";
@@ -46,6 +46,8 @@ const IngestBody = z
     /** File names under data/samples (bundled test material). */
     samples: z.array(z.string().min(1)).optional(),
     title: z.string().optional(),
+    publisher: z.string().optional(),
+    grades: z.string().optional(),
     episodes: z.number().int().min(1).max(20).optional(),
     lang: z.string().optional(),
   })
@@ -108,6 +110,13 @@ function settingsView() {
     },
   };
 }
+
+/** What the parent typed about a course, trimmed; a blank field is no answer. */
+function courseDetails(fields: { title?: string; publisher?: string; grades?: string }): { title?: string; publisher?: string; grades?: string } {
+  const clean = (v?: string) => (v && v.trim() ? v.trim() : undefined);
+  return { title: clean(fields.title), publisher: clean(fields.publisher), grades: clean(fields.grades) };
+}
+const CourseDetailsBody = z.object({ title: z.string().max(200).optional(), publisher: z.string().max(200).optional(), grades: z.string().max(100).optional() });
 
 function sampleFile(name: string): string {
   const base = path.basename(name);
@@ -278,6 +287,27 @@ export function registerApiRoutes(app: FastifyInstance): void {
     return { ok: true };
   });
   /** The parent's focus: which lessons and concepts the tutor teaches. A session reads it once, when it starts. */
+  /** The parent's own details for a course: title, publisher, grades. A blank publisher or grades clears it. */
+  app.put("/api/courses/:id/details", async (req: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+    const body = CourseDetailsBody.parse(req.body);
+    const next = { ...courses.require(req.params.id) };
+    if (body.title !== undefined) {
+      if (!body.title.trim()) return reply.code(400).send({ error: "A course needs a title." });
+      next.title = body.title.trim();
+    }
+    for (const k of ["publisher", "grades"] as const) {
+      const v = body[k];
+      if (v === undefined) continue;
+      if (v.trim()) next[k] = v.trim();
+      else delete next[k];
+    }
+    return courseSummary(courses.put(next));
+  });
+
+  // ---- Course builds (background jobs; the corner ring and the notification read these) ----------------------
+  app.get("/api/jobs", async () => listCourseJobs());
+  app.delete("/api/jobs/:id", async (req: FastifyRequest<{ Params: { id: string } }>) => ({ ok: dismissCourseJob(req.params.id) }));
+
   app.put("/api/courses/:id/focus", async (req: FastifyRequest<{ Params: { id: string } }>) => {
     const course = courses.require(req.params.id);
     const focus = sanitizeFocus(course, CourseFocusSchema.parse(req.body));
@@ -291,34 +321,30 @@ export function registerApiRoutes(app: FastifyInstance): void {
       .map((n) => ({ name: n, size: fs.statSync(path.join(SAMPLES_DIR, n)).size }));
   });
 
-  /** Multipart: files (documents, slides, scans, audio, video) plus optional `title` and `urls` (newline-separated). */
+  /**
+   * Multipart: files (documents, slides, scans, audio, video) plus optional title, publisher, grades and urls
+   * (newline-separated). Answers at once with a build job (202); the browser follows it on GET /api/jobs. Reading
+   * the files happens inside the job too, so a large scan does not hold the request open; a file the app cannot
+   * read fails the job with the conversion to run, which the parent sees in the notification.
+   */
   app.post("/api/courses/upload", async (req, reply) => {
-    const docs: SourceDocument[] = [];
-    let title: string | undefined;
-    const urls: string[] = [];
-    // A file we cannot read is the parent's problem to fix, not a server error: remember the first one
-    // and answer with it, but keep consuming the multipart stream so the request finishes cleanly.
-    let unreadable: string | undefined;
+    const files: Array<{ buf: Buffer; name: string }> = [];
+    const fields: Record<string, string> = {};
     for await (const part of req.parts()) {
-      if (part.type === "file") {
-        const buf = await part.toBuffer();
-        try {
-          docs.push(await documentFromUpload(buf, part.filename, { onProgress: (m) => req.log.info(m) }));
-        } catch (err) {
-          if (!(err instanceof UnsupportedFileError)) throw err;
-          unreadable ??= err.message;
-        }
-      } else if (part.fieldname === "title" && typeof part.value === "string") {
-        title = part.value;
-      } else if (part.fieldname === "urls" && typeof part.value === "string") {
-        urls.push(...part.value.split(/\s+/).filter(Boolean));
-      }
+      if (part.type === "file") files.push({ buf: await part.toBuffer(), name: part.filename });
+      else if (typeof part.value === "string") fields[part.fieldname] = part.value;
     }
-    if (unreadable) return reply.code(415).send({ error: unreadable });
-    for (const u of urls) docs.push(...(await documentsFromUrl(u, { onProgress: (m) => req.log.info(m) })));
-    if (!docs.length) return reply.code(400).send({ error: "Provide at least one file or URL." });
-    const course = await ingestCourse(docs, { titleHint: title, onProgress: (m) => req.log.info(m) });
-    return courseSummary(course);
+    const urls = (fields.urls ?? "").split(/\s+/).filter(Boolean);
+    if (!files.length && !urls.length) return reply.code(400).send({ error: "Provide at least one file or URL." });
+    const details = courseDetails(fields);
+    const log = (m: string) => req.log.info(m);
+    const job = startCourseJob(details.title ?? files[0]?.name ?? urls[0], async (tracker) => {
+      const docs: SourceDocument[] = [];
+      for (const f of files) docs.push(await documentFromUpload(f.buf, f.name, { onProgress: log }));
+      for (const u of urls) docs.push(...(await documentsFromUrl(u, { onProgress: log })));
+      return ingestCourse(docs, { titleHint: details.title, publisher: details.publisher, grades: details.grades, onProgress: log, tracker });
+    }, log);
+    return reply.code(202).send(job);
   });
 
   /** JSON alternative: { urls?: string[], samples?: string[], title?: string, episodes?: number }. */
@@ -326,24 +352,25 @@ export function registerApiRoutes(app: FastifyInstance): void {
     const parsed = IngestBody.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ error: parsed.error.issues.map((i) => i.message).join("; ") });
     const body = parsed.data;
-    const docs: SourceDocument[] = [];
+    const files: Array<{ buf: Buffer; name: string }> = [];
     for (const s of body.samples ?? []) {
-      let file: string;
       try {
-        file = sampleFile(s);
+        const file = sampleFile(s);
+        files.push({ buf: fs.readFileSync(file), name: path.basename(file) });
       } catch (err) {
         return reply.code(400).send({ error: err instanceof Error ? err.message : String(err) });
       }
-      try {
-        docs.push(await documentFromUpload(fs.readFileSync(file), path.basename(file), { onProgress: (m) => req.log.info(m) }));
-      } catch (err) {
-        if (!(err instanceof UnsupportedFileError)) throw err;
-        return reply.code(415).send({ error: err.message });
-      }
     }
-    for (const u of body.urls ?? []) docs.push(...(await documentsFromUrl(u, { episodes: body.episodes, lang: body.lang, onProgress: (m) => req.log.info(m) })));
-    const course = await ingestCourse(docs, { titleHint: body.title, onProgress: (m) => req.log.info(m) });
-    return courseSummary(course);
+    const details = courseDetails(body);
+    const log = (m: string) => req.log.info(m);
+    // A build job like an upload's: answered at once, followed on GET /api/jobs.
+    const job = startCourseJob(details.title ?? files[0]?.name ?? body.urls?.[0] ?? "Course", async (tracker) => {
+      const docs: SourceDocument[] = [];
+      for (const f of files) docs.push(await documentFromUpload(f.buf, f.name, { onProgress: log }));
+      for (const u of body.urls ?? []) docs.push(...(await documentsFromUrl(u, { episodes: body.episodes, lang: body.lang, onProgress: log })));
+      return ingestCourse(docs, { titleHint: details.title, publisher: details.publisher, grades: details.grades, onProgress: log, tracker });
+    }, log);
+    return reply.code(202).send(job);
   });
 
   // ---- Learners ------------------------------------------------------------

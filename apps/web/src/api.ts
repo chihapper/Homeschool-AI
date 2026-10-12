@@ -5,7 +5,7 @@ export interface Concept { id: string; name: string; summary: string; keyFacts: 
 export interface Chunk { id: string; source: string; headingPath: string[]; text: string; order: number }
 /** The parent's decision about how much of a course the tutor teaches. Absent means everything. */
 export interface CourseFocus { skippedLessonIds: string[]; skippedConceptIds: string[]; lessonOrder?: string[] }
-export interface Course { id: string; title: string; subject: string; level: string; description: string; lessons: Lesson[]; concepts: Concept[]; chunkCount: number; sources?: Array<{ name: string; kind: string; url?: string }>; focus?: CourseFocus; createdAt: string }
+export interface Course { id: string; title: string; subject: string; level: string; publisher?: string; grades?: string; description: string; lessons: Lesson[]; concepts: Concept[]; chunkCount: number; sources?: Array<{ name: string; kind: string; url?: string }>; focus?: CourseFocus; createdAt: string }
 /** How much of an answer the student is ready for (mirrors DepthSchema); absent on older profiles means "simple". */
 export type Depth = "simple" | "some-nuance" | "full";
 /** How to work with a student, whatever the course (mirrors LearnerProfileSchema). What they know about a course is a CourseKnowledge record. */
@@ -102,6 +102,11 @@ export interface VoicePreview { url: string; provider: string; firstAudioMs: num
 export interface Readiness { rows: Array<{ status: "ok" | "warn" | "fail"; item: string; note: string; stage: 0 | 1 | 2 | 3 }>; blocking: number; optional: number; checkedAt: string }
 export interface Health { ok: boolean; model: string; tutorModel: string; reflectModel: string; assessorModel: string; tutorEffort: string; tutorThinking: string; voice: { stt: "assemblyai" | "none"; tts: TtsProvider | "none"; ttsProvider: TtsProvider; ttsVoice: string; ttsModel: string } }
 
+/** A course build running on the server (mirrors ingest/jobs.ts). */
+export interface CourseJob { id: string; title: string; status: "running" | "done" | "failed"; stage: string; label: string; percent: number; courseId?: string; lessons?: number; concepts?: number; error?: string; startedAt: string; endedAt?: string }
+/** What the parent gives for a new course. */
+export interface CourseForm { title: string; publisher: string; grades: string; files: File[]; urls: string[] }
+
 async function j<T>(res: Response): Promise<T> {
   if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error ?? `${res.status} ${res.statusText}`);
   return res.json() as Promise<T>;
@@ -132,14 +137,41 @@ export const api = {
   /** Save the parent's focus for a course. Applies to sessions started afterwards. */
   setFocus: (courseId: string, focus: CourseFocus) => fetch(`/api/courses/${courseId}/focus`, json("PUT", focus)).then(j<Course>),
   samples: () => fetch("/api/samples").then(j<Array<{ name: string; size: number }>>),
-  ingestSamples: (samples: string[], title?: string) => fetch("/api/courses/ingest", json("POST", { samples, title: title || undefined })).then(j<Course>),
-  uploadCourse: (files: File[], title: string, urls: string[] = []) => {
-    const fd = new FormData();
-    if (title) fd.append("title", title);
-    if (urls.length) fd.append("urls", urls.join("\n"));
-    for (const f of files) fd.append("files", f, f.name);
-    return fetch("/api/courses/upload", { method: "POST", body: fd }).then(j<Course>);
-  },
+  /** Build from bundled sample files: answers at once with the build job. */
+  ingestSamples: (samples: string[], title?: string) => fetch("/api/courses/ingest", json("POST", { samples, title: title || undefined })).then(j<CourseJob>),
+  /**
+   * Upload material and start a build: answers with the build job once the files are on the server. Sent with
+   * XMLHttpRequest rather than fetch because only it reports how much of the upload has gone.
+   */
+  uploadCourse: (form: CourseForm, onUpload?: (fraction: number) => void) =>
+    new Promise<CourseJob>((resolve, reject) => {
+      const fd = new FormData();
+      for (const k of ["title", "publisher", "grades"] as const) if (form[k].trim()) fd.append(k, form[k].trim());
+      if (form.urls.length) fd.append("urls", form.urls.join(" "));
+      for (const f of form.files) fd.append("files", f, f.name);
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", "/api/courses/upload");
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) onUpload?.(e.loaded / e.total);
+      };
+      xhr.onload = () => {
+        let body: { error?: string } & Partial<CourseJob> = {};
+        try {
+          body = JSON.parse(xhr.responseText);
+        } catch {
+          // An empty or non-JSON answer: reported by status below.
+        }
+        if (xhr.status >= 200 && xhr.status < 300) resolve(body as CourseJob);
+        else reject(new Error(body.error ?? `${xhr.status} ${xhr.statusText}`));
+      };
+      xhr.onerror = () => reject(new Error("The upload did not reach the server. Is it running?"));
+      xhr.send(fd);
+    }),
+  /** Course builds in progress and finished ones not yet dismissed. */
+  jobs: () => fetch("/api/jobs").then(j<CourseJob[]>),
+  dismissJob: (id: string) => fetch(`/api/jobs/${id}`, { method: "DELETE" }).then(j<{ ok: boolean }>),
+  /** The parent's own details for a course. A blank publisher or grades clears it. */
+  updateCourseDetails: (id: string, details: { title?: string; publisher?: string; grades?: string }) => fetch(`/api/courses/${id}/details`, json("PUT", details)).then(j<Course>),
 
   learners: () => fetch("/api/learners").then(j<Learner[]>),
   createLearner: (body: { name: string; age?: number; gradeLevel?: string }) => fetch("/api/learners", json("POST", body)).then(j<Learner>),
