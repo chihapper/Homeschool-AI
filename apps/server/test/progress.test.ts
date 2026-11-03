@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildProgress, wasAssessed } from "../src/domain/progress.js";
+import { START_LEVEL, buildProgress, wasAssessed } from "../src/domain/progress.js";
 import type { ConceptMastery, Course, CourseKnowledge, MasteryReport } from "../src/domain/types.js";
 
 const course: Course = {
@@ -94,5 +94,69 @@ describe("progress: where the learner stands across sessions", () => {
     expect(bare.concepts[0].start).toBeUndefined();
     expect(bare.startsNotYetTaught).toEqual([]);
     expect(bare.baselineSummary).toBeUndefined();
+  });
+});
+
+describe("growth: where the student started against where they are now", () => {
+  const knowledge = (starts: CourseKnowledge["starts"]): CourseKnowledge => ({
+    id: "maya__c1", learnerId: "maya", courseId: "c1", priorKnowledge: [], observedGaps: [], guidance: [], createdAt: "", updatedAt: "", starts,
+  });
+
+  it("places the three starting estimates on the mastery ladder the levels define", () => {
+    expect(START_LEVEL).toEqual({ none: 0, some: 1, "can-explain": 2 });
+  });
+
+  it("calls it movement only when the level passed where they started", () => {
+    const k = knowledge([
+      { conceptId: "senate", estimate: "none", said: "", from: "probe" },
+      { conceptId: "consuls", estimate: "can-explain", said: "two of them, a year each", confidence: 8, from: "probe" },
+    ]);
+    const g = buildProgress([report("2026-09-01", [mastery("senate", 2), mastery("consuls", 2)])], course, "maya", "c1", k)!.growth;
+    // Knew nothing, now explains it: two rungs.
+    expect(g.concepts.find((c) => c.conceptId === "senate")).toMatchObject({ move: "gained", startLevel: 0, level: 2, rungs: 2 });
+    // Could already explain it and is still explaining it: the session demonstrated, but nothing moved.
+    // This is the case a bare "2/4 · Explains" reads as success (Andy on density, 2026-10-12).
+    expect(g.concepts.find((c) => c.conceptId === "consuls")).toMatchObject({ move: "held", startLevel: 2, level: 2, rungs: 0 });
+    expect(g).toMatchObject({ gained: 1, held: 1, below: 0, untested: 0, rungsGained: 2 });
+    expect(g.biggestMove).toMatchObject({ conceptId: "senate", rungs: 2 });
+  });
+
+  it("flags a concept the student is now demonstrating below where they said they started", () => {
+    const k = knowledge([{ conceptId: "senate", estimate: "can-explain", said: "they made the laws", confidence: 9, from: "probe" }]);
+    const g = buildProgress([report("2026-09-01", [mastery("senate", 1)])], course, "maya", "c1", k)!.growth;
+    expect(g.concepts[0]).toMatchObject({ move: "below", startLevel: 2, level: 1, rungs: -1 });
+    expect(g).toMatchObject({ below: 1, gained: 0, rungsGained: -1 });
+    expect(g.biggestMove).toBeUndefined();
+  });
+
+  it("separates not-taught-yet from no-baseline, and counts coverage against what the parent still teaches", () => {
+    const k = knowledge([{ conceptId: "consuls", estimate: "some", said: "two leaders", confidence: 4, from: "narration" }]);
+    const g = buildProgress([report("2026-09-01", [mastery("senate", 2)])], course, "maya", "c1", k)!.growth;
+    // Assessed but the intake never asked: no reference point, so no claim about movement.
+    const senate = g.concepts.find((c) => c.conceptId === "senate")!;
+    expect(senate).toMatchObject({ move: "no-baseline", level: 2 });
+    expect(senate.startLevel).toBeUndefined();
+    expect(senate.rungs).toBeUndefined();
+    // Asked before the course, no session has reached it.
+    const consuls = g.concepts.find((c) => c.conceptId === "consuls")!;
+    expect(consuls).toMatchObject({ move: "untested", startLevel: 1 });
+    expect(consuls.level).toBeUndefined();
+    expect(g).toMatchObject({ conceptsKept: 2, conceptsAssessed: 1, conceptsWithBaseline: 1, untested: 1, rungsGained: 0 });
+  });
+
+  it("leaves a skipped concept out of coverage, and keeps the history of one skipped after it was taught", () => {
+    const narrowed: Course = { ...course, focus: { skippedLessonIds: [], skippedConceptIds: ["consuls"] } };
+    const g = buildProgress([report("2026-09-01", [mastery("senate", 2), mastery("consuls", 3)])], narrowed, "maya", "c1")!.growth;
+    expect(g.conceptsKept).toBe(1); // the parent teaches one of the two
+    expect(g.concepts.find((c) => c.conceptId === "consuls")).toMatchObject({ level: 3, dropped: true });
+    expect(g.concepts.find((c) => c.conceptId === "senate")?.dropped).toBeUndefined();
+  });
+
+  it("counts what is still wrong, and says nothing about concepts neither asked nor taught", () => {
+    const g = buildProgress([report("2026-09-01", [mastery("senate", 2, { misconceptions: ["thinks senators were elected"] })])], course, "maya", "c1")!.growth;
+    expect(g.stillMisconceived).toBe(1);
+    // consuls was never asked and never reached: it is in the denominator, not a row.
+    expect(g.concepts.map((c) => c.conceptId)).toEqual(["senate"]);
+    expect(g.conceptsKept).toBe(2);
   });
 });

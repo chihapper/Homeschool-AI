@@ -1,7 +1,27 @@
 import { useEffect, useState } from "react";
-import { api, fmtDate, fmtUsd, type ConceptProgress, type ConceptStart, type Course, type Learner, type OutsideClaim, type ProgressSummary, type Report, type SessionCost } from "../api";
+import { api, fmtDate, fmtUsd, type ConceptGrowth, type ConceptProgress, type ConceptStart, type Course, type GrowthMove, type Learner, type OutsideClaim, type ProgressSummary, type Report, type SessionCost } from "../api";
 
 const LEVELS = ["No evidence", "Recalls", "Explains", "Applies", "Extends"];
+/** The same levels as a phrase that reads inside a sentence to a parent, not as a column label. */
+const LEVEL_PHRASE = ["showed nothing yet", "recalls the facts", "explains it", "applies it to a new case", "teaches it back"];
+
+/** How a concept moved between the course intake and now, in a parent's words. */
+const MOVE: Record<GrowthMove, { label: string; cls: string }> = {
+  gained: { label: "moved up", cls: "good" },
+  held: { label: "no change", cls: "" },
+  below: { label: "below the start", cls: "bad" },
+  untested: { label: "not taught yet", cls: "muted" },
+  "no-baseline": { label: "not asked first", cls: "muted" },
+};
+
+const levels = (n: number): string => `${n} level${n === 1 ? "" : "s"}`;
+
+/** The move with its size, for the cell a parent scans: "up 2 levels", "no change", "down 1 level". */
+function moveText(g: ConceptGrowth): string {
+  if (g.move === "gained") return `up ${levels(g.rungs ?? 0)}`;
+  if (g.move === "below") return `down ${levels(Math.abs(g.rungs ?? 0))}`;
+  return MOVE[g.move].label;
+}
 
 /** A check's outcome in a parent's words, with the colour of the chip. */
 function checkLabel(c: OutsideClaim): { label: string; tone: string } {
@@ -83,6 +103,7 @@ export function ReportPage({ report, courses, learners }: { report: Report | nul
   const names = new Map(courses.flatMap((c) => c.concepts.map((k) => [k.id, k.name] as const)));
   const learnerName = (id: string) => learners.find((l) => l.id === id)?.name ?? id;
   const courseTitle = (id?: string) => courses.find((c) => c.id === id)?.title ?? id ?? "";
+  const growthById = new Map((progress?.growth.concepts ?? []).map((g) => [g.conceptId, g] as const));
 
   const remove = async (r: Report) => {
     if (!confirm("Delete this session and its report?")) return;
@@ -96,7 +117,7 @@ export function ReportPage({ report, courses, learners }: { report: Report | nul
     <>
       <div className="card">
         <h2>Progress</h2>
-        <p className="muted small">Where a student stands on a course across every session so far: the latest level per concept, whether it moved since the previous time, and what they still get wrong.</p>
+        <p className="muted small">Where a student stands on a course across every session so far: how far each concept has moved since before the course began, the latest level, and what they still get wrong.</p>
         <div className="row">
           <label>Student<select value={pLearner} onChange={(e) => setPLearner(e.target.value)}><option value="">Choose...</option>{learners.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</select></label>
           <label>Course<select value={pCourse} onChange={(e) => setPCourse(e.target.value)}><option value="">Choose...</option>{courses.map((c) => <option key={c.id} value={c.id}>{c.title}</option>)}</select></label>
@@ -110,16 +131,45 @@ export function ReportPage({ report, courses, learners }: { report: Report | nul
               <span className={`stat ${progress.latest.tutorAnswerGiveaways ? "bad" : "good"}`}><strong>{plural(progress.latest.tutorAnswerGiveaways, "answer giveaway")}</strong> last session · {progress.totals.tutorAnswerGiveaways} in all</span>
               <span className="stat"><strong>{plural(progress.latest.answerSeekingTurns, "turn")}</strong> asking for the answer last session · {progress.totals.answerSeekingTurns} in all</span>
             </div>
+            <h3>Start to now</h3>
+            <p className="muted small">
+              What {learnerName(pLearner)} could do on each concept before any teaching, against where they stand now. "Before" is what they said
+              about it themselves when asked, read onto the same scale so the two can be compared — it is not an assessed level. So a concept they
+              could already explain has to reach "applies to a new case" before it counts as movement.
+            </p>
+            <div className="row">
+              <span className="stat"><strong>{progress.growth.conceptsAssessed} of {progress.growth.conceptsKept}</strong> concepts taught so far</span>
+              {progress.growth.gained > 0 && <span className="stat good"><strong>{plural(progress.growth.gained, "concept")}</strong> moved up · {levels(progress.growth.rungsGained)} in all</span>}
+              {progress.growth.held > 0 && <span className="stat"><strong>{plural(progress.growth.held, "concept")}</strong> where they started</span>}
+              {progress.growth.below > 0 && <span className="stat bad"><strong>{plural(progress.growth.below, "concept")}</strong> below the start</span>}
+              {progress.growth.untested > 0 && <span className="stat"><strong>{plural(progress.growth.untested, "concept")}</strong> asked but not taught yet</span>}
+            </div>
+            {progress.growth.biggestMove?.start && progress.growth.biggestMove.level !== undefined && (
+              <p className="small" style={{ marginTop: 10 }}>
+                <strong>Biggest move:</strong> {progress.growth.biggestMove.name} — {START_LABEL[progress.growth.biggestMove.start.estimate]} before the course,
+                now {LEVEL_PHRASE[progress.growth.biggestMove.level]}.
+              </p>
+            )}
+            {progress.growth.below > 0 && (
+              <p className="small warn">
+                Below the start: {progress.growth.concepts.filter((g) => g.move === "below").map((g) => g.name).join(", ")}. {learnerName(pLearner)} said
+                they could do more here than this session showed — worth asking about directly before moving on.
+              </p>
+            )}
+            {progress.growth.conceptsWithBaseline === 0 && (
+              <p className="small muted">No starting points on record for this course, so there is nothing to compare against. The course intake asks for them at the first lesson.</p>
+            )}
             <h3>Mastery by concept</h3>
-            <p className="muted small">Levels: 1 recalls · 2 explains · 3 applies to a new case · 4 extends or teaches back. "Since last time" compares with the previous session that assessed that concept; "new" means this is the first. "Before the course" is what they said when asked before any teaching. Concepts a session did not reach are not listed.</p>
+            <p className="muted small">Levels: 1 recalls · 2 explains · 3 applies to a new case · 4 extends or teaches back. "Move" compares with where they started before the course; "since last time" with the previous session that assessed that concept, where "new" means this is the first. Concepts a session did not reach are not listed.</p>
             <table className="table">
-              <thead><tr><th>Concept</th><th>Before the course</th><th>Level</th><th>Since last time</th><th>Still confuses</th><th>Assessed</th></tr></thead>
+              <thead><tr><th>Concept</th><th>Before the course</th><th>Level</th><th>Move</th><th>Since last time</th><th>Still confuses</th><th>Assessed</th></tr></thead>
               <tbody>
                 {progress.concepts.map((c) => (
                   <tr key={c.conceptId}>
                     <td><strong>{c.name}</strong></td>
                     <td className="small">{c.start ? startText(c.start) : <span className="muted">not asked</span>}</td>
                     <td><span className={`level l${c.level}`}>{c.level}/4 · {LEVELS[c.level]}</span></td>
+                    <td className={MOVE[growthById.get(c.conceptId)?.move ?? "no-baseline"].cls}>{(() => { const g = growthById.get(c.conceptId); return g ? moveText(g) : MOVE["no-baseline"].label; })()}</td>
                     <td>{trend(c)}</td>
                     <td className={c.misconceptions.length ? "warn" : "muted"}>{c.misconceptions.join(" · ") || "nothing listed"}</td>
                     <td className="muted small">{fmtDate(c.asOf)}</td>

@@ -77,6 +77,25 @@ export interface ProgressSummary {
   /** Concepts the course intake asked about that no session has assessed yet. */
   startsNotYetTaught: Array<ConceptStart & { name: string }>;
   baselineSummary?: string;
+  growth: GrowthSummary;
+}
+/** How one concept moved between the course intake and now (mirrors domain/progress.ts). */
+export type GrowthMove = "gained" | "held" | "below" | "untested" | "no-baseline";
+export interface ConceptGrowth {
+  conceptId: string; name: string; start?: ConceptStart; startLevel?: number; level?: number; move: GrowthMove; rungs?: number;
+  misconceptions: string[]; asOf?: string;
+  /** No longer taught in this course: the parent skipped it after it was assessed. */
+  dropped?: boolean;
+}
+/** Across one course: where the student started and where they are now. */
+export interface GrowthSummary {
+  conceptsKept: number; conceptsAssessed: number; conceptsWithBaseline: number;
+  gained: number; held: number; below: number; untested: number;
+  /** Levels climbed across every concept with both ends known, drops included. */
+  rungsGained: number;
+  biggestMove?: ConceptGrowth;
+  stillMisconceived: number;
+  concepts: ConceptGrowth[];
 }
 export type TtsProvider = "elevenlabs" | "inworld";
 /** How a person would name the provider in a sentence. */
