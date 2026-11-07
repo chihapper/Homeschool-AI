@@ -300,7 +300,9 @@ was known before; the Progress view shows a starting-point column.
 1. **The passage.** One candidate above, with questions in three age bands (decided 2026-09-28); the parent
    cannot swap it, so students stay comparable. The band questions themselves are still to be written.
 2. **How many probes** a 31-lesson course deserves, and whether "one course intake" should mean "per unit"
-   for a year-long course (scope is one unit at a time, so mostly the same thing).
+   for a year-long course. Sharper since 2026-10-12, when the scope became one *course* as the family bought
+   it rather than one unit: a twelve-lesson course book now gets the same eight probes a short unit got six
+   of (`UNIT_PROBES`/`COURSE_PROBES` in `domain/intake.ts`), which is thin cover for a year's material.
 3. **Confidence questions** are asked in the same turn as each probe (decided 2026-09-28), so the course
    intake stays at eight to twelve exchanges.
 4. **Read-aloud fluency in voice mode** (words correct per minute from the transcript's timing, no audio

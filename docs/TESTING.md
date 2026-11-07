@@ -35,9 +35,15 @@ Then, in the web app:
   thinking, cache pre-warm and refusal fallbacks sit beside them. All are live: a change applies to the next
   turn, no restart, and is saved to `data/settings.json` until you reset. This is where the model
   comparison below happens.
-- **Courses > Bundled samples > Ingest** builds the course from `data/samples/photosynthesis-lesson.md`.
-  Expand a lesson to see every concept with its key facts, misconceptions and the chunk ids that ground
-  it; open "Source passages" to compare against the verbatim text.
+- **Courses > Add a course** is a popup: a title, an optional publisher and grade range (blank means "read
+  it from the material"), then files, links, or one of the bundled samples listed at the bottom —
+  `data/samples/photosynthesis-lesson.md` is the two-page demo. Starting the build turns the popup into a
+  progress view that you can close: the build carries on as a background job, a ring in the top-right corner
+  shows roughly how far along it is, and a notice appears when the course is ready or says why it failed.
+  **Cancel** at any point drops the model call and saves nothing. Course cards start folded to one line
+  (title, publisher, grades); open one to edit those fields in place, to see every concept with its key
+  facts, misconceptions and the chunk ids that ground it, and to open "Source passages" and compare against
+  the verbatim text.
 - **Students** adds a student and holds the general intake right there ("Add and begin the intake", then
   Type or Talk and Begin; a card without a profile has "Start the intake"). A student with no record for a
   course gets the course intake at the start of their first lesson on it (Lesson tab); "Reset profile" and
@@ -49,7 +55,13 @@ Then, in the web app:
   right-hand panel is `/state`: phase, concept, every observation as it is recorded, what the
   orchestrator queued for the next turn, and the running latency summary. "Leave for now" keeps the
   session resumable; "End session & assess" runs the assessor (one to three minutes) and opens the report.
-- **Reports** lists every report with the answer-seeking and giveaway counts, and shows the full report.
+  The panel also shows "Cost so far", priced from the recorded tokens, voice characters and transcriber
+  seconds of that session. A lesson runs on the clock set in Settings (3 to 60 minutes): with two minutes
+  left the tutor should say so in passing and finish the idea in hand without starting anything new, and at
+  the limit it should say goodbye in a reply that asks no question, after which the app ends the session and
+  opens the report. Set the limit to 3 minutes to watch both ends of that without waiting half an hour.
+- **Reports** lists every report with the answer-seeking and giveaway counts, and shows the full report
+  with what the session cost.
 
 **In the terminal (same engine, no UI):**
 
@@ -105,8 +117,14 @@ npm run ingest -- --title "Ancient Rome" "C:\Users\<you>\Downloads\8 Ancient Rom
 4. **Stage 1 script**, items 4 to 7: answer-seeking, the advance gate, an off-material question ("who
    was Hannibal?").
 5. **Report.** Only kept concepts appear; the grounding audit is clean or names the exact claim.
-6. **Progress.** Reports tab, Progress panel: every concept reads "first time". A second short session on
-   the same lesson turns the column into "up from", "down from" or "same as before".
+6. **Progress.** Reports tab, Progress panel. The "Since last time" column reads "first time" after one
+   session and turns into "up from", "down from" or "same as before" after a second on the same lesson. The
+   **Move** column is the other comparison: each concept's level against where the course intake found it
+   ("moved up", "where they started", "below the start", "not asked first"), with the summary line above the
+   table — "N of M concepts taught so far", how many moved up and by how many rungs, and the biggest move.
+   The check that matters: a concept the student said they could already explain must read "where they
+   started" until it reaches level 3, applying the idea to a new case. If a reassuring level 2 shows as a
+   gain, the comparison is wrong.
 
 ## Stage 2: media ingestion
 

@@ -1,6 +1,6 @@
 # Handoff
 
-Last updated: 2026-10-09
+Last updated: 2026-11-07
 
 Read this before anything else. It is written for a session that has seen nothing.
 
@@ -13,12 +13,15 @@ across sessions. Fastify server with seven agents (curriculum, the two intakes, 
 checker, profile reviser) and a deterministic orchestrator; Vite/React front end; file-backed JSON in `data/`
 (gitignored).
 
-**State on 2026-10-09:** four branches are stacked on `main` (`807d069`), all pushed, none merged:
-`feature/models-5-5` (`3ce1589`), `fix/told-not-recalled` (`beb4e35`), `feature/intakes` (`c9ec5fa`) and
-`feature/ui-flow` on top (the UI in the order a family meets it, Hume removed, Haiku 5.5, the per-role model
-settings, the OpenAI adapter for the report, the cost notes, the documentation sweep). Merging `feature/ui-flow`
-into `main` brings all four as a fast-forward; **the merge is the user's call**. 250 unit tests; typecheck
-clean in both workspaces. Runtime settings on this machine (`data/settings.json`, which wins over `.env`):
+**State on 2026-11-07:** four branches are stacked on `main` (`807d069`, which still carries the state of
+2026-09-28), all pushed, none merged: `feature/models-5-5` (`3ce1589`), `fix/told-not-recalled` (`beb4e35`),
+`feature/intakes` (`c9ec5fa`) and `feature/ui-flow` on top at `b1e11c1` (the UI in the order a family meets it,
+Hume removed, Haiku 5.5, the per-role model settings, the OpenAI adapter for the report, the session clock, the
+meter, the Courses tab's background builds, the own-words fix, the reports' growth view). Merging
+`feature/ui-flow` into `main` brings all four as a fast-forward; **the merge is the user's call**. Because
+nothing is merged, the GitHub default branch — what anyone browsing the repo reads — is six weeks behind the
+build. 285 unit tests in 33 files, green on 2026-11-07; typecheck clean in both workspaces. Runtime settings on
+this machine (`data/settings.json`, which wins over `.env`):
 Haiku 5.5 speaks, Sonnet 5.5 takes the notes, Sonnet 5.5 writes the report (the user's decision of 2026-10-09
 after two sessions compared, `docs/COST.md`), Opus 5.5 does the rest; Inworld is the voice. The product
 assumption is full voice (user, 2026-10-09): typing is for testing and may go. A lesson now runs on the
@@ -53,8 +56,10 @@ decision on hosting (issue #13) before any pilot. No deadline has been set.
   (`notAskedAbout` in `orchestrator/session.ts`).
 - **Scripted test students are deleted after a run** unless `--keep`; the user's two test students and their
   records are theirs.
-- **Scope is an add-on, not a curriculum engine** (user, 2026-09-23). One unit of the family's own
-  material at a time, Socratic sessions, a parent's progress view. No scheduling, no planning of
+- **Scope is an add-on, not a curriculum engine** (user, 2026-09-23). One course of the family's own
+  material at a time — uploaded as they bought it, lesson book and student journal together, not unit by
+  unit, and with no subject or course hierarchy above it (user, 2026-10-12) — Socratic sessions, a parent's
+  progress view. No scheduling, no planning of
   coursework, no grading of publisher tests, no records. Reason: the three curricula the user chose
   are three different shapes (open prose guide, 60 scripted lessons with workbooks, a weekly booklist),
   families skip and substitute by design, and nothing in the community's literature shows a parent
@@ -167,7 +172,7 @@ Before any commit:
 npm test && npm run typecheck
 ```
 
-279 tests as of 2026-10-12, all pure (no network, no binaries). For the two intakes there is a ready-made
+285 tests in 33 files as of 2026-11-07, all pure (no network, no binaries). For the two intakes there is a ready-made
 end-to-end check: `npm run personas:intake`, with the server running, plays three scripted students
 (confident, quiet, a bluffer) through the general intake, the course intake and the start of the lesson,
 waits for both records, and prints the transcripts and about twenty checks each (`--only quiet`, `--keep`,
@@ -223,6 +228,11 @@ request); run `gh issue list`. The `pre-launch` label marks what must be settled
 the product (#13, #18, #23, #26). Ordering and blockers only here; the detail of finished work is in git
 history and in the docs each entry names.
 
+**The issue tracker is behind the build** (checked 2026-11-07): #17 (Inworld TTS) was built 2026-09-25,
+#20 (usage per turn) was built 2026-10-09 as the meter, and #7 and #28 are the only issues closed since
+September besides #4. Only #28 of the finished work is closed. Nothing depends on this, but `gh issue list`
+reads as a longer backlog than there is; closing #17 and #20 is the user's call.
+
 **User-side**
 
 1. Decide the profile pass's model: replayed on the same two sessions (`npm run profile:compare`), Sonnet 5.5
@@ -234,6 +244,8 @@ history and in the docs each entry names.
    Reports tab. Then the same by voice in Chrome (the app's browser pane has no microphone): the intake
    hand-over and the passage have never been heard aloud.
 3. Merge when satisfied: `feature/ui-flow` into `main` brings the four stacked branches as a fast-forward.
+   `b1e11c1` (the reports' growth view) is committed locally but **not pushed**: `origin/feature/ui-flow` is
+   one commit behind, so a pull on the second laptop would miss it.
 4. Decide the hosting, copyright and children's-data line (issue #13) before anyone asks for a login page.
    Now: turn off AssemblyAI's model training in its dashboard, which needs a paid plan and also gives zero
    retention for streaming (#23), and send the two neutral vendor emails (#18 Inworld, #23 AssemblyAI).
@@ -269,6 +281,22 @@ history and in the docs each entry names.
     simplest-form question can hand over the answer (#5).
 
 **Done, newest first** (one line each; the commit and the doc carry the detail)
+
+- 2026-11-07: the documentation sweep in this file's "Where the project stands" — README, ARCHITECTURE,
+  LATENCY, ROADMAP, TESTING, RESEARCH and COMPETITORS brought up to the build as of `b1e11c1` (no Hume as a
+  live component anywhere, the supported file formats, the background course build, the clock, the meter, the
+  growth view, "one course" not "one unit"). No code changed.
+
+- 2026-11-03 (`b1e11c1`): the reports say where each concept started against where it is now.
+  `domain/progress.ts` gained a pure growth read-model (`buildGrowth`, `START_LEVEL`) over the reports and the
+  course intake's starting points that already exist — nothing new is stored. Each concept is classified
+  gained / held / below / untested / no-baseline; coverage counts only concepts the parent still teaches
+  (`isConceptKept`), and a concept skipped after it was assessed keeps its history marked `dropped`. The
+  Reports tab shows "N of M concepts taught", the biggest move, and a Move column beside "Before the course".
+  The point a parent needs: a concept the child could already explain has to reach "applies to a new case"
+  before it counts as learning — on Andy's Marine Biology session that turned two reassuring level 2s into
+  "2 of 48 concepts taught" and "1 concept where they started". A starting point is a self-report, not an
+  assessed level, and the view says so.
 
 - 2026-10-12: the tutor no longer argues over wording (Andy's first Marine Biology lesson: a right answer pressed
   for "less dense" instead of "lighter", a contradiction claimed that was not there, four minutes on density,

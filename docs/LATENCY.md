@@ -3,6 +3,14 @@
 The student speaks; the tutor should answer like a person, not like a form. What that means in numbers,
 where the time goes, and what the build does about it.
 
+**The stack as it runs today** (2026-11-07): AssemblyAI streaming speech-to-text listening, the Claude API
+in the middle, and Inworld (the default) or ElevenLabs speaking — switched by the `ttsProvider` setting at
+the top of Settings, Voice. Hume EVI and Hume's Octave text-to-speech were the voice until 2026-10-06 and
+were removed when Hume announced their sunset; the historical measurements below are labelled where they
+involve them. The live model setting is Haiku 5.5 speaking with Sonnet 5.5 taking the notes; the code
+default is Sonnet 5.5 for both. Measurements taken before 2026-10-08 were made with Sonnet 5 and are
+labelled with their date.
+
 ## Target
 
 Human turn-taking gaps are roughly 200 to 500 ms. Voice products feel conversational under about
@@ -34,7 +42,8 @@ We control the middle two. Everything below is about Claude time-to-first-token 
 | **Cache pre-warm on session start** | `prewarmTutor()` fires when a session is created | A `max_tokens: 0` request writes the cache before the student says a word, so the first turn is a cache hit |
 | **Short replies by design** | `voice-conversation` skill, `SPEAK_MAX_TOKENS` (1200) / `REFLECT_MAX_TOKENS` (2000) in `tutor-agent.ts` | Two to four sentences then a question. The caps are room, not a target: `max_tokens` covers thinking too, and a spoken turn measures 60 to 200 output tokens on Sonnet 5 (2026-09-30) |
 | **Abort on interruption** | `interrupt` in `voice/live.ts` -> `AbortController` | When the student barges in, the model and the voice stop at once; what was already said stays in the transcript |
-| **Model choice** | `CLAUDE_TUTOR_MODEL` | Default `claude-sonnet-5-5`, the tier that can speak with no thinking first; `claude-haiku-5-5` (2026-10-07) can too, at about a tenth of the price (measured below). `claude-opus-5-5` is stronger but always thinks a little (low effort is the only control). If measured TTFT is too high, try `claude-haiku-4-5` (the code drops effort/thinking params automatically for Haiku). Note for the diagnostics: `thinkingChars` counts thinking *text*, which Sonnet 5, Sonnet 5.5 and Opus 5.5 omit from responses by default, so it reads 0 there even when the model thought; `outputTokens` still includes the thinking |
+| **Model choice** | `CLAUDE_TUTOR_MODEL` (Settings, Tutor model) | Code default `claude-sonnet-5-5`, the tier that can speak with no thinking first; `claude-haiku-5-5` (2026-10-07) can too, at about a tenth of the price and the same time to first word (measured below), which is why it is the live setting. `claude-opus-5-5` is stronger but always thinks a little (low effort is the only control, and `{type: "disabled"}` is a 400 on it). Note for the diagnostics: `thinkingChars` counts thinking *text*, which Sonnet 5, Sonnet 5.5 and Opus 5.5 omit from responses by default, so it reads 0 there even when the model thought; `outputTokens` still includes the thinking |
+| **A separate model for the notes** | `CLAUDE_REFLECT_MODEL` (Settings, Notes model) | Costs no latency on the speaking call, so the reflect pass can run on a more careful model than the speaker. Each model keeps its own prompt cache, which is one extra cache write per session, off the student's clock |
 
 ## Measuring
 

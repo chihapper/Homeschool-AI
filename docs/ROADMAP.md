@@ -1,11 +1,21 @@
 # Roadmap
 
 What is deliberately not built yet, each with the trigger that would start it and the first concrete
-step. The scope this sits on is in [ARCHITECTURE.md](ARCHITECTURE.md): one unit of the family's own
-material at a time, a Socratic session, a report to the parent; not a curriculum, a scheduler, or a grader.
+step. The scope this sits on is in [ARCHITECTURE.md](ARCHITECTURE.md): one course of the family's own
+material at a time, uploaded as they bought it, a Socratic session on it, a report to the parent; not a
+curriculum, a scheduler, or a grader.
 
 Every item here, plus the smaller fixes from the first real sessions, is tracked as a GitHub issue
-(chihapper/Homeschool-AI issues 1 to 14, filed 2026-09-24); the issues carry the detail, this file the shape.
+(chihapper/Homeschool-AI issues 1 to 14 and 16 to 29; 15 was the merged pull request). The issues carry the
+detail, this file the shape. Four issues carry the `pre-launch` label and must be settled before any family
+uses the product: **#13** hosting, copyright and the children's-data line; **#18** Inworld's data answers;
+**#23** turning off AssemblyAI's model training (needs a paid plan, which also gives zero retention on
+streaming); **#26** moving the Wikipedia checks to a Wikimedia Enterprise account.
+
+Two things on this list have since been built and their issues are simply still open: **#17**, Inworld as a
+voice provider (2026-09-25, now the default), and **#20**, usage recorded per turn (2026-10-09, the meter in
+[ARCHITECTURE.md](ARCHITECTURE.md) and [COST.md](COST.md)). **#28**, the dynamic learner profile, is built
+and closed.
 
 ## 1. Workbook and activity pages (first)
 
@@ -57,7 +67,7 @@ is not cut off at a pause (`sttMaxSilenceMs` in `voice/live.ts`). Not yet tried 
 
 ## 4. Per-learner focus
 
-Siblings sharing one unit at different levels. `Course.focus` is per family today; a per-learner override
+Siblings sharing one course at different levels. `Course.focus` is per family today; a per-learner override
 merged at `createSession` is additive and needs no migration.
 
 ## 5. A Charlotte Mason week as a second demo
@@ -74,4 +84,35 @@ this would rank kept concepts by latest level and staleness.
 ## 7. Pedagogy evals
 
 The Stage 4 simulated-student harness in [TESTING.md](TESTING.md), and the Sonnet/Opus/Haiku comparison,
-both better run against the Ancient Rome course than the photosynthesis sample.
+both better run against the Ancient Rome course than the photosynthesis sample. This is the next gate: skill
+edits are judged by hand today, and the Khanmigo RCT (+0.06 to 0.08 SD a year) is the warning that
+engagement, not features, is the risk ([COMPETITORS.md](COMPETITORS.md)).
+
+## 8. Facts from outside the material: beyond Wikipedia, and scripture
+
+The check built in September reads Wikipedia through its free API. Two open questions sit on top of it.
+**Other sources** (#27) where the checks show gaps — added from evidence, never as a parent-curated source
+list, because a parent may not know which sources matter. **Scholarly questions about scripture** (#29) —
+"historians doubt Matthew wrote Matthew" is handed to the parent today and never checked against Wikipedia,
+whatever the wording, because a student's question about the census in Luke once came back as "Luke is in
+error" in a family's report. Whether the tutor may say more than "ask your parent" — the family's own
+tradition, or the views described without a verdict — is the user's decision and is not taken.
+
+## 9. Cost, and cheaper models per agent
+
+[COST.md](COST.md) holds the measurements. Settled: the report on Sonnet 5.5 (half of Opus, level for level
+on two sessions), Haiku 5.5 speaking with Sonnet 5.5 taking the notes. Open: the profile pass on Sonnet 5.5
+(#22 — replayed, it proposed nearly the same revisions at half the cost, and the setting would be a
+`profileModel` beside the others), medium-effort ingest and a cached course block for the assessor (#12),
+and a monthly allowance read off the same meter. The constraint is real — a dozen spoken lessons a month per
+child is $8 to $10 at list prices — and the user's reading is that only Gemini, GPT or Anthropic would do.
+
+## 10. Voice: what was tried and parked
+
+**ElevenLabs' Text to Dialogue socket** (#16) works and was measured, but Inworld is cheaper, was ranked
+higher by ear, and has been the default since 2026-10-05; the socket stays on hold unless the user prefers
+ElevenLabs. **ElevenLabs Agents** (#19), which would run the conversation on ElevenLabs' side, is revisited
+only if echo or turn-taking fail in real family sessions — handing the conversation over means giving up the
+orchestrator, the grounding and the assessor, which is the product. **Inworld's speech-to-text** against
+AssemblyAI's two streaming models (#24) is untried. **AI video** (#25) — generated visualisations, the
+material on screen, a tutor avatar — is noted, not scoped.

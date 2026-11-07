@@ -8,8 +8,10 @@ Everything is built to make that reliable rather than merely plausible.
 
 ## Scope
 
-One unit of the family's own material at a time, a Socratic session on it, a report to the parent. Not a
-curriculum, a scheduler, or a grader. Two decisions are the parent's and never an agent's:
+One course of the family's own material at a time, a Socratic session on it, a report to the parent. Not a
+curriculum, a scheduler, or a grader. A course is whatever the parent bought, uploaded as they have it — a
+lesson book and its student journal, not a unit at a time — and there is no subject or course hierarchy
+above it (the user's call, 2026-10-12). Three decisions are the parent's and never an agent's:
 
 - **Focus** (`Course.focus`, `PUT /api/courses/:id/focus`): which lessons and concepts are taught.
   `createSession` resolves it once into `Session.conceptIds`; everything in a running session walks that
@@ -17,10 +19,24 @@ curriculum, a scheduler, or a grader. Two decisions are the parent's and never a
 - **Narration first** (`createSession({ narrationFirst })`): the student has already read the material,
   so the opening turn asks them to tell it back before any questioning (the `socratic-method` skill says
   how, and the assessor is told the first exchange is independent evidence).
+- **How long a lesson runs** (`sessionMaxMinutes`, 3 to 60, default 30; frozen onto the session as
+  `limitMinutes`). `domain/clock.ts` is the whole of it: `respondTurn` marks `timeWarnedAt` two minutes
+  from the limit and `timeUpAt` at it, the tutor agent reads the stage back through `clockStage`, and from
+  the warning on `applyAdvance` holds concept-to-concept moves so the session does not open something new
+  it cannot finish. In the closing reply the clock's words replace the phase-and-thread block entirely;
+  the browser ends the session once that reply has been heard. Lessons only — an intake has no clock.
 
-`GET /api/progress/:learnerId/:courseId` (`domain/progress.ts`) is the parent's cross-session view: the
-latest level per concept, the level before it, what the child still gets wrong, and the running grounding
-and giveaway counts. What is deliberately not built is in [ROADMAP.md](ROADMAP.md).
+`GET /api/progress/:learnerId/:courseId` (`domain/progress.ts`) is the parent's cross-session view, and it
+is pure: a read-model over the reports and starting points that already exist, storing nothing of its own.
+It carries the latest level per concept, the level before it, what the child still gets wrong, the running
+grounding and giveaway counts, and a **growth** view (`buildGrowth`) that compares each concept's latest
+level with where the course intake found it. `START_LEVEL` puts the intake's three estimates on the same
+ladder the levels define (nothing 0, some 1, could already explain 2) so the two ends are comparable, and
+each concept comes back classified `gained`, `held`, `below`, `untested` or `no-baseline`. Two rules keep it
+honest: a starting point is the child's self-report, not an assessed level, and the view says so; and
+coverage counts only concepts the parent still teaches (`isConceptKept`), so a concept skipped after it was
+assessed keeps its history marked `dropped` rather than vanishing from the denominator. What is
+deliberately not built is in [ROADMAP.md](ROADMAP.md).
 
 ## Agents and their skills
 
@@ -52,10 +68,14 @@ The settings route lets only the report leave the Claude API.
 
 `ingest/media/sources.ts` is the single entry point. Uploaded bytes and URLs both become
 `SourceDocument { fileName, text, kind, url? }` and flow into the same chunker and Curriculum Agent.
+Files are accepted up to `MAX_UPLOAD_MB` (500) each, twenty per request: a publisher's full-colour course
+book is 147 MB, and the old 50 MB cap refused one in front of the user.
 
 | Source | Path | Notes |
 |---|---|---|
-| PDF, DOCX, MD, TXT | `ingest/extract.ts` | as before |
+| PDF, DOCX, EPUB, ODT, RTF, HTML, MD, TXT | `ingest/extract.ts` (markup readers and the shared text helpers in `documents.ts`) | `pdf-text.ts` joins PDF text by glyph geometry, because `pdf-parse`'s default renderer fuses the words of a scan's OCR layer. Anything unreadable is refused **by name**, with the conversion that fixes it (`.doc` → save as `.docx`), never read as UTF-8: mojibake looks enough like prose that the Curriculum Agent will build a course from it |
+| Page scans and photographs `.png`, `.jpg`, `.gif`, `.webp` | `ingest/ocr.ts` | sent to the model and transcribed verbatim, with `[illegible]` where the scan cannot be read |
+| `.zip` | `ingest/extract.ts` | readable members read in name order, each under a heading of its own filename; a nested archive is refused by name rather than dropped silently |
 | PowerPoint `.pptx` | `media/pptx.ts` | slide text + speaker notes; each slide becomes a heading so chunks keep slide boundaries |
 | YouTube, TED, Vimeo, ~1,000 sites | `media/ytdlp.ts` | metadata + captions via `yt-dlp`; if no captions, audio is downloaded and transcribed |
 | Podcast RSS / direct audio URL | `media/podcast.ts` | latest N episodes, enclosure download, transcription |
@@ -66,6 +86,32 @@ Transcripts are rendered as paragraphs prefixed with `[mm:ss]` so a concept's so
 where in the recording it came from. The `curriculum-parsing` skill has specific rules for spoken and
 slide sources (segment by topic shift, ignore intros and sponsor reads, read speaker notes as the
 lecturer's explanation).
+
+## A course build is a background job
+
+Building a course from a publisher's book takes ten to fifteen minutes, so nothing waits on it.
+`POST /api/courses/upload` and `/ingest` answer **202** with a job id at once (`ingest/jobs.ts`); the
+browser polls `GET /api/jobs` for the stage and an estimated percentage, and a finished job stays in the
+list until its notice is dismissed (`DELETE /api/jobs/:id`). `POST /api/jobs/:id/cancel` drops the model
+call and saves nothing. `domain/build-progress.ts` owns the estimate, with two properties worth keeping:
+it never moves backwards, and it never reaches 100 before the course is saved. In the web app this is the
+"Add a course" popup, the ring in the top-right corner and the notice when it lands
+(`components/CourseBuilds.tsx`).
+
+Ingest is **output-bound, not input-bound**: the model writes 0.6 to 1.4 characters of course JSON per
+character of source, so a long unit is split into parts of at most 100k characters, built in parallel, each
+allowed 64k output tokens. A 142k-character unit in one call hit the output ceiling and came back truncated.
+
+## The meter
+
+Every call that costs money records what it used where it is made, and `domain/cost.ts` prices it from
+`llm/prices.ts` (list prices, dated in the file). A tutor turn's `latency` carries the speaking call's model
+and tokens, the reflect pass's, the characters the voice spoke and the seconds the transcriber listened; a
+report, a profile update, an intake's record, a reference check and a course build each carry their own
+`usage`. A model or voice with no price on file is **named, never guessed**. It surfaces on the lesson panel
+("Cost so far"), on the report, on each student's card, and at `GET /api/sessions/:id/cost` and
+`GET /api/usage?month=YYYY-MM`. A new call that costs money must record usage the same way, or the meter
+quietly under-reports.
 
 ## Session flow
 
@@ -101,6 +147,16 @@ at least two observations of what the learner showed for the current one (engage
 tutor itself told them do not count). That is the "assess via conversation"
 requirement enforced in code rather than left to the prompt.
 
+Two things keep the tutor honest about the conversation it has just had, both in code rather than in a
+prompt. **A fact the tutor stated is told, not recalled**: `domain/told.ts` finds the key-fact figures the
+tutor was the first to say across the whole walk, and hands them to the speaking call inside its final
+instruction and to the reflect call as `<already_told>`; the reflect pass files them as observation kind
+`told`, which is never assessment evidence. Without this the tutor read out a date, asked for it six turns
+later, and denied having said it. **A right idea in the learner's own words is a right answer**: neither
+call presses for the material's wording, "I already said that" is checked against the transcript and
+conceded rather than left in dispute, and the speaking call sees the reflect pass's notes on the previous
+answer (`notesOnPreviousAnswer`) so it does not re-litigate a point already granted.
+
 ## Voice path (browser)
 
 One WebSocket per session (`voice/live.ts`). The browser streams microphone audio; AssemblyAI transcribes it
@@ -132,8 +188,13 @@ speaks for the session that took over. Text and voice sessions share one state a
 ## Data
 
 File-backed JSON in `data/` (`courses/`, `learners/`, `course-knowledge/`, `sessions/`, `reports/`, plus
-`settings.json` for the runtime settings and `backups/` for records a migration converted). `JsonStore` is
-the only persistence abstraction; swap it for a database when needed. A learner record carries its profile and the
+`settings.json` for the runtime settings, `samples/` for the bundled demo material, `experiments/` for what
+the comparison scripts write, and `backups/` for records a migration converted). `JsonStore` is
+the only persistence abstraction; swap it for a database when needed. Course-build jobs are the exception:
+they live in memory only, so a server restart loses an in-flight build. `store/migrate.ts` converts older
+records when a server or CLI starts — never on import, because the tests import the store — and keeps the
+originals in `backups/`. Removing or moving a persisted field needs a migration that runs before anything
+writes: the store parses with Zod, which silently strips any key the schema no longer names. A learner record carries its profile and the
 profile's revisions (`profileHistory`: each with the changes, their reasons, what was held, and the profile as it
 was before, so the latest can be undone; the last 40 are kept).
 

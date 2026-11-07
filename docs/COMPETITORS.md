@@ -63,8 +63,8 @@ pedagogy, no mastery model, no parent view, and reaches adults first.
 
 ## Moats we could build on top (2026-09-28)
 
-Candidates, ranked by how well they fit the scope (one unit at a time, the parent decides, no scheduling or
-grading) and how hard they are for a platform to copy. None is built; the numbers are issue references.
+Candidates, ranked by how well they fit the scope (one course at a time, the parent decides, no scheduling
+or grading) and how hard they are for a platform to copy. None is built; the numbers are issue references.
 
 1. **Proof, not promises.** Make the grounding audit a family-readable record per session: every claim the
    tutor made, traced to the passage it came from, or flagged. It falls out of the assessor's audit and the
