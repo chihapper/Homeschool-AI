@@ -13,14 +13,15 @@ across sessions. Fastify server with seven agents (curriculum, the two intakes, 
 checker, profile reviser) and a deterministic orchestrator; Vite/React front end; file-backed JSON in `data/`
 (gitignored).
 
-**State on 2026-11-07:** four branches are stacked on `main` (`807d069`, which still carries the state of
-2026-09-28), all pushed, none merged: `feature/models-5-5` (`3ce1589`), `fix/told-not-recalled` (`beb4e35`),
-`feature/intakes` (`c9ec5fa`) and `feature/ui-flow` on top at `b1e11c1` (the UI in the order a family meets it,
-Hume removed, Haiku 5.5, the per-role model settings, the OpenAI adapter for the report, the session clock, the
-meter, the Courses tab's background builds, the own-words fix, the reports' growth view). Merging
-`feature/ui-flow` into `main` brings all four as a fast-forward; **the merge is the user's call**. Because
-nothing is merged, the GitHub default branch — what anyone browsing the repo reads — is six weeks behind the
-build. 285 unit tests in 33 files, green on 2026-11-07; typecheck clean in both workspaces. Runtime settings on
+**State on 2026-11-07:** everything is merged and pushed. `main` and `feature/ui-flow` are both at `e625bc8`
+on `origin`, and the six weeks of stacked work — `feature/models-5-5`, `fix/told-not-recalled`,
+`feature/intakes` and `feature/ui-flow` — went in as one fast-forward from `807d069` (the user's call,
+2026-11-07). So `main` now carries: the UI in the order a family meets it, Hume removed, the 5.5 models with
+Haiku 5.5, the per-role model settings, the OpenAI adapter for the report, the two intakes, told-not-recalled
+and the own-words fix, the session clock, the meter, the Courses tab's background builds, the reports' growth
+view, and the documentation sweep. The four feature branches are now ancestors of `main` and can be deleted
+whenever the user wants; nothing reads them. **Work from here branches off `main`.**
+285 unit tests in 33 files, green on 2026-11-07; typecheck clean in both workspaces. Runtime settings on
 this machine (`data/settings.json`, which wins over `.env`):
 Haiku 5.5 speaks, Sonnet 5.5 takes the notes, Sonnet 5.5 writes the report (the user's decision of 2026-10-09
 after two sessions compared, `docs/COST.md`), Opus 5.5 does the rest; Inworld is the voice. The product
@@ -34,8 +35,8 @@ works through Inworld (the default) or ElevenLabs. **Next: the user tests the ne
 (`docs/TESTING.md`): add a student on the Students tab and hold the intake there, then start that student on
 a course, in text and then by voice; the intake hand-over has never been heard aloud, and the user's own
 microphone session in Chrome has still not happened. The user intends to pull the repo on a second laptop:
-git carries neither `.env` nor `data/` (see the verification loop), and until the merge the work is on
-`feature/ui-flow`.
+`main` is now the branch to clone, and git carries neither `.env` nor `data/` (see the verification loop),
+so the keys go across by hand and the courses, learners, sessions and reports are copied or rebuilt.
 
 **Goal and gate:** get the tool in front of homeschool families as an add-on study partner. The next
 gate is a repeatable pedagogy evaluation (issue #6) so skill edits stop being judged by hand, then a
@@ -156,10 +157,13 @@ decision on hosting (issue #13) before any pilot. No deadline has been set.
 - **Commits end with the `Co-Authored-By` line the harness gives for the model in use** (it changed from
   Fable 5.1 to Opus 5.5 on 2026-09-24); pull request descriptions end with the Claude Code attribution
   line. Commit when a piece of work is done and pushes are authorized (the user pulls the repo on a second
-  laptop); merge only when the user says so. The repo has no configured git identity: the existing commits
-  are by "Claude <noreply@anthropic.com>", so commit with
-  `git -c user.name=Claude -c user.email=noreply@anthropic.com commit ...`. The GitHub CLI holds two logins;
-  `chihapper` must be the active one to push (`gh auth switch --user chihapper`).
+  laptop); merge only when the user says so. The repo's git identity is now configured and is
+  `chihapper <56445466+chihapper@users.noreply.github.com>` — plain `git commit` is correct, and the older
+  note about passing `-c user.name=Claude` is obsolete (commits before 2026-10-12 carry that author). The
+  GitHub CLI holds two logins; `chihapper` must be the active one to push (`gh auth switch --user chihapper`).
+  A fast-forward onto `main` is best done as `git push origin <branch>:main` plus
+  `git branch -f main origin/main`: it updates the remote and the local branch without checking `main` out,
+  so `tsx watch` does not restart the dev server twice over files that end up unchanged.
 - **Explain at the user's level.** They are a technical consulting partner, not a career engineer:
   define terms inline, lead with what happened and why it matters, give real tradeoffs and one
   recommendation (global instructions, `explain-on-my-level` skill).
@@ -243,9 +247,9 @@ reads as a longer backlog than there is; closing #17 and #20 is the user's call.
    questions); Focus ticks on the Courses tab; a lesson with "Already read this"; the Progress panel on the
    Reports tab. Then the same by voice in Chrome (the app's browser pane has no microphone): the intake
    hand-over and the passage have never been heard aloud.
-3. Merge when satisfied: `feature/ui-flow` into `main` brings the four stacked branches as a fast-forward.
-   `b1e11c1` (the reports' growth view) is committed locally but **not pushed**: `origin/feature/ui-flow` is
-   one commit behind, so a pull on the second laptop would miss it.
+3. ~~Merge~~ **done 2026-11-07**: `main` is at `e625bc8` on `origin`. Optional tidying, the user's call:
+   delete the four merged feature branches locally and on `origin`, and close issues #17 and #20, which
+   were built but left open.
 4. Decide the hosting, copyright and children's-data line (issue #13) before anyone asks for a login page.
    Now: turn off AssemblyAI's model training in its dashboard, which needs a paid plan and also gives zero
    retention for streaming (#23), and send the two neutral vendor emails (#18 Inworld, #23 AssemblyAI).
@@ -281,6 +285,12 @@ reads as a longer backlog than there is; closing #17 and #20 is the user's call.
     simplest-form question can hand over the answer (#5).
 
 **Done, newest first** (one line each; the commit and the doc carry the detail)
+
+- 2026-11-07: **merged.** `feature/ui-flow` went into `main` as a fast-forward from `807d069` to `e625bc8`
+  (the user's call), carrying `feature/models-5-5`, `fix/told-not-recalled` and `feature/intakes` with it —
+  six weeks of work, and the first time `main` has described the build since 2026-09-28. Both branches are
+  pushed. Done as `git push origin feature/ui-flow:main` and `git branch -f main origin/main`, so `main` was
+  never checked out and the dev server never restarted.
 
 - 2026-11-07: the documentation sweep in this file's "Where the project stands" — README, ARCHITECTURE,
   LATENCY, ROADMAP, TESTING, RESEARCH and COMPETITORS brought up to the build as of `b1e11c1` (no Hume as a
